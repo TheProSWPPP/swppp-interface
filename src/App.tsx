@@ -1,20 +1,52 @@
-import { useState } from "react";
-import { projects as initialProjects, type Project } from "./data";
+import { useState, useEffect } from "react";
+import { type Project } from "./data";
 import Dashboard from "./components/Dashboard";
 import { FileText } from "lucide-react";
 
 function App() {
-  const [projects, setProjects] = useState<Project[]>(initialProjects);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/projects")
+      .then((res) => res.json())
+      .then((data) => {
+        setProjects(data);
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch projects:", err);
+        setIsLoading(false);
+      });
+  }, []);
 
   const handleUpdateProject = (updatedProject: Project) => {
     setProjects((prev) =>
       prev.map((p) => (p.id === updatedProject.id ? updatedProject : p))
     );
+
+    fetch(`/api/projects/${updatedProject.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedProject),
+    }).catch((err) => console.error("Failed to update project:", err));
   };
 
   const handleDeleteProject = (projectId: string) => {
     setProjects((prev) => prev.filter((p) => p.id !== projectId));
+
+    fetch(`/api/projects/${projectId}`, {
+      method: "DELETE",
+    }).catch((err) => console.error("Failed to delete project:", err));
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen text-slate-500">
+        Loading projects...
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
