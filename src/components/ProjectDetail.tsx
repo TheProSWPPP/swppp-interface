@@ -6,11 +6,9 @@ import {
   FileText,
   ExternalLink,
   Map,
-  Database,
   Loader2,
   Calendar,
   AlertTriangle,
-  Trash2,
   DollarSign,
   CreditCard,
   ClipboardList,
@@ -37,7 +35,7 @@ export default function ProjectDetail({
   const [formData, setFormData] = useState<Project>(project);
 
   useEffect(() => {
-    setFormData((prev) => ({
+    setFormData({
       ...project,
       sequenceActivities:
         project.sequenceActivities ||
@@ -49,7 +47,7 @@ v. Landscaping, Drainage & Final Stabilization`,
       projectDescription:
         project.projectDescription ||
         `This project consists of the construction of a ${project.projectName} facility located in <city>, <county>, <state>.`,
-    }));
+    });
   }, [project]);
 
   const handleChange = (field: keyof Project, value: any) => {

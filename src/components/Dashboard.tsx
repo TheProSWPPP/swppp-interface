@@ -2,14 +2,7 @@ import { useState } from "react";
 import type { Project } from "../data";
 import ProjectList from "./ProjectList";
 import ProjectDetail from "./ProjectDetail";
-import {
-  BarChart3,
-  CheckCircle2,
-  Clock,
-  AlertCircle,
-  Inbox,
-} from "lucide-react";
-import { cn } from "../utils";
+import { CheckCircle2, Clock, AlertCircle, Inbox } from "lucide-react";
 
 interface DashboardProps {
   projects: Project[];
