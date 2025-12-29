@@ -161,7 +161,7 @@ app.delete("/api/projects/:id", (req, res) => {
 app.use(express.static(path.join(__dirname, "dist")));
 
 // Fallback for SPA
-app.get("*", (req, res) => {
+app.get("/*", (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
