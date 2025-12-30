@@ -13,7 +13,7 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// Initial Mock Data
+// In-memory storage
 let projects = [
   {
     id: "1",
@@ -116,6 +116,9 @@ let projects = [
   },
 ];
 
+// Archive storage
+let archive = [];
+
 // API Routes
 app.get("/api/projects", (req, res) => {
   res.json(projects);
@@ -150,12 +153,59 @@ app.put("/api/projects/:id", (req, res) => {
   }
 });
 
-// Delete Project
+// Delete Project (Move to Archive)
 app.delete("/api/projects/:id", (req, res) => {
   const { id } = req.params;
-  projects = projects.filter((p) => p.id !== id);
-  res.status(204).send();
+  const index = projects.findIndex((p) => p.id === id);
+
+  if (index !== -1) {
+    const project = projects[index];
+    // Add deletedAt timestamp
+    const archivedProject = { ...project, deletedAt: new Date().toISOString() };
+    archive.push(archivedProject);
+    projects.splice(index, 1);
+    console.log(`Archived project: ${project.projectName}`);
+    res.status(204).send();
+  } else {
+    res.status(404).json({ error: "Project not found" });
+  }
 });
+
+// Archive Endpoints
+app.get("/api/archive", (req, res) => {
+  res.json(archive);
+});
+
+app.post("/api/archive/:id/restore", (req, res) => {
+  const { id } = req.params;
+  const index = archive.findIndex((p) => p.id === id);
+
+  if (index !== -1) {
+    const project = archive[index];
+    const { deletedAt, ...rest } = project; // Remove deletedAt
+    projects.push(rest);
+    archive.splice(index, 1);
+    res.json(rest);
+  } else {
+    res.status(404).json({ error: "Project not found in archive" });
+  }
+});
+
+// Cleanup Task (Every 24 hours)
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  const initialLen = archive.length;
+  archive = archive.filter((p) => {
+    const deletedTime = new Date(p.deletedAt).getTime();
+    return now - deletedTime < THIRTY_DAYS_MS;
+  });
+  if (archive.length !== initialLen) {
+    console.log(
+      `Cleaned up ${initialLen - archive.length} expired archived projects.`
+    );
+  }
+}, 24 * 60 * 60 * 1000);
 
 // Serve static files
 app.use(express.static(path.join(__dirname, "dist")));

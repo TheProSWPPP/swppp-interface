@@ -15,7 +15,7 @@ import {
   ShieldCheck,
   Building,
 } from "lucide-react";
-import { cn } from "../utils";
+import { cn, parseCoordinate } from "../utils";
 
 interface ProjectDetailProps {
   project: Project;
@@ -269,10 +269,9 @@ v. Landscaping, Drainage & Final Stabilization`,
                     Coordinates
                   </label>
                   <a
-                    href={`https://www.google.com/maps?q=${formData.latitude.replace(
-                      /[^\d.-]/g,
-                      ""
-                    )},${formData.longitude.replace(/[^\d.-]/g, "")}`}
+                    href={`https://www.google.com/maps?q=${parseCoordinate(
+                      formData.latitude
+                    )},${parseCoordinate(formData.longitude)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center hover:underline"

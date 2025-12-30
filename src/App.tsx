@@ -1,13 +1,17 @@
 import { useState, useEffect } from "react";
 import { type Project } from "./data";
 import Dashboard from "./components/Dashboard";
+import ArchiveList from "./components/ArchiveList";
 import { FileText } from "lucide-react";
+import { cn } from "./utils";
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [view, setView] = useState<"dashboard" | "archive">("dashboard");
 
-  useEffect(() => {
+  const fetchProjects = () => {
+    setIsLoading(true);
     fetch("/api/projects")
       .then((res) => res.json())
       .then((data) => {
@@ -18,6 +22,10 @@ function App() {
         console.error("Failed to fetch projects:", err);
         setIsLoading(false);
       });
+  };
+
+  useEffect(() => {
+    fetchProjects();
   }, []);
 
   const handleUpdateProject = (updatedProject: Project) => {
@@ -64,22 +72,32 @@ function App() {
               </div>
             </div>
             <div className="flex items-center gap-6">
-              <nav className="hidden md:flex items-center gap-6">
-                <a
-                  href="#"
-                  className="text-sm font-medium text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full"
+              <nav className="hidden md:flex items-center gap-2">
+                <button
+                  onClick={() => setView("dashboard")}
+                  className={cn(
+                    "text-sm font-medium px-3 py-1.5 rounded-full transition-colors",
+                    view === "dashboard"
+                      ? "text-indigo-600 bg-indigo-50"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  )}
                 >
                   Dashboard
-                </a>
-                <a
-                  href="#"
-                  className="text-sm font-medium text-slate-600 hover:text-slate-900"
+                </button>
+                <button
+                  onClick={() => setView("archive")}
+                  className={cn(
+                    "text-sm font-medium px-3 py-1.5 rounded-full transition-colors",
+                    view === "archive"
+                      ? "text-indigo-600 bg-indigo-50"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  )}
                 >
-                  Reports
-                </a>
+                  Archive
+                </button>
                 <a
                   href="#"
-                  className="text-sm font-medium text-slate-600 hover:text-slate-900"
+                  className="text-sm font-medium text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-full hover:bg-slate-50 transition-colors"
                 >
                   Settings
                 </a>
@@ -100,11 +118,15 @@ function App() {
         </div>
       </header>
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Dashboard
-          projects={projects}
-          onUpdateProject={handleUpdateProject}
-          onDeleteProject={handleDeleteProject}
-        />
+        {view === "dashboard" ? (
+          <Dashboard
+            projects={projects}
+            onUpdateProject={handleUpdateProject}
+            onDeleteProject={handleDeleteProject}
+          />
+        ) : (
+          <ArchiveList onRestore={fetchProjects} />
+        )}
       </main>
     </div>
   );
