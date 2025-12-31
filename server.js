@@ -3,6 +3,7 @@ import cors from "cors";
 import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,8 +14,31 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// In-memory storage
-let projects = [
+const PROJECTS_FILE = path.join(__dirname, "projects.json");
+const ARCHIVE_FILE = path.join(__dirname, "archive.json");
+
+function loadData(file, defaultVal) {
+  if (fs.existsSync(file)) {
+    try {
+      const content = fs.readFileSync(file, "utf8");
+      return JSON.parse(content);
+    } catch (e) {
+      console.error(`Error loading ${file}`, e);
+    }
+  }
+  return defaultVal;
+}
+
+function saveData(file, data) {
+  try {
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error(`Error saving to ${file}`, e);
+  }
+}
+
+// Initial Mock Data (Seed)
+const initialProjects = [
   {
     id: "1",
     projectName: "Velez New Construction",
@@ -57,67 +81,10 @@ let projects = [
     folderLink: "https://dropboxbf1b.com/sh/ral_projectfolder5",
     invoiceLink: "https://quickbooks.intelligents4696.com/invoice/RAL-5005",
   },
-  {
-    id: "3",
-    projectName: "Maslow Park",
-    email: "jane.doe@acmeretail4a61.com",
-    status: "Pending Review",
-    dateReceived: "15/11/2025",
-    dueDate: "2025-11-20",
-    specialRequirements: "E-Portal Hard Copy Needed",
-    latitude: "33.7490° N",
-    longitude: "84.3880° W",
-    soilData: "Clay loam, sandy clay loam",
-    endangeredSpecies: "Wood Stork, Eastern Indigo Snake",
-    waterway: "Chattahoochee River",
-    landDisturbanceArea: 3,
-    trelloLink: "https://trelloef8f.com/c/abc123atl",
-    jobOrderLink: "https://dropboxaddd.com/s/atl_joborder1.pdf",
-    folderLink: "https://dropbox8368.com/sh/atl_projectfolder1",
-    invoiceLink: "https://quickbooks.intelligents8bf9.com/invoice/ATL-1001",
-  },
-  {
-    id: "4",
-    projectName: "Harbor View Development",
-    email: "alex.tan@bluesky6a58.com",
-    status: "Complete",
-    dateReceived: "14/11/2025",
-    dueDate: "2025-11-19",
-    specialRequirements: "E-Portal 24-Hour Turnaround",
-    latitude: "47.6062° N",
-    longitude: "122.3321° W",
-    soilData: "Silty clay loam, sandy loam",
-    endangeredSpecies: "Chinook salmon",
-    waterway: "Lake Union",
-    landDisturbanceArea: 3,
-    trelloLink: "https://trelloe210.com/c/jkl012sea",
-    jobOrderLink: "https://dropboxe322.com/s/sea_joborder4.pdf",
-    folderLink: "https://dropbox769d.com/sh/sea_projectfolder4",
-    invoiceLink: "https://quickbooks.intelligents62c7.com/invoice/SEA-4004",
-  },
-  {
-    id: "5",
-    projectName: "Mountain Side Estates",
-    email: "sam.lee@nextgenclouda270.com",
-    status: "Approved for Generation",
-    dateReceived: "16/11/2025",
-    dueDate: "2025-11-21",
-    specialRequirements: "Hard Copy Needed E-Portal",
-    latitude: "39.7392° N",
-    longitude: "104.9903° W",
-    soilData: "Sandy loam, silt loam",
-    endangeredSpecies: "Preble's meadow jumping mouse",
-    waterway: "South Platte River",
-    landDisturbanceArea: 5,
-    trelloLink: "https://trelloe17c.com/c/def456den",
-    jobOrderLink: "https://dropbox2186.com/s/den_joborder2.pdf",
-    folderLink: "https://dropboxdd1b.com/sh/den_projectfolder2",
-    invoiceLink: "https://quickbooks.intelligents623d.com/invoice/DEN-2002",
-  },
 ];
 
-// Archive storage
-let archive = [];
+let projects = loadData(PROJECTS_FILE, initialProjects);
+let archive = loadData(ARCHIVE_FILE, []);
 
 // API Routes
 app.get("/api/projects", (req, res) => {
@@ -132,14 +99,14 @@ app.post("/api/projects", (req, res) => {
   if (!newProject.status) newProject.status = "New";
   if (!newProject.projectName) newProject.projectName = "Untitled Project";
   if (!newProject.dateReceived)
-    newProject.dateReceived = new Date().toLocaleDateString("en-GB"); // DD/MM/YYYY
+    newProject.dateReceived = new Date().toLocaleDateString("en-GB");
 
   projects.push(newProject);
+  saveData(PROJECTS_FILE, projects);
   console.log("New project received:", newProject.projectName);
   res.status(201).json(newProject);
 });
 
-// Update Project (needed for UI interactions to persist in memory)
 app.put("/api/projects/:id", (req, res) => {
   const { id } = req.params;
   const updates = req.body;
@@ -147,23 +114,24 @@ app.put("/api/projects/:id", (req, res) => {
   const index = projects.findIndex((p) => p.id === id);
   if (index !== -1) {
     projects[index] = { ...projects[index], ...updates };
+    saveData(PROJECTS_FILE, projects);
     res.json(projects[index]);
   } else {
     res.status(404).json({ error: "Project not found" });
   }
 });
 
-// Delete Project (Move to Archive)
 app.delete("/api/projects/:id", (req, res) => {
   const { id } = req.params;
   const index = projects.findIndex((p) => p.id === id);
 
   if (index !== -1) {
     const project = projects[index];
-    // Add deletedAt timestamp
     const archivedProject = { ...project, deletedAt: new Date().toISOString() };
     archive.push(archivedProject);
     projects.splice(index, 1);
+    saveData(PROJECTS_FILE, projects);
+    saveData(ARCHIVE_FILE, archive);
     console.log(`Archived project: ${project.projectName}`);
     res.status(204).send();
   } else {
@@ -171,7 +139,6 @@ app.delete("/api/projects/:id", (req, res) => {
   }
 });
 
-// Archive Endpoints
 app.get("/api/archive", (req, res) => {
   res.json(archive);
 });
@@ -182,9 +149,11 @@ app.post("/api/archive/:id/restore", (req, res) => {
 
   if (index !== -1) {
     const project = archive[index];
-    const { deletedAt, ...rest } = project; // Remove deletedAt
+    const { deletedAt, ...rest } = project;
     projects.push(rest);
     archive.splice(index, 1);
+    saveData(PROJECTS_FILE, projects);
+    saveData(ARCHIVE_FILE, archive);
     res.json(rest);
   } else {
     res.status(404).json({ error: "Project not found in archive" });
@@ -201,6 +170,7 @@ setInterval(() => {
     return now - deletedTime < THIRTY_DAYS_MS;
   });
   if (archive.length !== initialLen) {
+    saveData(ARCHIVE_FILE, archive);
     console.log(
       `Cleaned up ${initialLen - archive.length} expired archived projects.`
     );

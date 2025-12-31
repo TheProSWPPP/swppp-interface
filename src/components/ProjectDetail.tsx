@@ -179,7 +179,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   </label>
                   <input
                     type="text"
-                    value={formData.projectName}
+                    value={formData.projectName || ""}
                     onChange={(e) =>
                       handleChange("projectName", e.target.value)
                     }
@@ -231,7 +231,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   Project Description
                 </label>
                 <textarea
-                  value={formData.projectDescription}
+                  value={formData.projectDescription || ""}
                   onChange={(e) =>
                     handleChange("projectDescription", e.target.value)
                   }
@@ -245,7 +245,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   Sequence of Major Activities
                 </label>
                 <textarea
-                  value={formData.sequenceActivities}
+                  value={formData.sequenceActivities || ""}
                   onChange={(e) =>
                     handleChange("sequenceActivities", e.target.value)
                   }
@@ -282,7 +282,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    value={formData.latitude}
+                    value={formData.latitude || ""}
                     onChange={(e) => handleChange("latitude", e.target.value)}
                     className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     placeholder="Lat"
@@ -290,7 +290,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   />
                   <input
                     type="text"
-                    value={formData.longitude}
+                    value={formData.longitude || ""}
                     onChange={(e) => handleChange("longitude", e.target.value)}
                     className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     placeholder="Long"
@@ -354,7 +354,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                 </div>
                 <input
                   type="text"
-                  value={formData.waterway}
+                  value={formData.waterway || ""}
                   onChange={(e) => handleChange("waterway", e.target.value)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
@@ -401,7 +401,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     </a>
                   </div>
                   <textarea
-                    value={formData.soilData}
+                    value={formData.soilData || ""}
                     onChange={(e) => handleChange("soilData", e.target.value)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 min-h-[80px]"
                     disabled={isApproved}
@@ -423,7 +423,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     </a>
                   </div>
                   <textarea
-                    value={formData.endangeredSpecies}
+                    value={formData.endangeredSpecies || ""}
                     onChange={(e) =>
                       handleChange("endangeredSpecies", e.target.value)
                     }
@@ -447,7 +447,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                 </label>
                 <input
                   type="number"
-                  value={formData.landDisturbanceArea}
+                  value={formData.landDisturbanceArea ?? ""}
                   onChange={(e) =>
                     handleChange(
                       "landDisturbanceArea",
