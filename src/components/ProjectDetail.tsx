@@ -34,6 +34,17 @@ export default function ProjectDetail({
   const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
   const [formData, setFormData] = useState<Project>(project);
 
+  const isApproved =
+    project.status === "Approved for Generation" ||
+    project.status === "Complete";
+  const isManual = project.status === "Manual Processing";
+  const isNew = project.status === "New";
+
+  const canApprove =
+    project.status === "Pending Review" ||
+    project.status === "Processing" ||
+    project.status === "";
+
   useEffect(() => {
     setFormData({
       ...project,
@@ -49,6 +60,37 @@ v. Landscaping, Drainage & Final Stabilization`,
         `This project consists of the construction of a ${project.projectName} facility located in <city>, <county>, <state>.`,
     });
   }, [project]);
+
+  // Automatic County Extraction
+  useEffect(() => {
+    if (
+      !formData.latitude ||
+      !formData.longitude ||
+      formData.county ||
+      isApproved
+    )
+      return;
+
+    const lat = parseCoordinate(formData.latitude);
+    const lon = parseCoordinate(formData.longitude);
+
+    if (lat === "0" || lon === "0") return;
+
+    const timer = setTimeout(() => {
+      fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`
+      )
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.address && data.address.county) {
+            handleChange("county", data.address.county.replace(" County", ""));
+          }
+        })
+        .catch((err) => console.error("County lookup failed:", err));
+    }, 1000); // Debounce to avoid hitting rate limits
+
+    return () => clearTimeout(timer);
+  }, [formData.latitude, formData.longitude, isApproved]);
 
   const handleChange = (field: keyof Project, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -106,17 +148,6 @@ v. Landscaping, Drainage & Final Stabilization`,
       setIsGeneratingInvoice(false);
     }, 1500);
   };
-
-  const isApproved =
-    project.status === "Approved for Generation" ||
-    project.status === "Complete";
-  const isManual = project.status === "Manual Processing";
-  const isNew = project.status === "New";
-
-  const canApprove =
-    project.status === "Pending Review" ||
-    project.status === "Processing" ||
-    project.status === "";
 
   return (
     <div className="bg-white shadow-sm rounded-2xl border border-slate-200 overflow-hidden">
@@ -207,8 +238,10 @@ v. Landscaping, Drainage & Final Stabilization`,
                   </label>
                   <input
                     type="date"
-                    value={formData.startDate || ""}
-                    onChange={(e) => handleChange("startDate", e.target.value)}
+                    value={formData.projectStartDate || ""}
+                    onChange={(e) =>
+                      handleChange("projectStartDate", e.target.value)
+                    }
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     disabled={isApproved}
                   />
@@ -219,8 +252,10 @@ v. Landscaping, Drainage & Final Stabilization`,
                   </label>
                   <input
                     type="date"
-                    value={formData.finishDate || ""}
-                    onChange={(e) => handleChange("finishDate", e.target.value)}
+                    value={formData.projectFinishDate || ""}
+                    onChange={(e) =>
+                      handleChange("projectFinishDate", e.target.value)
+                    }
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     disabled={isApproved}
                   />
@@ -251,6 +286,23 @@ v. Landscaping, Drainage & Final Stabilization`,
                   }
                   rows={6}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 font-mono"
+                  disabled={isApproved}
+                />
+              </div>
+
+              <div className="space-y-2 pt-4 border-t border-slate-100">
+                <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                  <ClipboardList className="h-4 w-4 text-slate-400" />
+                  Notes / Special Requirements
+                </label>
+                <textarea
+                  value={formData.specialRequirements || ""}
+                  onChange={(e) =>
+                    handleChange("specialRequirements", e.target.value)
+                  }
+                  rows={4}
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 bg-slate-50/50"
+                  placeholder="Additional notes from job order..."
                   disabled={isApproved}
                 />
               </div>
@@ -565,26 +617,9 @@ v. Landscaping, Drainage & Final Stabilization`,
                 : "Review accuracy. Approve to trigger generation."}
             </p>
 
-            <div className="space-y-3">
-              {isNew && (
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={handleDelete}
-                    className="flex items-center justify-center px-4 py-2.5 border border-red-200 text-sm font-medium rounded-lg text-red-700 bg-white hover:bg-red-50 hover:border-red-300 transition-all shadow-sm"
-                  >
-                    Delete
-                  </button>
-                  <button
-                    onClick={handleAccept}
-                    className="flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-slate-900 hover:bg-slate-800 transition-all shadow-sm shadow-slate-900/10"
-                  >
-                    Accept
-                  </button>
-                </div>
-              )}
-
-              {canApprove && !isApproved && !isNew && (
-                <div className="space-y-4">
+            <div className="space-y-4">
+              {!isApproved && !isManual && (
+                <div className="space-y-3">
                   <label className="flex items-center p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer hover:border-indigo-300 transition-colors">
                     <input
                       type="checkbox"
@@ -594,8 +629,8 @@ v. Landscaping, Drainage & Final Stabilization`,
                       }
                       className="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
                     />
-                    <span className="ml-3 text-sm font-medium text-slate-700">
-                      Project plans uploaded to Dropbox?
+                    <span className="ml-3 text-sm font-medium text-slate-700 leading-tight">
+                      I have verified civil plans are in the dropbox folder
                     </span>
                   </label>
 
@@ -612,29 +647,50 @@ v. Landscaping, Drainage & Final Stabilization`,
                       Is Industrial Project?
                     </span>
                   </label>
+                </div>
+              )}
+
+              {isNew && (
+                <div className="grid grid-cols-2 gap-3">
                   <button
-                    onClick={handleApprove}
-                    disabled={
-                      isGenerating ||
-                      (!formData.plansUploaded && !formData.isIndustrial)
-                    }
-                    className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-500/20 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-indigo-600/20"
+                    onClick={handleDelete}
+                    className="flex items-center justify-center px-4 py-2.5 border border-red-200 text-sm font-medium rounded-lg text-red-700 bg-white hover:bg-red-50 hover:border-red-300 transition-all shadow-sm"
                   >
-                    {isGenerating ? (
-                      <>
-                        <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="-ml-1 mr-2 h-4 w-4" />
-                        {formData.isIndustrial
-                          ? "Confirm Manual Processing"
-                          : "Approve & Generate"}
-                      </>
-                    )}
+                    Delete
+                  </button>
+                  <button
+                    onClick={handleAccept}
+                    disabled={!formData.plansUploaded && !formData.isIndustrial}
+                    className="flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-slate-900 hover:bg-slate-800 transition-all shadow-sm shadow-slate-900/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Accept
                   </button>
                 </div>
+              )}
+
+              {canApprove && !isApproved && !isNew && (
+                <button
+                  onClick={handleApprove}
+                  disabled={
+                    isGenerating ||
+                    (!formData.plansUploaded && !formData.isIndustrial)
+                  }
+                  className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-500/20 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-indigo-600/20"
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="-ml-1 mr-2 h-4 w-4" />
+                      {formData.isIndustrial
+                        ? "Confirm Manual Processing"
+                        : "Approve & Generate"}
+                    </>
+                  )}
+                </button>
               )}
 
               {(isApproved || isManual) && (

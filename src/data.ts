@@ -30,8 +30,8 @@ export interface Project {
   waterbodyImpaired?: boolean;
   bestManagementPractices?: string[];
   projectAddress?: string;
-  startDate?: string;
-  finishDate?: string;
+  projectStartDate?: string;
+  projectFinishDate?: string;
   projectDescription?: string;
   sequenceActivities?: string;
   invoiceTotal?: number;
