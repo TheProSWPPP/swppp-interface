@@ -3,7 +3,9 @@ import cors from "cors";
 import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
-import fs from "fs";
+import pg from "pg";
+
+const { Pool } = pg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,166 +16,193 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
-const PROJECTS_FILE = path.join(__dirname, "projects.json");
-const ARCHIVE_FILE = path.join(__dirname, "archive.json");
-
-function loadData(file, defaultVal) {
-  if (fs.existsSync(file)) {
-    try {
-      const content = fs.readFileSync(file, "utf8");
-      return JSON.parse(content);
-    } catch (e) {
-      console.error(`Error loading ${file}`, e);
-    }
-  }
-  return defaultVal;
-}
-
-function saveData(file, data) {
-  try {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2));
-  } catch (e) {
-    console.error(`Error saving to ${file}`, e);
-  }
-}
-
-// Initial Mock Data (Seed)
-const initialProjects = [
-  {
-    id: "1",
-    projectName: "Velez New Construction",
-    email: "lisa.martin@innosoft832c.com",
-    status: "Processing",
-    isIndustrial: false,
-    dateReceived: "17/11/2025",
-    dueDate: "2025-11-20",
-    specialRequirements: "E-Portal Hard Copy Needed",
-    latitude: "30.2672° N",
-    longitude: "97.7431° W",
-    soilData: "Clay, silty clay loam",
-    endangeredSpecies: "Houston toad",
-    waterway: "Colorado River",
-    landDisturbanceArea: 2,
-    invoiceTotal: 1250.0,
-    trelloLink: "https://trellocd79.com/c/ghi789aus",
-    jobOrderLink: "https://dropbox1203.com/s/aus_joborder3.pdf",
-    folderLink: "https://dropbox9667.com/sh/aus_projectfolder3",
-    invoiceLink: "https://quickbooks.intelligents8344.com/invoice/AUS-3003",
-  },
-  {
-    id: "2",
-    projectName: "Peace River Wildlife Center",
-    email: "emily.park@greengridc8d9.com",
-    status: "New",
-    isIndustrial: false,
-    dateReceived: "13/11/2025",
-    dueDate: "2025-11-18",
-    specialRequirements: "24-Hour Turnaround E-Portal",
-    latitude: "35.7796° N",
-    longitude: "78.6382° W",
-    soilData: "Loamy sand, sandy clay",
-    endangeredSpecies: "Red-cockaded woodpecker",
-    waterway: "Neuse River",
-    landDisturbanceArea: 4,
-    invoiceTotal: 850.5,
-    trelloLink: "https://trelloed18.com/c/mno345ral",
-    jobOrderLink: "https://dropbox27f4.com/s/ral_joborder5.pdf",
-    folderLink: "https://dropboxbf1b.com/sh/ral_projectfolder5",
-    invoiceLink: "https://quickbooks.intelligents4696.com/invoice/RAL-5005",
-  },
-];
-
-let projects = loadData(PROJECTS_FILE, initialProjects);
-let archive = loadData(ARCHIVE_FILE, []);
-
-// API Routes
-app.get("/api/projects", (req, res) => {
-  res.json(projects);
+// Database connection
+// Railway automatically provides DATABASE_URL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
-app.post("/api/projects", (req, res) => {
-  const newProject = req.body;
+// Initial Database Schema Setup
+async function initDB() {
+  if (!process.env.DATABASE_URL) {
+    console.warn("DATABASE_URL not found. Running in ephemeral memory mode.");
+    return;
+  }
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        status TEXT,
+        data JSONB NOT NULL,
+        archived BOOLEAN DEFAULT FALSE,
+        deleted_at TIMESTAMP
+      )
+    `);
+    console.log("Database connected and initialized");
+  } catch (err) {
+    console.error("Error initializing database:", err);
+  }
+}
 
-  // Basic validation/defaults
+initDB();
+
+// Fallback in-memory store if no DB is connected (for local dev)
+let memoryProjects = [];
+let memoryArchive = [];
+
+// API Routes
+app.get("/api/projects", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.json(memoryProjects);
+
+  try {
+    const result = await pool.query(
+      "SELECT data FROM projects WHERE archived = FALSE ORDER BY (data->>'dateReceived') DESC"
+    );
+    res.json(result.rows.map((r) => r.data));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/projects", async (req, res) => {
+  const newProject = req.body;
   if (!newProject.id) newProject.id = Date.now().toString();
   if (!newProject.status) newProject.status = "New";
   if (!newProject.projectName) newProject.projectName = "Untitled Project";
   if (!newProject.dateReceived)
     newProject.dateReceived = new Date().toLocaleDateString("en-GB");
 
-  projects.push(newProject);
-  saveData(PROJECTS_FILE, projects);
-  console.log("New project received:", newProject.projectName);
-  res.status(201).json(newProject);
+  if (!process.env.DATABASE_URL) {
+    memoryProjects.push(newProject);
+    return res.status(201).json(newProject);
+  }
+
+  try {
+    await pool.query(
+      "INSERT INTO projects (id, name, status, data) VALUES ($1, $2, $3, $4)",
+      [newProject.id, newProject.projectName, newProject.status, newProject]
+    );
+    res.status(201).json(newProject);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.put("/api/projects/:id", (req, res) => {
+app.put("/api/projects/:id", async (req, res) => {
   const { id } = req.params;
   const updates = req.body;
 
-  const index = projects.findIndex((p) => p.id === id);
-  if (index !== -1) {
-    projects[index] = { ...projects[index], ...updates };
-    saveData(PROJECTS_FILE, projects);
-    res.json(projects[index]);
-  } else {
-    res.status(404).json({ error: "Project not found" });
+  if (!process.env.DATABASE_URL) {
+    const index = memoryProjects.findIndex((p) => p.id === id);
+    if (index !== -1) {
+      memoryProjects[index] = { ...memoryProjects[index], ...updates };
+      return res.json(memoryProjects[index]);
+    }
+    return res.status(404).json({ error: "Not found" });
   }
-});
 
-app.delete("/api/projects/:id", (req, res) => {
-  const { id } = req.params;
-  const index = projects.findIndex((p) => p.id === id);
-
-  if (index !== -1) {
-    const project = projects[index];
-    const archivedProject = { ...project, deletedAt: new Date().toISOString() };
-    archive.push(archivedProject);
-    projects.splice(index, 1);
-    saveData(PROJECTS_FILE, projects);
-    saveData(ARCHIVE_FILE, archive);
-    console.log(`Archived project: ${project.projectName}`);
-    res.status(204).send();
-  } else {
-    res.status(404).json({ error: "Project not found" });
-  }
-});
-
-app.get("/api/archive", (req, res) => {
-  res.json(archive);
-});
-
-app.post("/api/archive/:id/restore", (req, res) => {
-  const { id } = req.params;
-  const index = archive.findIndex((p) => p.id === id);
-
-  if (index !== -1) {
-    const project = archive[index];
-    const { deletedAt, ...rest } = project;
-    projects.push(rest);
-    archive.splice(index, 1);
-    saveData(PROJECTS_FILE, projects);
-    saveData(ARCHIVE_FILE, archive);
-    res.json(rest);
-  } else {
-    res.status(404).json({ error: "Project not found in archive" });
-  }
-});
-
-// Cleanup Task (Every 24 hours)
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-setInterval(() => {
-  const now = Date.now();
-  const initialLen = archive.length;
-  archive = archive.filter((p) => {
-    const deletedTime = new Date(p.deletedAt).getTime();
-    return now - deletedTime < THIRTY_DAYS_MS;
-  });
-  if (archive.length !== initialLen) {
-    saveData(ARCHIVE_FILE, archive);
-    console.log(
-      `Cleaned up ${initialLen - archive.length} expired archived projects.`
+  try {
+    const current = await pool.query(
+      "SELECT data FROM projects WHERE id = $1",
+      [id]
     );
+    if (current.rows.length === 0)
+      return res.status(404).json({ error: "Not found" });
+
+    const updatedData = { ...current.rows[0].data, ...updates };
+    await pool.query(
+      "UPDATE projects SET name = $1, status = $2, data = $3 WHERE id = $4",
+      [updatedData.projectName, updatedData.status, updatedData, id]
+    );
+    res.json(updatedData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/projects/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!process.env.DATABASE_URL) {
+    const index = memoryProjects.findIndex((p) => p.id === id);
+    if (index !== -1) {
+      const project = memoryProjects[index];
+      project.deletedAt = new Date().toISOString();
+      memoryArchive.push(project);
+      memoryProjects.splice(index, 1);
+      return res.status(204).send();
+    }
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  try {
+    const now = new Date().toISOString();
+    await pool.query(
+      "UPDATE projects SET archived = TRUE, deleted_at = $1 WHERE id = $2",
+      [now, id]
+    );
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/archive", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.json(memoryArchive);
+
+  try {
+    const result = await pool.query(
+      "SELECT data, deleted_at FROM projects WHERE archived = TRUE ORDER BY deleted_at DESC"
+    );
+    res.json(result.rows.map((r) => ({ ...r.data, deletedAt: r.deleted_at })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/archive/:id/restore", async (req, res) => {
+  const { id } = req.params;
+
+  if (!process.env.DATABASE_URL) {
+    const index = memoryArchive.findIndex((p) => p.id === id);
+    if (index !== -1) {
+      const project = memoryArchive[index];
+      delete project.deletedAt;
+      memoryProjects.push(project);
+      memoryArchive.splice(index, 1);
+      return res.json(project);
+    }
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  try {
+    await pool.query(
+      "UPDATE projects SET archived = FALSE, deleted_at = NULL WHERE id = $1",
+      [id]
+    );
+    const result = await pool.query("SELECT data FROM projects WHERE id = $1", [
+      id,
+    ]);
+    res.json(result.rows[0].data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cleanup Task
+setInterval(async () => {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    const result = await pool.query(
+      "DELETE FROM projects WHERE archived = TRUE AND deleted_at < NOW() - INTERVAL '30 days'"
+    );
+    if (result.rowCount > 0) {
+      console.log(`Cleaned up ${result.rowCount} expired archived projects.`);
+    }
+  } catch (err) {
+    console.error("Cleanup error:", err);
   }
 }, 24 * 60 * 60 * 1000);
 
