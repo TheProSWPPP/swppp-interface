@@ -414,7 +414,9 @@ v. Landscaping, Drainage & Final Stabilization`,
                     Contributing Waterbodies
                   </label>
                   <a
-                    href="https://mywaterway.epa.gov/"
+                    href={`https://mywaterway.epa.gov/community/${encodeURIComponent(
+                      formData.projectAddress || ""
+                    )}/overview`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center hover:underline"
