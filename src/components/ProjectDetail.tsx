@@ -14,8 +14,10 @@ import {
   ClipboardList,
   ShieldCheck,
   Building,
+  FileCode,
 } from "lucide-react";
 import { cn, parseCoordinate } from "../utils";
+import { getDocumentsForTemplate } from "../templates";
 
 interface ProjectDetailProps {
   project: Project;
@@ -165,6 +167,12 @@ v. Landscaping, Drainage & Final Stabilization`,
               <h3 className="text-xl font-bold text-slate-900 leading-tight">
                 {project.projectName}
               </h3>
+              {project.stateTemplateName && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 border border-slate-200">
+                  <FileCode className="h-3 w-3" />
+                  {project.stateTemplateName}
+                </span>
+              )}
               <span
                 className={cn(
                   "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border",
@@ -770,23 +778,23 @@ v. Landscaping, Drainage & Final Stabilization`,
                 <FileText className="h-4 w-4" /> Generated Documents
               </h4>
               <div className="space-y-2">
-                {["Cover Letter", "CSN", "NOI", "NOT", "SWPPP DOC"].map(
-                  (doc) => (
-                    <a
-                      key={doc}
-                      href="#"
-                      className="flex items-center p-3 bg-white border border-slate-200 rounded-xl hover:border-indigo-300 hover:shadow-sm transition-all group"
-                    >
-                      <div className="h-8 w-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 group-hover:bg-indigo-100 transition-colors mr-3">
-                        <FileText className="h-4 w-4" />
-                      </div>
-                      <span className="text-sm font-medium text-slate-700 group-hover:text-indigo-600 transition-colors">
-                        {doc}
-                      </span>
-                      <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
-                    </a>
-                  )
-                )}
+                {getDocumentsForTemplate(
+                  project.stateTemplateId || project.stateTemplateName
+                ).map((doc) => (
+                  <a
+                    key={doc}
+                    href="#"
+                    className="flex items-center p-3 bg-white border border-slate-200 rounded-xl hover:border-indigo-300 hover:shadow-sm transition-all group"
+                  >
+                    <div className="h-8 w-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 group-hover:bg-indigo-100 transition-colors mr-3">
+                      <FileText className="h-4 w-4" />
+                    </div>
+                    <span className="text-sm font-medium text-slate-700 group-hover:text-indigo-600 transition-colors">
+                      {doc}
+                    </span>
+                    <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
+                  </a>
+                ))}
               </div>
             </div>
           )}

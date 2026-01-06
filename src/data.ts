@@ -34,6 +34,8 @@ export interface Project {
   projectFinishDate?: string;
   projectDescription?: string;
   sequenceActivities?: string;
+  stateTemplateId?: string;
+  stateTemplateName?: string;
   invoiceTotal?: number;
   trelloLink: string;
   jobOrderLink: string;
