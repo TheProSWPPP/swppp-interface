@@ -38,7 +38,6 @@ export default function ProjectDetail({
   onDelete,
 }: ProjectDetailProps) {
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
   const [formData, setFormData] = useState<Project>(project);
 
   const isApproved =
@@ -145,15 +144,6 @@ v. Landscaping, Drainage & Final Stabilization`,
     if (confirm("Are you sure you want to delete this project?")) {
       onDelete();
     }
-  };
-
-  const handleGenerateInvoice = () => {
-    setIsGeneratingInvoice(true);
-    // Mock API call
-    setTimeout(() => {
-      window.open(project.invoiceLink || "#", "_blank");
-      setIsGeneratingInvoice(false);
-    }, 1500);
   };
 
   return (
@@ -788,16 +778,14 @@ v. Landscaping, Drainage & Final Stabilization`,
                 ).map((doc) => {
                   const automated = isAutomatedDocument(doc);
                   return (
-                    <a
+                    <div
                       key={doc}
-                      href="#"
                       className={cn(
                         "flex items-center p-3 border rounded-xl transition-all group relative overflow-hidden",
                         automated
                           ? "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
                           : "bg-slate-50 border-slate-200 opacity-80 cursor-default"
                       )}
-                      onClick={(e) => !automated && e.preventDefault()}
                     >
                       <div
                         className={cn(
@@ -829,7 +817,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                       {automated && (
                         <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
                       )}
-                    </a>
+                    </div>
                   );
                 })}
               </div>
