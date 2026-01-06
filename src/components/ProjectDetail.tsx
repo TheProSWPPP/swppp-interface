@@ -19,6 +19,7 @@ import {
 import { cn, parseCoordinate } from "../utils";
 import {
   getDocumentsForTemplate,
+  getTemplateColor,
   getTemplateName,
   isAutomatedDocument,
 } from "../templates";
@@ -172,7 +173,14 @@ v. Landscaping, Drainage & Final Stabilization`,
                 {project.projectName}
               </h3>
               {(project.stateTemplateId || project.stateTemplateName) && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 border border-slate-200">
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold border shadow-sm transition-all",
+                    getTemplateColor(
+                      project.stateTemplateId || project.stateTemplateName
+                    )
+                  )}
+                >
                   <FileCode className="h-3 w-3" />
                   {getTemplateName(
                     project.stateTemplateId || project.stateTemplateName
@@ -328,8 +336,8 @@ v. Landscaping, Drainage & Final Stabilization`,
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
               <Map className="h-4 w-4" /> Location & Environmental
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-slate-700">
                     Coordinates
@@ -365,7 +373,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <label className="text-sm font-medium text-slate-700">
                   County
                 </label>
@@ -732,48 +740,39 @@ v. Landscaping, Drainage & Final Stabilization`,
           </div>
 
           {/* Financials */}
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <DollarSign className="h-4 w-4" /> Financials
-            </h4>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
-                  Invoice Total
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <span className="text-slate-500 sm:text-sm">$</span>
+          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-6 shadow-sm relative overflow-hidden group">
+            <div className="absolute inset-0 bg-slate-50/40 backdrop-blur-[1px] z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest shadow-xl">
+                Coming Soon
+              </span>
+            </div>
+            <div className="opacity-40 pointer-events-none grayscale">
+              <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <DollarSign className="h-4 w-4" /> Financials
+              </h4>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">
+                    Invoice Total
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <span className="text-slate-500 sm:text-sm">$</span>
+                    </div>
+                    <input
+                      type="number"
+                      value={formData.invoiceTotal || ""}
+                      className="pl-7 w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm"
+                      placeholder="0.00"
+                      readOnly
+                    />
                   </div>
-                  <input
-                    type="number"
-                    value={formData.invoiceTotal || ""}
-                    onChange={(e) =>
-                      handleChange("invoiceTotal", parseFloat(e.target.value))
-                    }
-                    className="pl-7 w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
-                    placeholder="0.00"
-                    step="0.01"
-                  />
                 </div>
+                <button className="w-full flex items-center justify-center px-4 py-2.5 border border-slate-200 text-sm font-medium rounded-lg text-slate-700 bg-white shadow-sm">
+                  <CreditCard className="-ml-1 mr-2 h-4 w-4" />
+                  Generate on QuickBooks
+                </button>
               </div>
-              <button
-                onClick={handleGenerateInvoice}
-                disabled={isGeneratingInvoice || !formData.invoiceTotal}
-                className="w-full flex items-center justify-center px-4 py-2.5 border border-slate-200 text-sm font-medium rounded-lg text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-300 focus:ring-4 focus:ring-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-              >
-                {isGeneratingInvoice ? (
-                  <>
-                    <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="-ml-1 mr-2 h-4 w-4" />
-                    Generate on QuickBooks
-                  </>
-                )}
-              </button>
             </div>
           </div>
 
@@ -819,7 +818,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                               : "text-slate-500"
                           )}
                         >
-                          {doc}
+                          {doc} {automated && "(Automated)"}
                         </span>
                         {!automated && (
                           <span className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
