@@ -767,62 +767,60 @@ v. Landscaping, Drainage & Final Stabilization`,
           </div>
 
           {/* Generated Documents Links */}
-          {isApproved && (
-            <div className="space-y-3">
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                <FileText className="h-4 w-4" /> Generated Documents
-              </h4>
-              <div className="space-y-2">
-                {getDocumentsForTemplate(
-                  project.stateTemplateId || project.stateTemplateName
-                ).map((doc) => {
-                  const automated = isAutomatedDocument(doc);
-                  return (
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+              <FileText className="h-4 w-4" /> Documents to be Generated
+            </h4>
+            <div className="space-y-2">
+              {getDocumentsForTemplate(
+                project.stateTemplateId || project.stateTemplateName
+              ).map((doc) => {
+                const automated = isAutomatedDocument(doc);
+                return (
+                  <div
+                    key={doc}
+                    className={cn(
+                      "flex items-center p-3 border rounded-xl transition-all group relative overflow-hidden",
+                      automated
+                        ? "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
+                        : "bg-slate-50 border-slate-200 opacity-80 cursor-default"
+                    )}
+                  >
                     <div
-                      key={doc}
                       className={cn(
-                        "flex items-center p-3 border rounded-xl transition-all group relative overflow-hidden",
+                        "h-8 w-8 rounded-lg flex items-center justify-center mr-3 transition-colors",
                         automated
-                          ? "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
-                          : "bg-slate-50 border-slate-200 opacity-80 cursor-default"
+                          ? "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"
+                          : "bg-slate-200 text-slate-500"
                       )}
                     >
-                      <div
+                      <FileText className="h-4 w-4" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span
                         className={cn(
-                          "h-8 w-8 rounded-lg flex items-center justify-center mr-3 transition-colors",
+                          "text-sm font-medium transition-colors",
                           automated
-                            ? "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"
-                            : "bg-slate-200 text-slate-500"
+                            ? "text-slate-700 group-hover:text-indigo-600"
+                            : "text-slate-500"
                         )}
                       >
-                        <FileText className="h-4 w-4" />
-                      </div>
-                      <div className="flex flex-col">
-                        <span
-                          className={cn(
-                            "text-sm font-medium transition-colors",
-                            automated
-                              ? "text-slate-700 group-hover:text-indigo-600"
-                              : "text-slate-500"
-                          )}
-                        >
-                          {doc} {automated && "(Automated)"}
+                        {doc} {automated && "(Automated)"}
+                      </span>
+                      {!automated && (
+                        <span className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
+                          Manual - Pending Automation
                         </span>
-                        {!automated && (
-                          <span className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
-                            Manual - Pending Automation
-                          </span>
-                        )}
-                      </div>
-                      {automated && (
-                        <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
                       )}
                     </div>
-                  );
-                })}
-              </div>
+                    {automated && (
+                      <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          )}
+          </div>
 
           {/* Resources */}
           <div className="space-y-3">
