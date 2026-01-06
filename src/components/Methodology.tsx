@@ -97,14 +97,22 @@ export default function Methodology() {
               </ul>
               <p className="text-xs text-slate-500">
                 <span className="font-bold">Sample area:</span> project acreage
-                × 1.1 (10% buffer) |{" "}
+                × 3 (captures immediate surroundings) |{" "}
                 <span className="font-bold">Minimum: 1 acre</span> |{" "}
                 <span className="font-bold">Maximum: 50 acres</span>
               </p>
-              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl">
+              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2">
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  <span className="font-bold italic text-slate-700">
+                    Why ×3 multiplier:
+                  </span>{" "}
+                  Balances project-specific accuracy vs. regional context.
+                </p>
                 <p className="text-xs text-slate-600 leading-relaxed italic">
-                  <span className="font-bold">Why:</span> Fixed 259-acre sample
-                  was 26× oversample for small projects.
+                  Manual method might draw ~1,000+ acre AOI ("whatever fits on
+                  screen") which includes irrelevant regional soils. Approach
+                  samples project footprint + buffer for defensible,
+                  site-relevant data.
                 </p>
               </div>
             </div>
