@@ -460,7 +460,9 @@ v. Landscaping, Drainage & Final Stabilization`,
                       Endangered Species
                     </label>
                     <a
-                      href="#"
+                      href={`https://ecos.fws.gov/ecp/report/species-listings-by-current-range-county?fips=${
+                        formData.countyFips || ""
+                      }`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center hover:underline"

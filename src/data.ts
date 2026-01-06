@@ -36,6 +36,7 @@ export interface Project {
   sequenceActivities?: string;
   stateTemplateId?: string;
   stateTemplateName?: string;
+  countyFips?: string;
   invoiceTotal?: number;
   trelloLink: string;
   jobOrderLink: string;

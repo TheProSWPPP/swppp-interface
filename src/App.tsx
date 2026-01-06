@@ -2,13 +2,16 @@ import { useState, useEffect } from "react";
 import { type Project } from "./data";
 import Dashboard from "./components/Dashboard";
 import ArchiveList from "./components/ArchiveList";
+import Methodology from "./components/Methodology";
 import { FileText } from "lucide-react";
 import { cn } from "./utils";
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [view, setView] = useState<"dashboard" | "archive">("dashboard");
+  const [view, setView] = useState<"dashboard" | "archive" | "methodology">(
+    "dashboard"
+  );
 
   const fetchProjects = () => {
     setIsLoading(true);
@@ -95,12 +98,17 @@ function App() {
                 >
                   Archive
                 </button>
-                <a
-                  href="#"
-                  className="text-sm font-medium text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-full hover:bg-slate-50 transition-colors"
+                <button
+                  onClick={() => setView("methodology")}
+                  className={cn(
+                    "text-sm font-medium px-3 py-1.5 rounded-full transition-colors",
+                    view === "methodology"
+                      ? "text-indigo-600 bg-indigo-50"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  )}
                 >
-                  Settings
-                </a>
+                  Methodology
+                </button>
               </nav>
               <div className="h-6 w-px bg-slate-200 mx-2 hidden md:block" />
               <div className="flex items-center gap-3">
@@ -118,15 +126,15 @@ function App() {
         </div>
       </header>
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {view === "dashboard" ? (
+        {view === "dashboard" && (
           <Dashboard
             projects={projects}
             onUpdateProject={handleUpdateProject}
             onDeleteProject={handleDeleteProject}
           />
-        ) : (
-          <ArchiveList onRestore={fetchProjects} />
         )}
+        {view === "archive" && <ArchiveList onRestore={fetchProjects} />}
+        {view === "methodology" && <Methodology />}
       </main>
     </div>
   );

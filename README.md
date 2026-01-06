@@ -34,6 +34,7 @@ Endpoint: `POST /api/projects`
 | `latitude`            | Decimal latitude                        |
 | `longitude`           | Decimal longitude                       |
 | `ms4Operator`         | MS4 Operator Name                       |
+| `countyFips`          | 5-digit FIPS code for county            |
 | `specialRequirements` | Maps to the **Notes** field in the UI   |
 | `landDisturbanceArea` | Estimated acres                         |
 

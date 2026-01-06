@@ -7,7 +7,12 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatGeorgiaTime(dateStr: string): string {
   try {
-    const date = new Date(dateStr);
+    // If the input date doesn't include a timezone, assume it's UTC
+    let date = new Date(dateStr);
+    if (!dateStr.includes("Z") && !dateStr.includes("+")) {
+      date = new Date(dateStr + "Z"); // Treat as UTC
+    }
+
     return new Intl.DateTimeFormat("en-US", {
       timeZone: "America/New_York",
       weekday: "long",
@@ -18,6 +23,7 @@ export function formatGeorgiaTime(dateStr: string): string {
     })
       .format(date)
       .replace(" at", ",")
+      .replace(":00 ", " ")
       .replace(":00", "");
   } catch (e) {
     return dateStr;
