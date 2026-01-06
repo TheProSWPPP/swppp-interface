@@ -17,7 +17,7 @@ import {
   FileCode,
 } from "lucide-react";
 import { cn, parseCoordinate } from "../utils";
-import { getDocumentsForTemplate } from "../templates";
+import { getDocumentsForTemplate, getTemplateName } from "../templates";
 
 interface ProjectDetailProps {
   project: Project;
@@ -167,10 +167,12 @@ v. Landscaping, Drainage & Final Stabilization`,
               <h3 className="text-xl font-bold text-slate-900 leading-tight">
                 {project.projectName}
               </h3>
-              {project.stateTemplateName && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 border border-slate-200">
+              {(project.stateTemplateId || project.stateTemplateName) && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 border border-slate-200">
                   <FileCode className="h-3 w-3" />
-                  {project.stateTemplateName}
+                  {getTemplateName(
+                    project.stateTemplateId || project.stateTemplateName
+                  )}
                 </span>
               )}
               <span
