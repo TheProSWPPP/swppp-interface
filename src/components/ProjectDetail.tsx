@@ -376,18 +376,24 @@ v. Landscaping, Drainage & Final Stabilization`,
                 />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
-                  TCEQ Segment
-                </label>
-                <input
-                  type="text"
-                  value={formData.tceqSegment || ""}
-                  onChange={(e) => handleChange("tceqSegment", e.target.value)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
-                  disabled={isApproved}
-                />
-              </div>
+              {getTemplateName(
+                project.stateTemplateId || project.stateTemplateName
+              )?.includes("Texas") && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">
+                    TCEQ Segment
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.tceqSegment || ""}
+                    onChange={(e) =>
+                      handleChange("tceqSegment", e.target.value)
+                    }
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                    disabled={isApproved}
+                  />
+                </div>
+              )}
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">
@@ -405,7 +411,7 @@ v. Landscaping, Drainage & Final Stabilization`,
               <div className="md:col-span-2 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-slate-700">
-                    Contributing Waterbody
+                    Contributing Waterbodies
                   </label>
                   <a
                     href="https://mywaterway.epa.gov/"
@@ -423,30 +429,6 @@ v. Landscaping, Drainage & Final Stabilization`,
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
                 />
-                <div className="flex gap-4 mt-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="waterbodyImpaired"
-                      checked={formData.waterbodyImpaired === true}
-                      onChange={() => handleChange("waterbodyImpaired", true)}
-                      className="text-indigo-600 focus:ring-indigo-500"
-                      disabled={isApproved}
-                    />
-                    <span className="text-sm text-slate-600">Impaired</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="waterbodyImpaired"
-                      checked={formData.waterbodyImpaired === false}
-                      onChange={() => handleChange("waterbodyImpaired", false)}
-                      className="text-indigo-600 focus:ring-indigo-500"
-                      disabled={isApproved}
-                    />
-                    <span className="text-sm text-slate-600">Not Impaired</span>
-                  </label>
-                </div>
               </div>
 
               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">

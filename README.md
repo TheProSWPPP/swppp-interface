@@ -33,6 +33,7 @@ Endpoint: `POST /api/projects`
 | `stateTemplateName`   | Alternatively, the name (e.g., `TX SM`) |
 | `latitude`            | Decimal latitude                        |
 | `longitude`           | Decimal longitude                       |
+| `ms4Operator`         | MS4 Operator Name                       |
 | `specialRequirements` | Maps to the **Notes** field in the UI   |
 | `landDisturbanceArea` | Estimated acres                         |
 
