@@ -30,6 +30,10 @@ async function initDB() {
     return;
   }
   try {
+    console.log("Database connected. Initializing tables...");
+    const res = await pool.query("SELECT NOW()");
+    console.log("Postgres connected successfully at:", res.rows[0].now);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
@@ -40,9 +44,9 @@ async function initDB() {
         deleted_at TIMESTAMP
       )
     `);
-    console.log("Database connected and initialized");
+    console.log("Table 'projects' verified/created.");
   } catch (err) {
-    console.error("Error initializing database:", err);
+    console.error("CRITICAL: Error initializing database:", err);
   }
 }
 

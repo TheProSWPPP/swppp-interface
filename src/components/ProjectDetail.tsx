@@ -17,7 +17,11 @@ import {
   FileCode,
 } from "lucide-react";
 import { cn, parseCoordinate } from "../utils";
-import { getDocumentsForTemplate, getTemplateName } from "../templates";
+import {
+  getDocumentsForTemplate,
+  getTemplateName,
+  isAutomatedDocument,
+} from "../templates";
 
 interface ProjectDetailProps {
   project: Project;
@@ -782,21 +786,53 @@ v. Landscaping, Drainage & Final Stabilization`,
               <div className="space-y-2">
                 {getDocumentsForTemplate(
                   project.stateTemplateId || project.stateTemplateName
-                ).map((doc) => (
-                  <a
-                    key={doc}
-                    href="#"
-                    className="flex items-center p-3 bg-white border border-slate-200 rounded-xl hover:border-indigo-300 hover:shadow-sm transition-all group"
-                  >
-                    <div className="h-8 w-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 group-hover:bg-indigo-100 transition-colors mr-3">
-                      <FileText className="h-4 w-4" />
-                    </div>
-                    <span className="text-sm font-medium text-slate-700 group-hover:text-indigo-600 transition-colors">
-                      {doc}
-                    </span>
-                    <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
-                  </a>
-                ))}
+                ).map((doc) => {
+                  const automated = isAutomatedDocument(doc);
+                  return (
+                    <a
+                      key={doc}
+                      href="#"
+                      className={cn(
+                        "flex items-center p-3 border rounded-xl transition-all group relative overflow-hidden",
+                        automated
+                          ? "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
+                          : "bg-slate-50 border-slate-200 opacity-80 cursor-default"
+                      )}
+                      onClick={(e) => !automated && e.preventDefault()}
+                    >
+                      <div
+                        className={cn(
+                          "h-8 w-8 rounded-lg flex items-center justify-center mr-3 transition-colors",
+                          automated
+                            ? "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"
+                            : "bg-slate-200 text-slate-500"
+                        )}
+                      >
+                        <FileText className="h-4 w-4" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span
+                          className={cn(
+                            "text-sm font-medium transition-colors",
+                            automated
+                              ? "text-slate-700 group-hover:text-indigo-600"
+                              : "text-slate-500"
+                          )}
+                        >
+                          {doc}
+                        </span>
+                        {!automated && (
+                          <span className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
+                            Manual - Pending Automation
+                          </span>
+                        )}
+                      </div>
+                      {automated && (
+                        <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
+                      )}
+                    </a>
+                  );
+                })}
               </div>
             </div>
           )}
