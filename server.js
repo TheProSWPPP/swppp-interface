@@ -57,6 +57,10 @@ let memoryProjects = [];
 let memoryArchive = [];
 
 // API Routes
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", database: !!process.env.DATABASE_URL });
+});
+
 app.get("/api/projects", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.json(memoryProjects);
 
