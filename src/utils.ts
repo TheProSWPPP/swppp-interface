@@ -5,6 +5,25 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function formatGeorgiaTime(dateStr: string): string {
+  try {
+    const date = new Date(dateStr);
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      weekday: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      hour12: true,
+    })
+      .format(date)
+      .replace(" at", ",")
+      .replace(":00", "");
+  } catch (e) {
+    return dateStr;
+  }
+}
+
 export function parseCoordinate(
   coord: string | number | undefined | null
 ): string {

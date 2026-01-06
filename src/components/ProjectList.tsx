@@ -2,12 +2,13 @@ import type { Project } from "../data";
 import {
   Calendar,
   AlertCircle,
-  MapPin,
   ChevronRight,
   Clock,
   Trash2,
+  FileCode,
 } from "lucide-react";
-import { cn } from "../utils";
+import { cn, formatGeorgiaTime } from "../utils";
+import { getTemplateName } from "../templates";
 
 interface ProjectListProps {
   projects: Project[];
@@ -108,15 +109,25 @@ export default function ProjectList({
                       {project.email}
                     </span>
                   </div>
+                  {(project.stateTemplateId || project.stateTemplateName) && (
+                    <div className="flex items-center gap-2 hidden sm:flex">
+                      <FileCode className="h-4 w-4 text-gray-400" />
+                      <span className="font-medium text-slate-600">
+                        {getTemplateName(
+                          project.stateTemplateId || project.stateTemplateName
+                        )}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 hidden sm:flex">
-                    <MapPin className="h-4 w-4 text-gray-400" />
-                    <span>
-                      {project.latitude}, {project.longitude}
+                    <Calendar className="h-4 w-4 text-gray-400" />
+                    <span className="capitalize">
+                      {formatGeorgiaTime(project.dateReceived)}
                     </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-gray-400" />
+                  <Clock className="h-4 w-4 text-gray-400" />
                   <span
                     className={cn(
                       "font-medium",
