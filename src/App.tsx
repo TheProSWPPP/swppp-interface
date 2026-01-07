@@ -3,7 +3,13 @@ import { type Project } from "./data";
 import Dashboard from "./components/Dashboard";
 import ArchiveList from "./components/ArchiveList";
 import Methodology from "./components/Methodology";
-import { FileText } from "lucide-react";
+import {
+  FileText,
+  LayoutDashboard,
+  Archive,
+  BookOpen,
+  Settings,
+} from "lucide-react";
 import { cn } from "./utils";
 
 function App() {
@@ -75,39 +81,46 @@ function App() {
               </div>
             </div>
             <div className="flex items-center gap-6">
-              <nav className="hidden md:flex items-center gap-2">
+              <nav className="hidden md:flex items-center gap-1">
                 <button
                   onClick={() => setView("dashboard")}
                   className={cn(
-                    "text-sm font-medium px-3 py-1.5 rounded-full transition-colors",
+                    "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
                     view === "dashboard"
-                      ? "text-indigo-600 bg-indigo-50"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                      ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
                   )}
                 >
+                  <LayoutDashboard className="h-4 w-4" />
                   Dashboard
                 </button>
                 <button
                   onClick={() => setView("archive")}
                   className={cn(
-                    "text-sm font-medium px-3 py-1.5 rounded-full transition-colors",
+                    "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
                     view === "archive"
-                      ? "text-indigo-600 bg-indigo-50"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                      ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
                   )}
                 >
+                  <Archive className="h-4 w-4" />
                   Archive
                 </button>
                 <button
                   onClick={() => setView("methodology")}
                   className={cn(
-                    "text-sm font-medium px-3 py-1.5 rounded-full transition-colors",
+                    "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
                     view === "methodology"
-                      ? "text-indigo-600 bg-indigo-50"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                      ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
                   )}
                 >
+                  <BookOpen className="h-4 w-4" />
                   Methodology
+                </button>
+                <button className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-50 transition-all duration-200">
+                  <Settings className="h-4 w-4" />
+                  Settings
                 </button>
               </nav>
               <div className="h-6 w-px bg-slate-200 mx-2 hidden md:block" />
