@@ -214,7 +214,7 @@ setInterval(async () => {
   }
 }, 24 * 60 * 60 * 1000);
 
-// Serve static files
+// Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, "dist")));
 
 // Fallback for SPA
