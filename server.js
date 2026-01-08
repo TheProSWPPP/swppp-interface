@@ -16,6 +16,28 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
+// Basic Authentication Security Wall
+const ADMIN_USER = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASS = process.env.ADMIN_PASSWORD || "swppp2026";
+
+app.use((req, res, next) => {
+  // Skip auth for health check
+  if (req.path === "/health") return next();
+
+  const auth = { login: ADMIN_USER, password: ADMIN_PASS };
+  const b64auth = (req.headers.authorization || "").split(" ")[1] || "";
+  const [login, password] = Buffer.from(b64auth, "base64")
+    .toString()
+    .split(":");
+
+  if (login && password && login === auth.login && password === auth.password) {
+    return next();
+  }
+
+  res.set("WWW-Authenticate", 'Basic realm="401"');
+  res.status(401).send("Authentication required.");
+});
+
 // Database connection
 // Railway automatically provides DATABASE_URL
 const pool = new Pool({
