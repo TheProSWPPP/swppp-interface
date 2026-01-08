@@ -24,17 +24,23 @@ app.use((req, res, next) => {
   // Skip auth for health check
   if (req.path === "/health") return next();
 
-  const auth = { login: ADMIN_USER, password: ADMIN_PASS };
-  const b64auth = (req.headers.authorization || "").split(" ")[1] || "";
-  const [login, password] = Buffer.from(b64auth, "base64")
-    .toString()
-    .split(":");
+  const authHeader = req.headers.authorization || "";
+  if (authHeader.startsWith("Basic ")) {
+    const b64auth = authHeader.split(" ")[1] || "";
+    const decoded = Buffer.from(b64auth, "base64").toString();
+    const splitIndex = decoded.indexOf(":");
 
-  if (login && password && login === auth.login && password === auth.password) {
-    return next();
+    if (splitIndex !== -1) {
+      const login = decoded.substring(0, splitIndex);
+      const password = decoded.substring(splitIndex + 1);
+
+      if (login === ADMIN_USER && password === ADMIN_PASS) {
+        return next();
+      }
+    }
   }
 
-  res.set("WWW-Authenticate", 'Basic realm="401"');
+  res.set("WWW-Authenticate", 'Basic realm="SWPPP Dashboard"');
   res.status(401).send("Authentication required.");
 });
 
