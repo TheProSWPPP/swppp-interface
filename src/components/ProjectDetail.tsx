@@ -545,8 +545,8 @@ v. Landscaping, Drainage & Final Stabilization`,
 
               <div className="md:col-span-2 space-y-3">
                 <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                  <ClipboardList className="h-4 w-4" /> Best Management
-                  Practices
+                  <ClipboardList className="h-4 w-4 text-slate-400" /> Best
+                  Management Practices
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {bmps.map((bmp) => (
@@ -658,8 +658,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   </button>
                   <button
                     onClick={handleAccept}
-                    disabled={!formData.plansUploaded && !formData.isIndustrial}
-                    className="flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-slate-900 hover:bg-slate-800 transition-all shadow-sm shadow-slate-900/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-slate-900 hover:bg-slate-800 transition-all shadow-sm shadow-slate-900/10"
                   >
                     Accept
                   </button>
@@ -715,6 +714,73 @@ v. Landscaping, Drainage & Final Stabilization`,
             </div>
           </div>
 
+          {/* Generated Documents Links */}
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+              <FileText className="h-4 w-4" /> Documents to be Generated
+            </h4>
+            <div className="space-y-2">
+              {[
+                ...getDocumentsForTemplate(
+                  project.stateTemplateId || project.stateTemplateName
+                ),
+                "Job Order PDF",
+              ].map((doc) => {
+                const automated = isAutomatedDocument(doc);
+                const docLink =
+                  doc === "Job Order PDF" ? project.jobOrderLink : null;
+                const isClickable = automated || !!docLink;
+
+                return (
+                  <a
+                    key={doc}
+                    href={docLink || (automated ? "#" : undefined)}
+                    target={docLink ? "_blank" : undefined}
+                    rel={docLink ? "noopener noreferrer" : undefined}
+                    className={cn(
+                      "flex items-center p-3 border rounded-xl transition-all group relative overflow-hidden",
+                      isClickable
+                        ? "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm cursor-pointer"
+                        : "bg-slate-50 border-slate-200 opacity-80 cursor-default"
+                    )}
+                    onClick={(e) => !isClickable && e.preventDefault()}
+                  >
+                    <div
+                      className={cn(
+                        "h-8 w-8 rounded-lg flex items-center justify-center mr-3 transition-colors",
+                        isClickable
+                          ? "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"
+                          : "bg-slate-200 text-slate-500"
+                      )}
+                    >
+                      <FileText className="h-4 w-4" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span
+                        className={cn(
+                          "text-sm font-medium transition-colors",
+                          isClickable
+                            ? "text-slate-700 group-hover:text-indigo-600"
+                            : "text-slate-500"
+                        )}
+                      >
+                        {doc} {automated && "(Automated)"}
+                      </span>
+                      {!automated && !docLink && (
+                        <span className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
+                          Manual - Pending Automation
+                        </span>
+                      )}
+                    </div>
+                    {isClickable && (
+                      <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
+                    )}
+                  </a>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Financials */}
           <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-6 shadow-sm relative overflow-hidden group">
             <div className="absolute inset-0 bg-slate-50/40 backdrop-blur-[1px] z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -744,67 +810,23 @@ v. Landscaping, Drainage & Final Stabilization`,
                     />
                   </div>
                 </div>
-                <button className="w-full flex items-center justify-center px-4 py-2.5 border border-slate-200 text-sm font-medium rounded-lg text-slate-700 bg-white shadow-sm">
-                  <CreditCard className="-ml-1 mr-2 h-4 w-4" />
-                  Generate on QuickBooks
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Generated Documents Links */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-              <FileText className="h-4 w-4" /> Documents to be Generated
-            </h4>
-            <div className="space-y-2">
-              {getDocumentsForTemplate(
-                project.stateTemplateId || project.stateTemplateName
-              ).map((doc) => {
-                const automated = isAutomatedDocument(doc);
-                return (
-                  <div
-                    key={doc}
-                    className={cn(
-                      "flex items-center p-3 border rounded-xl transition-all group relative overflow-hidden",
-                      automated
-                        ? "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
-                        : "bg-slate-50 border-slate-200 opacity-80 cursor-default"
-                    )}
+                {project.invoiceLink ? (
+                  <a
+                    href={project.invoiceLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full flex items-center justify-center px-4 py-2.5 border border-slate-200 text-sm font-medium rounded-lg text-slate-700 bg-white shadow-sm hover:bg-slate-50 transition-colors"
                   >
-                    <div
-                      className={cn(
-                        "h-8 w-8 rounded-lg flex items-center justify-center mr-3 transition-colors",
-                        automated
-                          ? "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"
-                          : "bg-slate-200 text-slate-500"
-                      )}
-                    >
-                      <FileText className="h-4 w-4" />
-                    </div>
-                    <div className="flex flex-col">
-                      <span
-                        className={cn(
-                          "text-sm font-medium transition-colors",
-                          automated
-                            ? "text-slate-700 group-hover:text-indigo-600"
-                            : "text-slate-500"
-                        )}
-                      >
-                        {doc} {automated && "(Automated)"}
-                      </span>
-                      {!automated && (
-                        <span className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
-                          Manual - Pending Automation
-                        </span>
-                      )}
-                    </div>
-                    {automated && (
-                      <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
-                    )}
-                  </div>
-                );
-              })}
+                    <CreditCard className="-ml-1 mr-2 h-4 w-4" />
+                    View Invoice
+                  </a>
+                ) : (
+                  <button className="w-full flex items-center justify-center px-4 py-2.5 border border-slate-200 text-sm font-medium rounded-lg text-slate-700 bg-white shadow-sm">
+                    <CreditCard className="-ml-1 mr-2 h-4 w-4" />
+                    Generate on QuickBooks
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -815,10 +837,8 @@ v. Landscaping, Drainage & Final Stabilization`,
             </h4>
             <div className="space-y-2">
               {[
-                { name: "Job Order PDF", href: project.jobOrderLink },
                 { name: "Project Folder", href: project.folderLink },
                 { name: "Trello Card", href: project.trelloLink },
-                { name: "Invoice", href: project.invoiceLink },
               ].map((link) => (
                 <a
                   key={link.name}

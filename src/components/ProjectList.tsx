@@ -134,7 +134,16 @@ export default function ProjectList({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2.5 text-slate-500">
+                <div className="flex items-center gap-4">
+                  {new Date(project.dueDate).toDateString() ===
+                    new Date(
+                      new Date().getTime() + 24 * 60 * 60 * 1000
+                    ).toDateString() && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-[11px] font-black text-red-700 border border-red-200 uppercase tracking-tighter shadow-sm animate-pulse">
+                      <Clock className="h-3 w-3" />
+                      Tomorrow
+                    </span>
+                  )}
                   <div
                     className={cn(
                       "p-2 rounded-2xl border transition-all duration-300 flex items-center gap-2.5 px-4",

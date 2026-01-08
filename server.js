@@ -20,6 +20,17 @@ app.use(bodyParser.json());
 const ADMIN_USER = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASS = process.env.ADMIN_PASSWORD || "swppp2026";
 
+console.log(
+  `Security: Using ADMIN_USERNAME=${
+    process.env.ADMIN_USERNAME ? "DEFINED" : "NOT DEFINED (default: admin)"
+  }`
+);
+console.log(
+  `Security: Using ADMIN_PASSWORD=${
+    process.env.ADMIN_PASSWORD ? "DEFINED" : "NOT DEFINED (default)"
+  }`
+);
+
 app.use((req, res, next) => {
   // Skip auth for health check
   if (req.path === "/health") return next();
@@ -105,7 +116,7 @@ app.get("/api/projects", async (req, res) => {
 app.post("/api/projects", async (req, res) => {
   const newProject = req.body;
   if (!newProject.id) newProject.id = Date.now().toString();
-  if (!newProject.status) newProject.status = "New";
+  if (!newProject.status) newProject.status = "Pending Review";
   if (!newProject.projectName) newProject.projectName = "Untitled Project";
   if (!newProject.dateReceived)
     newProject.dateReceived = new Date().toLocaleDateString("en-GB");
