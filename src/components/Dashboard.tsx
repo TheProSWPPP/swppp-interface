@@ -22,11 +22,12 @@ export default function Dashboard({
     new: projects.filter((p) => p.status === "New").length,
     pending: projects.filter((p) => p.status === "Pending Review").length,
     processing: projects.filter(
-      (p) => p.status === "Processing" || p.status === "Manual Processing"
+      (p) =>
+        p.status === "Processing" ||
+        p.status === "Manual Processing" ||
+        p.status === "Approved for Generation"
     ).length,
-    completed: projects.filter(
-      (p) => p.status === "Approved for Generation" || p.status === "Complete"
-    ).length,
+    completed: projects.filter((p) => p.status === "Complete").length,
   };
 
   return (

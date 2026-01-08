@@ -3,21 +3,22 @@ import { type Project } from "./data";
 import Dashboard from "./components/Dashboard";
 import ArchiveList from "./components/ArchiveList";
 import Methodology from "./components/Methodology";
+import SettingsView from "./components/Settings";
 import {
   FileText,
   LayoutDashboard,
   Archive,
   BookOpen,
-  Settings,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { cn } from "./utils";
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [view, setView] = useState<"dashboard" | "archive" | "methodology">(
-    "dashboard"
-  );
+  const [view, setView] = useState<
+    "dashboard" | "archive" | "methodology" | "settings"
+  >("dashboard");
 
   const fetchProjects = () => {
     setIsLoading(true);
@@ -118,8 +119,16 @@ function App() {
                   <BookOpen className="h-4 w-4" />
                   Methodology
                 </button>
-                <button className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-slate-50 transition-all duration-200">
-                  <Settings className="h-4 w-4" />
+                <button
+                  onClick={() => setView("settings")}
+                  className={cn(
+                    "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
+                    view === "settings"
+                      ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                  )}
+                >
+                  <SettingsIcon className="h-4 w-4" />
                   Settings
                 </button>
               </nav>
@@ -148,6 +157,7 @@ function App() {
         )}
         {view === "archive" && <ArchiveList onRestore={fetchProjects} />}
         {view === "methodology" && <Methodology />}
+        {view === "settings" && <SettingsView />}
       </main>
     </div>
   );
