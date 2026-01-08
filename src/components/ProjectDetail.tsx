@@ -442,7 +442,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   <a
                     href={`https://mywaterway.epa.gov/community/${encodeURIComponent(
                       formData.projectAddress || ""
-                    )}/overview`}
+                    ).replace(/%2C/g, ",")}/overview`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center hover:underline"
