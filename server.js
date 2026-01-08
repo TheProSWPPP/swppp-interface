@@ -13,6 +13,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 3000;
 
+const N8N_WEBHOOK_URL =
+  "https://proswppp.app.n8n.cloud/webhook/4eed0ad0-ce18-4c43-aab8-222ab4b46d54";
+
 app.use(cors());
 app.use(bodyParser.json());
 
@@ -158,11 +161,37 @@ app.put("/api/projects/:id", async (req, res) => {
     if (current.rows.length === 0)
       return res.status(404).json({ error: "Not found" });
 
+    const oldStatus = current.rows[0].data.status;
     const updatedData = { ...current.rows[0].data, ...updates };
+    const newStatus = updatedData.status;
+
     await pool.query(
       "UPDATE projects SET name = $1, status = $2, data = $3 WHERE id = $4",
       [updatedData.projectName, updatedData.status, updatedData, id]
     );
+
+    // Trigger n8n webhook on approval
+    if (
+      newStatus !== oldStatus &&
+      (newStatus === "Approved for Generation" ||
+        newStatus === "Manual Processing")
+    ) {
+      console.log(
+        `Triggering n8n webhook for project: ${updatedData.projectName}`
+      );
+      fetch(N8N_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedData),
+      })
+        .then((response) => {
+          console.log(`n8n webhook response: ${response.status}`);
+        })
+        .catch((err) => {
+          console.error("Failed to trigger n8n webhook:", err);
+        });
+    }
+
     res.json(updatedData);
   } catch (err) {
     res.status(500).json({ error: err.message });
