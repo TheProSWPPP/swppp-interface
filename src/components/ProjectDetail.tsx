@@ -15,6 +15,8 @@ import {
   ShieldCheck,
   Building,
   FileCode,
+  FolderOpen,
+  Trello,
 } from "lucide-react";
 import { cn, parseCoordinate } from "../utils";
 import {
@@ -162,6 +164,30 @@ v. Landscaping, Drainage & Final Stabilization`,
               <h3 className="text-xl font-bold text-slate-900 leading-tight">
                 {project.projectName}
               </h3>
+              <div className="flex items-center gap-1.5 ml-2">
+                {project.folderLink && (
+                  <a
+                    href={project.folderLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
+                    title="Project Folder"
+                  >
+                    <FolderOpen className="h-5 w-5" />
+                  </a>
+                )}
+                {project.trelloLink && (
+                  <a
+                    href={project.trelloLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-[#0079BF] hover:bg-blue-50 transition-all"
+                    title="Trello Card"
+                  >
+                    <Trello className="h-5 w-5" />
+                  </a>
+                )}
+              </div>
               {(project.stateTemplateId || project.stateTemplateName) && (
                 <span
                   className={cn(
@@ -726,15 +752,22 @@ v. Landscaping, Drainage & Final Stabilization`,
                 ),
                 "Job Order PDF",
               ].map((doc) => {
-                const automated = isAutomatedDocument(doc);
+                const automated =
+                  isAutomatedDocument(doc) || doc === "Job Order PDF";
+                const isManualTarget = !automated;
                 const docLink =
-                  doc === "Job Order PDF" ? project.jobOrderLink : null;
-                const isClickable = automated || !!docLink;
+                  doc === "Job Order PDF"
+                    ? project.jobOrderLink
+                    : automated && isApproved
+                    ? "#" // Placeholder for approved automated docs
+                    : null;
+
+                const isClickable = !!docLink;
 
                 return (
                   <a
                     key={doc}
-                    href={docLink || (automated ? "#" : undefined)}
+                    href={docLink || undefined}
                     target={docLink ? "_blank" : undefined}
                     rel={docLink ? "noopener noreferrer" : undefined}
                     className={cn(
@@ -764,11 +797,20 @@ v. Landscaping, Drainage & Final Stabilization`,
                             : "text-slate-500"
                         )}
                       >
-                        {doc} {automated && "(Automated)"}
+                        {doc}{" "}
+                        {automated &&
+                          !isManualTarget &&
+                          doc !== "Job Order PDF" &&
+                          "(Automated)"}
                       </span>
-                      {!automated && !docLink && (
+                      {isManualTarget && (
                         <span className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
                           Manual - Pending Automation
+                        </span>
+                      )}
+                      {automated && !isClickable && (
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
+                          Awaiting Approval
                         </span>
                       )}
                     </div>
@@ -827,32 +869,6 @@ v. Landscaping, Drainage & Final Stabilization`,
                   </button>
                 )}
               </div>
-            </div>
-          </div>
-
-          {/* Resources */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-              <ExternalLink className="h-4 w-4" /> External Resources
-            </h4>
-            <div className="space-y-2">
-              {[
-                { name: "Project Folder", href: project.folderLink },
-                { name: "Trello Card", href: project.trelloLink },
-              ].map((link) => (
-                <a
-                  key={link.name}
-                  href={link.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center p-3 bg-white border border-slate-200 rounded-xl hover:border-indigo-300 hover:shadow-sm transition-all group"
-                >
-                  <span className="text-sm font-medium text-slate-700 group-hover:text-indigo-600 transition-colors">
-                    {link.name}
-                  </span>
-                  <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
-                </a>
-              ))}
             </div>
           </div>
         </div>
