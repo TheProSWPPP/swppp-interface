@@ -14,7 +14,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 const N8N_WEBHOOK_URL =
-  "https://proswppp.app.n8n.cloud/webhook/4eed0ad0-ce18-4c43-aab8-222ab4b46d54";
+  "https://proswppp.app.n8n.cloud/webhook/state-document-generator";
 
 app.use(cors());
 app.use(bodyParser.json());
