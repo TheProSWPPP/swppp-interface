@@ -18,7 +18,7 @@ import {
   FolderOpen,
   Trello,
 } from "lucide-react";
-import { cn, parseCoordinate } from "../utils";
+import { cn, parseCoordinate, formatWaterwayUrl } from "../utils";
 import {
   getDocumentsForTemplate,
   getTemplateColor,
@@ -440,9 +440,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     Contributing Waterbodies
                   </label>
                   <a
-                    href={`https://mywaterway.epa.gov/community/${encodeURIComponent(
-                      formData.projectAddress || ""
-                    ).replace(/%2C/g, ",")}/overview`}
+                    href={formatWaterwayUrl(formData.projectAddress || "")}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center hover:underline"

@@ -49,3 +49,10 @@ export function parseCoordinate(
   }
   return value.toString();
 }
+
+export function formatWaterwayUrl(address: string): string {
+  if (!address) return "https://mywaterway.epa.gov/";
+  // Replace spaces with %20 but KEEP commas as raw characters
+  const formattedAddress = address.trim().replace(/ /g, "%20");
+  return `https://mywaterway.epa.gov/community/${formattedAddress}/overview`;
+}
