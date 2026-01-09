@@ -17,6 +17,7 @@ import {
   FileCode,
   FolderOpen,
   Trello,
+  XCircle,
 } from "lucide-react";
 import { cn, parseCoordinate, formatWaterwayUrl } from "../utils";
 import {
@@ -142,6 +143,15 @@ v. Landscaping, Drainage & Final Stabilization`,
     });
   };
 
+  const handleCancelGeneration = () => {
+    if (confirm("Cancel generation and reset status to Pending Review?")) {
+      onUpdate({
+        ...formData,
+        status: "Pending Review",
+      });
+    }
+  };
+
   const handleDelete = () => {
     if (confirm("Are you sure you want to delete this project?")) {
       onDelete();
@@ -203,22 +213,38 @@ v. Landscaping, Drainage & Final Stabilization`,
                   )}
                 </span>
               )}
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border",
-                  project.status === "Approved for Generation"
-                    ? "bg-purple-50 text-purple-700 border-purple-200"
-                    : project.status === "Complete"
-                    ? "bg-green-50 text-green-700 border-green-200"
-                    : project.status === "Manual Processing"
-                    ? "bg-orange-50 text-orange-700 border-orange-200"
-                    : project.status === "New"
-                    ? "bg-slate-100 text-slate-700 border-slate-200"
-                    : "bg-indigo-50 text-indigo-700 border-indigo-200"
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border",
+                    project.status === "Approved for Generation"
+                      ? "bg-purple-50 text-purple-700 border-purple-200"
+                      : project.status === "Complete"
+                      ? "bg-green-50 text-green-700 border-green-200"
+                      : project.status === "Manual Processing"
+                      ? "bg-orange-50 text-orange-700 border-orange-200"
+                      : project.status === "Ready"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : project.status === "New"
+                      ? "bg-slate-100 text-slate-700 border-slate-200"
+                      : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                  )}
+                >
+                  {project.status || "Draft"}
+                </span>
+                {(project.status === "Approved for Generation" ||
+                  project.status === "Manual Processing" ||
+                  project.status === "Ready") && (
+                  <button
+                    onClick={handleCancelGeneration}
+                    className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded-full border border-red-200 transition-colors uppercase tracking-tight"
+                    title="Cancel Generation & Reset"
+                  >
+                    <XCircle className="h-3 w-3" />
+                    Cancel
+                  </button>
                 )}
-              >
-                {project.status || "Draft"}
-              </span>
+              </div>
             </div>
             <p className="text-sm text-slate-500 flex items-center gap-3 mt-1.5">
               <span>{project.email}</span>
