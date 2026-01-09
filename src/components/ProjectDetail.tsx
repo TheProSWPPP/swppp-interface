@@ -753,11 +753,14 @@ v. Landscaping, Drainage & Final Stabilization`,
                 const automated =
                   isAutomatedDocument(doc) || doc === "Job Order PDF";
                 const isManualTarget = !automated;
+                const isProjectReady = project.status === "Ready";
+
+                // Links are ONLY active if status is "Ready" OR it's a Job Order PDF that exists
                 const docLink =
                   doc === "Job Order PDF"
                     ? project.jobOrderLink
-                    : automated && isApproved
-                    ? "#" // Placeholder for approved automated docs
+                    : isProjectReady
+                    ? "#" // Placeholder for ready documents
                     : null;
 
                 const isClickable = !!docLink;
@@ -806,7 +809,12 @@ v. Landscaping, Drainage & Final Stabilization`,
                           Manual - Pending Automation
                         </span>
                       )}
-                      {automated && !isClickable && (
+                      {automated && !isProjectReady && isApproved && (
+                        <span className="text-[10px] text-indigo-600 font-bold uppercase tracking-tight animate-pulse">
+                          Generating...
+                        </span>
+                      )}
+                      {automated && !isApproved && !isClickable && (
                         <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
                           Awaiting Approval
                         </span>

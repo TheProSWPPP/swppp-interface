@@ -3,6 +3,7 @@ export type ProjectStatus =
   | "Pending Review"
   | "Complete"
   | "Approved for Generation"
+  | "Ready"
   | "New"
   | "Manual Processing"
   | "";
