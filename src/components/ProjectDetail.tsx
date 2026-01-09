@@ -18,6 +18,7 @@ import {
   FolderOpen,
   Trello,
   XCircle,
+  Edit2,
 } from "lucide-react";
 import { cn, parseCoordinate, formatWaterwayUrl } from "../utils";
 import {
@@ -174,9 +175,24 @@ v. Landscaping, Drainage & Final Stabilization`,
           </button>
           <div>
             <div className="flex items-center gap-3">
-              <h3 className="text-xl font-bold text-slate-900 leading-tight">
-                {project.projectName}
-              </h3>
+              {isPending ? (
+                <div className="relative group/title">
+                  <input
+                    type="text"
+                    value={formData.projectName || ""}
+                    onChange={(e) =>
+                      handleChange("projectName", e.target.value)
+                    }
+                    className="text-xl font-bold text-slate-900 leading-tight bg-transparent border-none p-0 focus:ring-0 focus:outline-none min-w-[200px]"
+                  />
+                  <Edit2 className="h-3 w-3 text-slate-400 absolute -right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover/title:opacity-100 transition-opacity pointer-events-none" />
+                  <div className="absolute bottom-0 left-0 w-full h-px bg-slate-200 scale-x-0 group-hover/title:scale-x-100 transition-transform origin-left" />
+                </div>
+              ) : (
+                <h3 className="text-xl font-bold text-slate-900 leading-tight">
+                  {project.projectName}
+                </h3>
+              )}
               <div className="flex items-center gap-1.5 ml-2">
                 {project.folderLink && (
                   <a
@@ -271,23 +287,6 @@ v. Landscaping, Drainage & Final Stabilization`,
             </h4>
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Project Name
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.projectName || ""}
-                    onChange={(e) =>
-                      handleChange("projectName", e.target.value)
-                    }
-                    className={cn(
-                      "w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all",
-                      !isPending && "bg-slate-50 cursor-not-allowed opacity-75"
-                    )}
-                    disabled={!isPending}
-                  />
-                </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">
                     Project Address
