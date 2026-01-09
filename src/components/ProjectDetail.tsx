@@ -43,6 +43,9 @@ export default function ProjectDetail({
   const [isGenerating, setIsGenerating] = useState(false);
   const [formData, setFormData] = useState<Project>(project);
 
+  const isPending =
+    project.status === "Pending Review" || project.status === "New";
+
   const isApproved =
     project.status === "Approved for Generation" ||
     project.status === "Complete";
@@ -278,8 +281,11 @@ v. Landscaping, Drainage & Final Stabilization`,
                     onChange={(e) =>
                       handleChange("projectName", e.target.value)
                     }
-                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
-                    disabled={isApproved}
+                    className={cn(
+                      "w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all",
+                      !isPending && "bg-slate-50 cursor-not-allowed opacity-75"
+                    )}
+                    disabled={!isPending}
                   />
                 </div>
                 <div className="space-y-2">
