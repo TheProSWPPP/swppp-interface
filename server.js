@@ -119,7 +119,8 @@ app.get("/api/projects", async (req, res) => {
 app.post("/api/projects", async (req, res) => {
   const newProject = req.body;
   if (!newProject.id) newProject.id = Date.now().toString();
-  if (!newProject.status) newProject.status = "Pending Review";
+  // FORCE status to Pending Review regardless of payload for new creations
+  newProject.status = "Pending Review";
   if (!newProject.projectName) newProject.projectName = "Untitled Project";
   if (!newProject.dateReceived)
     newProject.dateReceived = new Date().toLocaleDateString("en-GB");
