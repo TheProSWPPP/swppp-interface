@@ -183,6 +183,8 @@ v. Landscaping, Drainage & Final Stabilization`,
                     onChange={(e) =>
                       handleChange("projectName", e.target.value)
                     }
+                    onBlur={() => onUpdate(formData)}
+                    onKeyDown={(e) => e.key === "Enter" && onUpdate(formData)}
                     className="text-xl font-bold text-slate-900 leading-tight bg-transparent border-none p-0 focus:ring-0 focus:outline-none min-w-[200px]"
                   />
                   <Edit2 className="h-3 w-3 text-slate-400 absolute -right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover/title:opacity-100 transition-opacity pointer-events-none" />
