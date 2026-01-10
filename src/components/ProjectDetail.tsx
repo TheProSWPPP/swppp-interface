@@ -610,33 +610,41 @@ v. Landscaping, Drainage & Final Stabilization`,
         {/* Sidebar Column */}
         <div className="space-y-6">
           {/* Quick Resources */}
-          <div className="flex items-center justify-between px-2">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-              Project Resources
-            </h4>
-            <div className="flex items-center gap-1">
-              {project.folderLink && (
+          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                Quick Links
+              </h4>
+              <div className="flex items-center gap-2">
                 <a
-                  href={project.folderLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-100 transition-all"
+                  href={project.folderLink || "#"}
+                  target={project.folderLink ? "_blank" : undefined}
+                  className={cn(
+                    "p-2 rounded-xl transition-all border",
+                    project.folderLink
+                      ? "text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-100"
+                      : "text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed"
+                  )}
                   title="Dropbox Folder"
+                  onClick={(e) => !project.folderLink && e.preventDefault()}
                 >
                   <FolderOpen className="h-4 w-4" />
                 </a>
-              )}
-              {project.trelloLink && (
                 <a
-                  href={project.trelloLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 rounded-xl text-slate-400 hover:text-[#0079BF] hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-100 transition-all"
+                  href={project.trelloLink || "#"}
+                  target={project.trelloLink ? "_blank" : undefined}
+                  className={cn(
+                    "p-2 rounded-xl transition-all border",
+                    project.trelloLink
+                      ? "text-[#0079BF] bg-blue-50 border-blue-100 hover:bg-blue-100"
+                      : "text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed"
+                  )}
                   title="Trello Card"
+                  onClick={(e) => !project.trelloLink && e.preventDefault()}
                 >
                   <Trello className="h-4 w-4" />
                 </a>
-              )}
+              </div>
             </div>
           </div>
 
