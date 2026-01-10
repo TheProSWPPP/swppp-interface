@@ -2,6 +2,7 @@ export interface StateTemplate {
   id: string;
   name: string;
   documents: string[];
+  templateLinks?: Record<string, string>;
 }
 
 export const STATE_TEMPLATES: StateTemplate[] = [
@@ -248,6 +249,17 @@ export function getDocumentsForTemplate(templateIdOrName?: string): string[] {
   );
 
   return template ? template.documents : DEFAULT_DOCUMENTS;
+}
+
+export function getTemplateDocLink(
+  templateIdOrName: string | undefined,
+  docName: string
+): string | undefined {
+  if (!templateIdOrName) return undefined;
+  const template = STATE_TEMPLATES.find(
+    (t) => t.id === templateIdOrName || t.name === templateIdOrName
+  );
+  return template?.templateLinks?.[docName];
 }
 
 export function getTemplateName(templateIdOrName?: string): string | undefined {

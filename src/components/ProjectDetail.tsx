@@ -25,6 +25,7 @@ import {
   getDocumentsForTemplate,
   getTemplateColor,
   getTemplateName,
+  getTemplateDocLink,
   isAutomatedDocument,
 } from "../templates";
 
@@ -195,30 +196,6 @@ v. Landscaping, Drainage & Final Stabilization`,
                   {project.projectName}
                 </h3>
               )}
-              <div className="flex items-center gap-1.5 ml-2">
-                {project.folderLink && (
-                  <a
-                    href={project.folderLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
-                    title="Project Folder"
-                  >
-                    <FolderOpen className="h-5 w-5" />
-                  </a>
-                )}
-                {project.trelloLink && (
-                  <a
-                    href={project.trelloLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-[#0079BF] hover:bg-blue-50 transition-all"
-                    title="Trello Card"
-                  >
-                    <Trello className="h-5 w-5" />
-                  </a>
-                )}
-              </div>
               {(project.stateTemplateId || project.stateTemplateName) && (
                 <span
                   className={cn(
@@ -632,6 +609,37 @@ v. Landscaping, Drainage & Final Stabilization`,
 
         {/* Sidebar Column */}
         <div className="space-y-6">
+          {/* Quick Resources */}
+          <div className="flex items-center justify-between px-2">
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+              Project Resources
+            </h4>
+            <div className="flex items-center gap-1">
+              {project.folderLink && (
+                <a
+                  href={project.folderLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-100 transition-all"
+                  title="Dropbox Folder"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </a>
+              )}
+              {project.trelloLink && (
+                <a
+                  href={project.trelloLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 rounded-xl text-slate-400 hover:text-[#0079BF] hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-100 transition-all"
+                  title="Trello Card"
+                >
+                  <Trello className="h-4 w-4" />
+                </a>
+              )}
+            </div>
+          </div>
+
           {/* Actions Card */}
           <div
             className={cn(
@@ -797,66 +805,91 @@ v. Landscaping, Drainage & Final Stabilization`,
                     : null;
 
                 const isClickable = !!docLink;
+                const templateLink = getTemplateDocLink(
+                  project.stateTemplateId || project.stateTemplateName,
+                  doc
+                );
 
                 return (
-                  <a
+                  <div
                     key={doc}
-                    href={docLink || undefined}
-                    target={docLink ? "_blank" : undefined}
-                    rel={docLink ? "noopener noreferrer" : undefined}
                     className={cn(
-                      "flex items-center p-3 border rounded-xl transition-all group relative overflow-hidden",
+                      "flex flex-col border rounded-xl transition-all overflow-hidden",
                       isClickable
-                        ? "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm cursor-pointer"
-                        : "bg-slate-50 border-slate-200 opacity-80 cursor-default"
+                        ? "bg-white border-slate-200 shadow-sm"
+                        : "bg-slate-50 border-slate-200 opacity-80"
                     )}
-                    onClick={(e) => !isClickable && e.preventDefault()}
                   >
-                    <div
+                    <a
+                      href={docLink || undefined}
+                      target={docLink ? "_blank" : undefined}
+                      rel={docLink ? "noopener noreferrer" : undefined}
                       className={cn(
-                        "h-8 w-8 rounded-lg flex items-center justify-center mr-3 transition-colors",
-                        isClickable
-                          ? "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"
-                          : "bg-slate-200 text-slate-500"
+                        "flex items-center p-3 group relative",
+                        isClickable ? "cursor-pointer" : "cursor-default"
                       )}
+                      onClick={(e) => !isClickable && e.preventDefault()}
                     >
-                      <FileText className="h-4 w-4" />
-                    </div>
-                    <div className="flex flex-col">
-                      <span
+                      <div
                         className={cn(
-                          "text-sm font-medium transition-colors",
+                          "h-8 w-8 rounded-lg flex items-center justify-center mr-3 transition-colors",
                           isClickable
-                            ? "text-slate-700 group-hover:text-indigo-600"
-                            : "text-slate-500"
+                            ? "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"
+                            : "bg-slate-200 text-slate-500"
                         )}
                       >
-                        {doc}{" "}
-                        {automated &&
-                          !isManualTarget &&
-                          doc !== "Job Order PDF" &&
-                          "(Automated)"}
-                      </span>
-                      {isManualTarget && (
-                        <span className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
-                          Manual - Pending Automation
+                        <FileText className="h-4 w-4" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span
+                          className={cn(
+                            "text-sm font-medium transition-colors",
+                            isClickable
+                              ? "text-slate-700 group-hover:text-indigo-600"
+                              : "text-slate-500"
+                          )}
+                        >
+                          {doc}{" "}
+                          {automated &&
+                            !isManualTarget &&
+                            doc !== "Job Order PDF" &&
+                            "(Automated)"}
                         </span>
+                        {isManualTarget && (
+                          <span className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
+                            Manual - Pending Automation
+                          </span>
+                        )}
+                        {automated && !isProjectReady && isApproved && (
+                          <span className="text-[10px] text-indigo-600 font-bold uppercase tracking-tight animate-pulse">
+                            Generating...
+                          </span>
+                        )}
+                        {automated && !isApproved && !isClickable && (
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
+                            Awaiting Approval
+                          </span>
+                        )}
+                      </div>
+                      {isClickable && (
+                        <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
                       )}
-                      {automated && !isProjectReady && isApproved && (
-                        <span className="text-[10px] text-indigo-600 font-bold uppercase tracking-tight animate-pulse">
-                          Generating...
-                        </span>
-                      )}
-                      {automated && !isApproved && !isClickable && (
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
-                          Awaiting Approval
-                        </span>
-                      )}
-                    </div>
-                    {isClickable && (
-                      <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
+                    </a>
+
+                    {templateLink && (
+                      <div className="px-3 pb-2 flex justify-end">
+                        <a
+                          href={templateLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] font-bold text-indigo-500 hover:text-indigo-700 flex items-center gap-1 bg-indigo-50/50 px-2 py-0.5 rounded-full transition-colors"
+                        >
+                          View Template Doc
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
                     )}
-                  </a>
+                  </div>
                 );
               })}
             </div>
