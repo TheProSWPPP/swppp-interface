@@ -439,6 +439,11 @@ export function getTemplateDocLink(
   templateIdOrName: string | undefined,
   docName: string
 ): string | undefined {
+  // Special case for Job Order PDF - universal across all templates
+  if (docName === "Job Order PDF") {
+    return "#"; // Placeholder for Job Order PDF template
+  }
+
   if (!templateIdOrName) return undefined;
   const template = STATE_TEMPLATES.find(
     (t) => t.id === templateIdOrName || t.name === templateIdOrName
