@@ -14,6 +14,7 @@ import {
   ClipboardList,
   ShieldCheck,
   Building,
+  User,
   FileCode,
   FolderOpen,
   Trello,
@@ -259,6 +260,65 @@ v. Landscaping, Drainage & Final Stabilization`,
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 p-6 lg:p-8 bg-slate-50/50">
         {/* Main Data Column */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Customer Details */}
+          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+              <User className="h-4 w-4" /> Customer Details
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Company Name
+                </label>
+                <input
+                  type="text"
+                  value={formData.companyName || ""}
+                  onChange={(e) => handleChange("companyName", e.target.value)}
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  disabled={isApproved}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Contact Name
+                </label>
+                <input
+                  type="text"
+                  value={formData.contactName || ""}
+                  onChange={(e) => handleChange("contactName", e.target.value)}
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  disabled={isApproved}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Phone
+                </label>
+                <input
+                  type="text"
+                  value={formData.phone || ""}
+                  onChange={(e) => handleChange("phone", e.target.value)}
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  disabled={isApproved}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Customer Address
+                </label>
+                <input
+                  type="text"
+                  value={formData.customerAddress || ""}
+                  onChange={(e) =>
+                    handleChange("customerAddress", e.target.value)
+                  }
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  disabled={isApproved}
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Project Details */}
           <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">

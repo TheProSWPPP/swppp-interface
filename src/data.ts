@@ -35,6 +35,10 @@ export interface Project {
   projectFinishDate?: string;
   projectDescription?: string;
   swpppProjectDescription?: string;
+  companyName?: string;
+  contactName?: string;
+  phone?: string;
+  customerAddress?: string;
   sequenceActivities?: string;
   stateTemplateId?: string;
   stateTemplateName?: string;

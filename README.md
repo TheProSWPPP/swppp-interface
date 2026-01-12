@@ -38,6 +38,10 @@ Endpoint: `POST /api/projects`
 | `specialRequirements` | Maps to the **Notes** field in the UI   |
 | `landDisturbanceArea` | Estimated acres                         |
 | `civilDrawingsLink`   | Link to the civil drawings              |
+| `companyName`         | Name of the company                     |
+| `contactName`         | Name of the contact person              |
+| `phone`               | Phone number                            |
+| `customerAddress`     | Address of the customer                 |
 
 ## Database
 
