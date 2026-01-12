@@ -20,7 +20,9 @@ export default function Dashboard({
   const stats = {
     total: projects.length,
     new: projects.filter((p) => p.status === "New").length,
-    pending: projects.filter((p) => p.status === "Pending Review").length,
+    pending: projects.filter(
+      (p) => p.status === "Pending Review" || p.status === "New"
+    ).length,
     processing: projects.filter(
       (p) =>
         p.status === "Processing" ||

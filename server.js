@@ -104,9 +104,20 @@ app.get("/health", (req, res) => {
 });
 
 app.get("/api/projects", async (req, res) => {
-  if (!process.env.DATABASE_URL) return res.json(memoryProjects);
+  if (!process.env.DATABASE_URL) {
+    // Migration for memory mode
+    memoryProjects = memoryProjects.map((p) =>
+      p.status === "New" ? { ...p, status: "Pending Review" } : p
+    );
+    return res.json(memoryProjects);
+  }
 
   try {
+    // Auto-migrate "New" to "Pending Review" in DB
+    await pool.query(
+      "UPDATE projects SET status = 'Pending Review', data = jsonb_set(data, '{status}', '\"Pending Review\"') WHERE status = 'New' AND archived = FALSE"
+    );
+
     const result = await pool.query(
       "SELECT data FROM projects WHERE archived = FALSE ORDER BY (data->>'dateReceived') DESC"
     );
