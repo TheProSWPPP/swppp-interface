@@ -42,6 +42,7 @@ export interface Project {
   invoiceTotal?: number;
   trelloLink: string;
   jobOrderLink: string;
+  civilDrawingsLink?: string;
   folderLink: string;
   invoiceLink: string;
 }
