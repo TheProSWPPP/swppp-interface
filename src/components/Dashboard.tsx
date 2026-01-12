@@ -8,12 +8,14 @@ interface DashboardProps {
   projects: Project[];
   onUpdateProject: (project: Project) => void;
   onDeleteProject: (projectId: string) => void;
+  onBulkDeleteProjects: (projectIds: string[]) => void;
 }
 
 export default function Dashboard({
   projects,
   onUpdateProject,
   onDeleteProject,
+  onBulkDeleteProjects,
 }: DashboardProps) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
@@ -103,6 +105,7 @@ export default function Dashboard({
           projects={projects}
           onSelectProject={setSelectedProject}
           onDeleteProject={onDeleteProject}
+          onBulkDeleteProjects={onBulkDeleteProjects}
         />
       )}
     </div>

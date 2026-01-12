@@ -279,6 +279,38 @@ app.post("/api/archive/:id/restore", async (req, res) => {
   }
 });
 
+// Delete Project (Single or Bulk)
+app.post("/api/projects/delete", async (req, res) => {
+  const { ids } = req.body;
+  if (!ids || !Array.isArray(ids))
+    return res.status(400).json({ error: "IDs array required" });
+
+  if (!process.env.DATABASE_URL) {
+    const now = new Date().toISOString();
+    ids.forEach((id) => {
+      const index = memoryProjects.findIndex((p) => p.id === id);
+      if (index !== -1) {
+        const project = memoryProjects[index];
+        project.deletedAt = now;
+        memoryArchive.push(project);
+        memoryProjects.splice(index, 1);
+      }
+    });
+    return res.status(204).send();
+  }
+
+  try {
+    const now = new Date().toISOString();
+    await pool.query(
+      "UPDATE projects SET archived = TRUE, deleted_at = $1 WHERE id = ANY($2)",
+      [now, ids]
+    );
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Cleanup Task
 setInterval(async () => {
   if (!process.env.DATABASE_URL) return;

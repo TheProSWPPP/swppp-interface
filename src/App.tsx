@@ -13,6 +13,10 @@ import {
 } from "lucide-react";
 import { cn } from "./utils";
 
+interface BulkDeleteRequest {
+  ids: string[];
+}
+
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -56,6 +60,16 @@ function App() {
     fetch(`/api/projects/${projectId}`, {
       method: "DELETE",
     }).catch((err) => console.error("Failed to delete project:", err));
+  };
+
+  const handleBulkDeleteProjects = (projectIds: string[]) => {
+    setProjects((prev) => prev.filter((p) => !projectIds.includes(p.id)));
+
+    fetch("/api/projects/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: projectIds }),
+    }).catch((err) => console.error("Failed to bulk delete projects:", err));
   };
 
   if (isLoading) {
@@ -153,6 +167,7 @@ function App() {
             projects={projects}
             onUpdateProject={handleUpdateProject}
             onDeleteProject={handleDeleteProject}
+            onBulkDeleteProjects={handleBulkDeleteProjects}
           />
         )}
         {view === "archive" && <ArchiveList onRestore={fetchProjects} />}

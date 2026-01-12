@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Project } from "../data";
 import {
   Calendar,
@@ -6,6 +7,7 @@ import {
   Clock,
   Trash2,
   FileCode,
+  CheckCircle,
 } from "lucide-react";
 import { cn, formatGeorgiaTime } from "../utils";
 import { getTemplateName } from "../templates";
@@ -15,6 +17,7 @@ interface ProjectListProps {
   projects: Project[];
   onSelectProject: (project: Project) => void;
   onDeleteProject: (projectId: string) => void;
+  onBulkDeleteProjects: (projectIds: string[]) => void;
 }
 
 const statusColors: Record<string, string> = {
@@ -32,7 +35,26 @@ export default function ProjectList({
   projects,
   onSelectProject,
   onDeleteProject,
+  onBulkDeleteProjects,
 }: ProjectListProps) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkDelete = () => {
+    if (
+      confirm(`Are you sure you want to delete ${selectedIds.length} projects?`)
+    ) {
+      onBulkDeleteProjects(selectedIds);
+      setSelectedIds([]);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -44,6 +66,35 @@ export default function ProjectList({
             Manage document generation workflows and job orders.
           </p>
         </div>
+
+        <AnimatePresence>
+          {selectedIds.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="flex items-center gap-4 bg-white border border-slate-200 px-4 py-2 rounded-2xl shadow-lg"
+            >
+              <span className="text-sm font-bold text-slate-700">
+                {selectedIds.length} Selected
+              </span>
+              <div className="h-4 w-px bg-slate-200" />
+              <button
+                onClick={handleBulkDelete}
+                className="flex items-center gap-2 text-sm font-bold text-red-600 hover:text-red-700 transition-colors"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete Selected
+              </button>
+              <button
+                onClick={() => setSelectedIds([])}
+                className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                Cancel
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <div className="grid grid-cols-1 gap-4">
@@ -56,12 +107,28 @@ export default function ProjectList({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
               onClick={() => onSelectProject(project)}
-              className="group relative bg-white rounded-3xl border border-slate-200 shadow-sm hover:shadow-xl hover:shadow-indigo-500/5 hover:-translate-y-0.5 transition-all duration-300 cursor-pointer overflow-hidden p-1"
+              className={cn(
+                "group relative bg-white rounded-3xl border transition-all duration-300 cursor-pointer overflow-hidden p-1",
+                selectedIds.includes(project.id)
+                  ? "border-indigo-500 shadow-indigo-100 shadow-lg ring-1 ring-indigo-500"
+                  : "border-slate-200 shadow-sm hover:shadow-xl hover:shadow-indigo-500/5 hover:-translate-y-0.5"
+              )}
             >
               <div className="bg-white rounded-[1.4rem] p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-5">
-                    <div className="flex-shrink-0">
+                    <div className="flex-shrink-0 relative group/check">
+                      <div
+                        onClick={(e) => toggleSelect(project.id, e)}
+                        className={cn(
+                          "absolute -top-2 -left-2 z-10 p-1.5 rounded-full border transition-all duration-200 opacity-0 group-hover/check:opacity-100",
+                          selectedIds.includes(project.id)
+                            ? "bg-indigo-600 border-indigo-600 text-white opacity-100"
+                            : "bg-white border-slate-200 text-slate-400 hover:border-indigo-400"
+                        )}
+                      >
+                        <CheckCircle className="h-3.5 w-3.5" />
+                      </div>
                       <div className="h-14 w-14 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-600 font-black text-lg border border-slate-100 group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600 transition-all duration-300 shadow-inner">
                         {project.projectName.substring(0, 2).toUpperCase()}
                       </div>

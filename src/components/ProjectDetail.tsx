@@ -524,102 +524,109 @@ v. Landscaping, Drainage & Final Stabilization`,
           </div>
 
           {/* SWPPP Specifics */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4" /> SWPPP Specifics
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
-                  NOI Acknowledgement
-                </label>
-                <div className="flex flex-col gap-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="noiType"
-                      checked={formData.noiType === "Large"}
-                      onChange={() => handleChange("noiType", "Large")}
-                      className="text-indigo-600 focus:ring-indigo-500"
-                      disabled={isApproved}
-                    />
-                    <span className="text-sm text-slate-600">
-                      Large Construction Site
-                    </span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="noiType"
-                      checked={formData.noiType === "Small"}
-                      onChange={() => handleChange("noiType", "Small")}
-                      className="text-indigo-600 focus:ring-indigo-500"
-                      disabled={isApproved}
-                    />
-                    <span className="text-sm text-slate-600">
-                      Small Construction Site
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="md:col-span-2 space-y-4 pt-4 border-t border-slate-100">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm relative overflow-hidden group/swppp">
+            <div className="absolute inset-0 bg-slate-50/40 backdrop-blur-[1px] z-10 flex items-center justify-center opacity-0 group-hover/swppp:opacity-100 transition-opacity">
+              <span className="bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest shadow-xl">
+                Coming Soon
+              </span>
+            </div>
+            <div className="opacity-40 pointer-events-none grayscale">
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4" /> SWPPP Specifics
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">
-                    SWPPP Document Description
+                    NOI Acknowledgement
                   </label>
-                  <textarea
-                    value={formData.swpppProjectDescription || ""}
-                    onChange={(e) =>
-                      handleChange("swpppProjectDescription", e.target.value)
-                    }
-                    rows={3}
-                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 bg-slate-50/30"
-                    placeholder="This description will appear in the SWPPP document..."
-                    disabled={isApproved}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Sequence of Major Activities
-                  </label>
-                  <textarea
-                    value={formData.sequenceActivities || ""}
-                    onChange={(e) =>
-                      handleChange("sequenceActivities", e.target.value)
-                    }
-                    rows={6}
-                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 font-mono bg-slate-50/30"
-                    disabled={isApproved}
-                  />
-                </div>
-              </div>
-
-              <div className="md:col-span-2 space-y-3">
-                <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                  <ClipboardList className="h-4 w-4 text-slate-400" /> Best
-                  Management Practices
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {bmps.map((bmp) => (
-                    <label
-                      key={bmp}
-                      className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-slate-50 border border-transparent hover:border-slate-100"
-                    >
+                  <div className="flex flex-col gap-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
                       <input
-                        type="checkbox"
-                        checked={
-                          formData.bestManagementPractices?.includes(bmp) ||
-                          false
-                        }
-                        onChange={() => toggleBMP(bmp)}
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        type="radio"
+                        name="noiType"
+                        checked={formData.noiType === "Large"}
+                        onChange={() => handleChange("noiType", "Large")}
+                        className="text-indigo-600 focus:ring-indigo-500"
                         disabled={isApproved}
                       />
-                      <span className="text-sm text-slate-600">{bmp}</span>
+                      <span className="text-sm text-slate-600">
+                        Large Construction Site
+                      </span>
                     </label>
-                  ))}
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="noiType"
+                        checked={formData.noiType === "Small"}
+                        onChange={() => handleChange("noiType", "Small")}
+                        className="text-indigo-600 focus:ring-indigo-500"
+                        disabled={isApproved}
+                      />
+                      <span className="text-sm text-slate-600">
+                        Small Construction Site
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 space-y-4 pt-4 border-t border-slate-100">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700">
+                      SWPPP Document Description
+                    </label>
+                    <textarea
+                      value={formData.swpppProjectDescription || ""}
+                      onChange={(e) =>
+                        handleChange("swpppProjectDescription", e.target.value)
+                      }
+                      rows={3}
+                      className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 bg-slate-50/30"
+                      placeholder="This description will appear in the SWPPP document..."
+                      disabled={isApproved}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700">
+                      Sequence of Major Activities
+                    </label>
+                    <textarea
+                      value={formData.sequenceActivities || ""}
+                      onChange={(e) =>
+                        handleChange("sequenceActivities", e.target.value)
+                      }
+                      rows={6}
+                      className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 font-mono bg-slate-50/30"
+                      disabled={isApproved}
+                    />
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 space-y-3">
+                  <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                    <ClipboardList className="h-4 w-4 text-slate-400" /> Best
+                    Management Practices
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {bmps.map((bmp) => (
+                      <label
+                        key={bmp}
+                        className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-slate-50 border border-transparent hover:border-slate-100"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={
+                            formData.bestManagementPractices?.includes(bmp) ||
+                            false
+                          }
+                          onChange={() => toggleBMP(bmp)}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          disabled={true}
+                        />
+                        <span className="text-sm text-slate-600">{bmp}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
