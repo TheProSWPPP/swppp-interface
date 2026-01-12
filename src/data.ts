@@ -43,6 +43,10 @@ export interface Project {
   stateTemplateId?: string;
   stateTemplateName?: string;
   countyFips?: string;
+  "24hrTurnaround"?: string;
+  needHardCopy?: string;
+  certifiedInspection?: string;
+  eportalAccess?: string;
   invoiceTotal?: number;
   trelloLink: string;
   jobOrderLink: string;

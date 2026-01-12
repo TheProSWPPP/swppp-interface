@@ -8,6 +8,10 @@ import {
   Trash2,
   FileCode,
   CheckCircle,
+  Zap,
+  Printer,
+  ShieldCheck,
+  Globe,
 } from "lucide-react";
 import { cn, formatGeorgiaTime } from "../utils";
 import { getTemplateName } from "../templates";
@@ -138,9 +142,28 @@ export default function ProjectList({
                         <h4 className="text-lg font-bold text-slate-900 group-hover:text-indigo-600 transition-colors leading-snug">
                           {project.projectName}
                         </h4>
-                        {project.specialRequirements.includes("24-Hour") && (
-                          <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-0.5 text-[10px] font-bold text-red-700 border border-red-100 uppercase tracking-wider">
-                            Urgent
+                        {project["24hrTurnaround"] === "yes" && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-0.5 text-[10px] font-bold text-red-700 border border-red-100 uppercase tracking-wider">
+                            <Zap className="h-3 w-3" />
+                            24hr Turnaround
+                          </span>
+                        )}
+                        {project.needHardCopy === "yes" && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] font-bold text-amber-700 border border-amber-100 uppercase tracking-wider">
+                            <Printer className="h-3 w-3" />
+                            Hard Copy
+                          </span>
+                        )}
+                        {project.certifiedInspection === "yes" && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-bold text-blue-700 border border-blue-100 uppercase tracking-wider">
+                            <ShieldCheck className="h-3 w-3" />
+                            Certified
+                          </span>
+                        )}
+                        {project.eportalAccess === "yes" && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-100 uppercase tracking-wider">
+                            <Globe className="h-3 w-3" />
+                            E-Portal
                           </span>
                         )}
                       </div>

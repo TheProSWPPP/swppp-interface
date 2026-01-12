@@ -20,6 +20,9 @@ import {
   Trello,
   XCircle,
   Edit2,
+  Zap,
+  Printer,
+  Globe,
 } from "lucide-react";
 import { cn, parseCoordinate, formatWaterwayUrl } from "../utils";
 import {
@@ -213,6 +216,40 @@ v. Landscaping, Drainage & Final Stabilization`,
                 </span>
               )}
               <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2">
+                  {project["24hrTurnaround"] === "yes" && (
+                    <span
+                      className="p-1 rounded-full bg-red-50 text-red-600 border border-red-100 shadow-sm"
+                      title="24hr Turnaround Required"
+                    >
+                      <Zap className="h-3.5 w-3.5" />
+                    </span>
+                  )}
+                  {project.needHardCopy === "yes" && (
+                    <span
+                      className="p-1 rounded-full bg-amber-50 text-amber-600 border border-amber-100 shadow-sm"
+                      title="Hard Copy Needed"
+                    >
+                      <Printer className="h-3.5 w-3.5" />
+                    </span>
+                  )}
+                  {project.certifiedInspection === "yes" && (
+                    <span
+                      className="p-1 rounded-full bg-blue-50 text-blue-600 border border-blue-100 shadow-sm"
+                      title="Certified Inspection Required"
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                    </span>
+                  )}
+                  {project.eportalAccess === "yes" && (
+                    <span
+                      className="p-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-sm"
+                      title="E-Portal Access Required"
+                    >
+                      <Globe className="h-3.5 w-3.5" />
+                    </span>
+                  )}
+                </div>
                 <span
                   className={cn(
                     "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border",
