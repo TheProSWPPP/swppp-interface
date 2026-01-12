@@ -407,7 +407,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                 </div>
                 <div className="md:col-span-2 space-y-2">
                   <label className="text-sm font-medium text-slate-700">
-                    Civil Drawings Link
+                    Civil Drawings Link (by Customer)
                   </label>
                   <input
                     type="text"

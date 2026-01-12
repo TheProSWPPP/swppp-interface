@@ -136,6 +136,10 @@ app.post("/api/projects", async (req, res) => {
   if (!newProject.dateReceived)
     newProject.dateReceived = new Date().toLocaleDateString("en-GB");
 
+  // Map API fields
+  if (newProject.CivilDrawings)
+    newProject.civilDrawingsLink = newProject.CivilDrawings;
+
   if (!process.env.DATABASE_URL) {
     memoryProjects.push(newProject);
     return res.status(201).json(newProject);
