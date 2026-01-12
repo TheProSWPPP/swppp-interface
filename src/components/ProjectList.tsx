@@ -86,6 +86,13 @@ export default function ProjectList({
                         >
                           {project.status || "Draft"}
                         </span>
+                        {new Date().getTime() -
+                          new Date(project.dateReceived).getTime() <
+                          24 * 60 * 60 * 1000 && (
+                          <span className="inline-flex items-center rounded-full bg-blue-600 px-2.5 py-0.5 text-[10px] font-black text-white uppercase tracking-widest shadow-sm shadow-blue-200">
+                            New
+                          </span>
+                        )}
                         {(project.stateTemplateId ||
                           project.stateTemplateName) && (
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1 text-[11px] font-bold text-slate-500 border border-slate-100 uppercase tracking-wider">
