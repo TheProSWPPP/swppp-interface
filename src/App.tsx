@@ -13,10 +13,6 @@ import {
 } from "lucide-react";
 import { cn } from "./utils";
 
-interface BulkDeleteRequest {
-  ids: string[];
-}
-
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
