@@ -95,7 +95,7 @@ export default function ProjectList({
                         )}
                         {(project.stateTemplateId ||
                           project.stateTemplateName) && (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1 text-[11px] font-bold text-slate-500 border border-slate-100 uppercase tracking-wider">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-bold text-indigo-600 border border-indigo-100 uppercase tracking-wider shadow-sm">
                             <FileCode className="h-3 w-3" />
                             {getTemplateName(
                               project.stateTemplateId ||
