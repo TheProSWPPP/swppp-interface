@@ -69,8 +69,8 @@ ii. Site Work & Utilities
 iii. Paving & Foundations
 iv. Building Construction
 v. Landscaping, Drainage & Final Stabilization`,
-      projectDescription:
-        project.projectDescription ||
+      swpppProjectDescription:
+        project.swpppProjectDescription ||
         `This project consists of the construction of a ${project.projectName} facility located in <city>, <county>, <state>.`,
     });
   }, [project]);
@@ -323,20 +323,6 @@ v. Landscaping, Drainage & Final Stabilization`,
                   disabled={isApproved}
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
-                  Sequence of Major Activities
-                </label>
-                <textarea
-                  value={formData.sequenceActivities || ""}
-                  onChange={(e) =>
-                    handleChange("sequenceActivities", e.target.value)
-                  }
-                  rows={6}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 font-mono"
-                  disabled={isApproved}
-                />
-              </div>
 
               <div className="space-y-2 pt-4 border-t border-slate-100">
                 <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
@@ -574,6 +560,39 @@ v. Landscaping, Drainage & Final Stabilization`,
                       Small Construction Site
                     </span>
                   </label>
+                </div>
+              </div>
+
+              <div className="md:col-span-2 space-y-4 pt-4 border-t border-slate-100">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">
+                    SWPPP Document Description
+                  </label>
+                  <textarea
+                    value={formData.swpppProjectDescription || ""}
+                    onChange={(e) =>
+                      handleChange("swpppProjectDescription", e.target.value)
+                    }
+                    rows={3}
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 bg-slate-50/30"
+                    placeholder="This description will appear in the SWPPP document..."
+                    disabled={isApproved}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">
+                    Sequence of Major Activities
+                  </label>
+                  <textarea
+                    value={formData.sequenceActivities || ""}
+                    onChange={(e) =>
+                      handleChange("sequenceActivities", e.target.value)
+                    }
+                    rows={6}
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 font-mono bg-slate-50/30"
+                    disabled={isApproved}
+                  />
                 </div>
               </div>
 

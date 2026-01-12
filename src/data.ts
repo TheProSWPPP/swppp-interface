@@ -34,6 +34,7 @@ export interface Project {
   projectStartDate?: string;
   projectFinishDate?: string;
   projectDescription?: string;
+  swpppProjectDescription?: string;
   sequenceActivities?: string;
   stateTemplateId?: string;
   stateTemplateName?: string;
