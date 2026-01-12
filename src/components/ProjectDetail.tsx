@@ -405,6 +405,21 @@ v. Landscaping, Drainage & Final Stabilization`,
                     disabled={isApproved}
                   />
                 </div>
+                <div className="md:col-span-2 space-y-2">
+                  <label className="text-sm font-medium text-slate-700">
+                    Civil Drawings Link
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.civilDrawingsLink || ""}
+                    onChange={(e) =>
+                      handleChange("civilDrawingsLink", e.target.value)
+                    }
+                    placeholder="https://dropbox.com/path/to/drawings..."
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                    disabled={isApproved}
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">
