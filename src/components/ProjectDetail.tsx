@@ -453,6 +453,24 @@ v. Landscaping, Drainage & Final Stabilization`,
                 />
               </div>
 
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Est. Acres Disturbed
+                </label>
+                <input
+                  type="number"
+                  value={formData.landDisturbanceArea ?? ""}
+                  onChange={(e) =>
+                    handleChange(
+                      "landDisturbanceArea",
+                      parseFloat(e.target.value)
+                    )
+                  }
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  disabled={isApproved}
+                />
+              </div>
+
               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -511,24 +529,6 @@ v. Landscaping, Drainage & Final Stabilization`,
               <ShieldCheck className="h-4 w-4" /> SWPPP Specifics
             </h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
-                  Est. Acres Disturbed
-                </label>
-                <input
-                  type="number"
-                  value={formData.landDisturbanceArea ?? ""}
-                  onChange={(e) =>
-                    handleChange(
-                      "landDisturbanceArea",
-                      parseFloat(e.target.value)
-                    )
-                  }
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
-                  disabled={isApproved}
-                />
-              </div>
-
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">
                   NOI Acknowledgement
