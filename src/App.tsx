@@ -82,14 +82,11 @@ function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
             <div className="flex items-center gap-3">
-              <div className="bg-indigo-600 p-2 rounded-xl shadow-md shadow-indigo-200">
-                <FileText className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h1 className="text-lg font-bold text-slate-900 tracking-tight">
-                  SWPPP<span className="text-indigo-600">Doc</span>
-                </h1>
-              </div>
+              <img
+                src="/logo.webp"
+                alt="Pro SWPPP Logo"
+                className="h-10 w-auto"
+              />
             </div>
             <div className="flex items-center gap-6">
               <nav className="hidden md:flex items-center gap-1">
