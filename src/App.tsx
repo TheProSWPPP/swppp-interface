@@ -5,7 +5,6 @@ import ArchiveList from "./components/ArchiveList";
 import Methodology from "./components/Methodology";
 import SettingsView from "./components/Settings";
 import {
-  FileText,
   LayoutDashboard,
   Archive,
   BookOpen,
