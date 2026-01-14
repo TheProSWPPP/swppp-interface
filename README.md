@@ -23,26 +23,26 @@ Endpoint: `POST /api/projects`
 
 ### **Payload Fields**
 
-| Field                 | Description                             |
-| :-------------------- | :-------------------------------------- |
-| `projectName`         | Name of the project                     |
-| `projectAddress`      | Full address of the site                |
-| `projectStartDate`    | Format: `YYYY-MM-DD`                    |
-| `projectFinishDate`   | Format: `YYYY-MM-DD`                    |
-| `stateTemplateId`     | The ID of the state template            |
-| `stateTemplateName`   | Alternatively, the name (e.g., `TX SM`) |
-| `latitude`            | Decimal latitude                        |
-| `longitude`           | Decimal longitude                       |
-| `state`               | US State (e.g., TX, CA, FL)             |
-| `ms4Operator`         | MS4 Operator Name                       |
-| `countyFips`          | 5-digit FIPS code for county            |
-| `specialRequirements` | Maps to the **Notes** field in the UI   |
-| `landDisturbanceArea` | Estimated acres                         |
-| `civilDrawingsLink`   | Link to the civil drawings              |
-| `companyName`         | Name of the company                     |
-| `contactName`         | Name of the contact person              |
-| `phone`               | Phone number                            |
-| `customerAddress`     | Address of the customer                 |
+| Field                 | Description                              |
+| :-------------------- | :--------------------------------------- |
+| `projectName`         | Name of the project                      |
+| `projectAddress`      | Full address of the site                 |
+| `projectStartDate`    | Format: `YYYY-MM-DD`                     |
+| `projectFinishDate`   | Format: `YYYY-MM-DD`                     |
+| `stateTemplateId`     | The ID of the state template             |
+| `stateTemplateName`   | Alternatively, the name (e.g., `TX SM`)  |
+| `latitude`            | Decimal latitude                         |
+| `longitude`           | Decimal longitude                        |
+| `state`               | State (full name, e.g., Arkansas, Texas) |
+| `ms4Operator`         | MS4 Operator Name                        |
+| `countyFips`          | 5-digit FIPS code for county             |
+| `specialRequirements` | Maps to the **Notes** field in the UI    |
+| `landDisturbanceArea` | Estimated acres                          |
+| `civilDrawingsLink`   | Link to the civil drawings               |
+| `companyName`         | Name of the company                      |
+| `contactName`         | Name of the contact person               |
+| `phone`               | Phone number                             |
+| `customerAddress`     | Address of the customer                  |
 
 ## Database
 
