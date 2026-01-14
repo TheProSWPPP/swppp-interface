@@ -311,6 +311,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   type="text"
                   value={formData.companyName || ""}
                   onChange={(e) => handleChange("companyName", e.target.value)}
+                  onBlur={() => onUpdate(formData)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
                 />
@@ -323,6 +324,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   type="text"
                   value={formData.contactName || ""}
                   onChange={(e) => handleChange("contactName", e.target.value)}
+                  onBlur={() => onUpdate(formData)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
                 />
@@ -335,6 +337,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   type="text"
                   value={formData.phone || ""}
                   onChange={(e) => handleChange("phone", e.target.value)}
+                  onBlur={() => onUpdate(formData)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
                 />
@@ -349,6 +352,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   onChange={(e) =>
                     handleChange("customerAddress", e.target.value)
                   }
+                  onBlur={() => onUpdate(formData)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
                 />
@@ -373,6 +377,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     onChange={(e) =>
                       handleChange("projectAddress", e.target.value)
                     }
+                    onBlur={() => onUpdate(formData)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     disabled={isApproved}
                   />
@@ -387,6 +392,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     onChange={(e) =>
                       handleChange("projectStartDate", e.target.value)
                     }
+                    onBlur={() => onUpdate(formData)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     disabled={isApproved}
                   />
@@ -401,6 +407,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     onChange={(e) =>
                       handleChange("projectFinishDate", e.target.value)
                     }
+                    onBlur={() => onUpdate(formData)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     disabled={isApproved}
                   />
@@ -415,6 +422,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     onChange={(e) =>
                       handleChange("civilDrawingsLink", e.target.value)
                     }
+                    onBlur={() => onUpdate(formData)}
                     placeholder="https://dropbox.com/path/to/drawings..."
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     disabled={isApproved}
@@ -430,6 +438,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   onChange={(e) =>
                     handleChange("projectDescription", e.target.value)
                   }
+                  onBlur={() => onUpdate(formData)}
                   rows={3}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                   disabled={isApproved}
@@ -446,6 +455,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   onChange={(e) =>
                     handleChange("specialRequirements", e.target.value)
                   }
+                  onBlur={() => onUpdate(formData)}
                   rows={4}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 bg-slate-50/50"
                   placeholder="Additional notes from job order..."
@@ -482,6 +492,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     type="text"
                     value={formData.latitude || ""}
                     onChange={(e) => handleChange("latitude", e.target.value)}
+                    onBlur={() => onUpdate(formData)}
                     className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     placeholder="Lat"
                     disabled={isApproved}
@@ -490,6 +501,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     type="text"
                     value={formData.longitude || ""}
                     onChange={(e) => handleChange("longitude", e.target.value)}
+                    onBlur={() => onUpdate(formData)}
                     className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     placeholder="Long"
                     disabled={isApproved}
@@ -505,6 +517,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   type="text"
                   value={formData.state || ""}
                   onChange={(e) => handleChange("state", e.target.value)}
+                  onBlur={() => onUpdate(formData)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   placeholder="e.g., Arkansas, Texas, Florida"
                   disabled={isApproved}
@@ -519,6 +532,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   type="text"
                   value={formData.county || ""}
                   onChange={(e) => handleChange("county", e.target.value)}
+                  onBlur={() => onUpdate(formData)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
                 />
@@ -537,6 +551,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     onChange={(e) =>
                       handleChange("tceqSegment", e.target.value)
                     }
+                    onBlur={() => onUpdate(formData)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                     disabled={isApproved}
                   />
@@ -551,6 +566,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   type="text"
                   value={formData.ms4Operator || ""}
                   onChange={(e) => handleChange("ms4Operator", e.target.value)}
+                  onBlur={() => onUpdate(formData)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
                 />
@@ -574,6 +590,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   type="text"
                   value={formData.waterway || ""}
                   onChange={(e) => handleChange("waterway", e.target.value)}
+                  onBlur={() => onUpdate(formData)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
                 />
@@ -592,6 +609,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                       parseFloat(e.target.value)
                     )
                   }
+                  onBlur={() => onUpdate(formData)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
                 />
@@ -615,6 +633,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                   <textarea
                     value={formData.soilData || ""}
                     onChange={(e) => handleChange("soilData", e.target.value)}
+                    onBlur={() => onUpdate(formData)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 min-h-[80px]"
                     disabled={isApproved}
                   />
@@ -641,6 +660,7 @@ v. Landscaping, Drainage & Final Stabilization`,
                     onChange={(e) =>
                       handleChange("endangeredSpecies", e.target.value)
                     }
+                    onBlur={() => onUpdate(formData)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 min-h-[80px]"
                     disabled={isApproved}
                   />
