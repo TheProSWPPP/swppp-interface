@@ -487,6 +487,10 @@ export function getTemplateColor(templateIdOrName?: string): string {
 }
 
 export function isAutomatedDocument(docName: string): boolean {
-  const automated = ["Job Cover Letter", "Construction Site Notice"];
+  const automated = [
+    "Job Cover Letter",
+    "Construction Site Notice",
+    "Job Order PDF",
+  ];
   return automated.includes(docName);
 }
