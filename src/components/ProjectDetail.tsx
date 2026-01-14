@@ -499,6 +499,20 @@ v. Landscaping, Drainage & Final Stabilization`,
 
               <div className="space-y-3">
                 <label className="text-sm font-medium text-slate-700">
+                  State
+                </label>
+                <input
+                  type="text"
+                  value={formData.state || ""}
+                  onChange={(e) => handleChange("state", e.target.value)}
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  placeholder="e.g., TX, CA, FL"
+                  disabled={isApproved}
+                />
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-slate-700">
                   County
                 </label>
                 <input

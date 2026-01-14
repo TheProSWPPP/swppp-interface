@@ -33,6 +33,7 @@ Endpoint: `POST /api/projects`
 | `stateTemplateName`   | Alternatively, the name (e.g., `TX SM`) |
 | `latitude`            | Decimal latitude                        |
 | `longitude`           | Decimal longitude                       |
+| `state`               | US State (e.g., TX, CA, FL)             |
 | `ms4Operator`         | MS4 Operator Name                       |
 | `countyFips`          | 5-digit FIPS code for county            |
 | `specialRequirements` | Maps to the **Notes** field in the UI   |

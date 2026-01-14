@@ -26,6 +26,7 @@ export interface Project {
   landDisturbanceArea: number;
   tceqSegment?: string;
   county?: string;
+  state?: string;
   ms4Operator?: string;
   noiType?: "Large" | "Small";
   waterbodyImpaired?: boolean;
