@@ -79,6 +79,20 @@ v. Landscaping, Drainage & Final Stabilization`,
     });
   }, [project]);
 
+  // Aggressive Auto-Save: Save changes automatically after 1 second of inactivity
+  useEffect(() => {
+    if (isApproved) return; // Don't auto-save for approved projects
+
+    const timer = setTimeout(() => {
+      // Only save if formData has actually changed from the original project
+      if (JSON.stringify(formData) !== JSON.stringify(project)) {
+        onUpdate(formData);
+      }
+    }, 1000); // Wait 1 second after last change
+
+    return () => clearTimeout(timer);
+  }, [formData, isApproved]); // Trigger whenever formData changes
+
   // Automatic County Extraction
   useEffect(() => {
     if (
