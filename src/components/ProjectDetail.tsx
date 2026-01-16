@@ -66,13 +66,6 @@ export default function ProjectDetail({
   useEffect(() => {
     setFormData({
       ...project,
-      sequenceActivities:
-        project.sequenceActivities ||
-        `i. Implement SWPPP, Site Prep & Mobilization
-ii. Site Work & Utilities
-iii. Paving & Foundations
-iv. Building Construction
-v. Landscaping, Drainage & Final Stabilization`,
       swpppProjectDescription:
         project.swpppProjectDescription ||
         `This project consists of the construction of a ${project.projectName} facility located in <city>, <county>, <state>.`,
@@ -455,6 +448,23 @@ v. Landscaping, Drainage & Final Stabilization`,
                   onBlur={() => onUpdate(formData)}
                   rows={3}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                  disabled={isApproved}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Sequence of Major Activities
+                </label>
+                <textarea
+                  value={formData.sequenceActivities || ""}
+                  onChange={(e) =>
+                    handleChange("sequenceActivities", e.target.value)
+                  }
+                  onBlur={() => onUpdate(formData)}
+                  rows={6}
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 font-mono"
+                  placeholder="e.g., Site prep, utilities, paving, construction, landscaping..."
                   disabled={isApproved}
                 />
               </div>
