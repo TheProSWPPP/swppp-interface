@@ -47,6 +47,7 @@ export default function ProjectDetail({
   onDelete,
 }: ProjectDetailProps) {
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isRetriggering, setIsRetriggering] = useState(false);
   const [formData, setFormData] = useState<Project>(project);
 
   const isPending =
@@ -182,6 +183,8 @@ export default function ProjectDetail({
     )
       return;
 
+    setIsRetriggering(true);
+
     try {
       // Prepare data with only Customer Details and Project Details fields
       const retriggerData = {
@@ -237,6 +240,8 @@ export default function ProjectDetail({
     } catch (error) {
       console.error("Re-trigger failed:", error);
       alert("Error re-triggering project. Please check your connection.");
+    } finally {
+      setIsRetriggering(false);
     }
   };
 
@@ -1005,10 +1010,20 @@ export default function ProjectDetail({
                 <>
                   <button
                     onClick={handleRetrigger}
-                    className="w-full flex items-center justify-center px-4 py-2.5 border border-amber-300 text-sm font-medium rounded-lg text-amber-900 bg-amber-50 hover:bg-amber-100 hover:border-amber-400 transition-all shadow-sm"
+                    disabled={isRetriggering}
+                    className="w-full flex items-center justify-center px-4 py-2.5 border border-amber-300 text-sm font-medium rounded-lg text-amber-900 bg-amber-50 hover:bg-amber-100 hover:border-amber-400 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-sm"
                   >
-                    <Loader2 className="-ml-1 mr-2 h-4 w-4" />
-                    Re-trigger with Corrected Data
+                    {isRetriggering ? (
+                      <>
+                        <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
+                        Regenerating Data...
+                      </>
+                    ) : (
+                      <>
+                        <Loader2 className="-ml-1 mr-2 h-4 w-4" />
+                        Re-trigger with Corrected Data
+                      </>
+                    )}
                   </button>
 
                   <button
@@ -1060,10 +1075,20 @@ export default function ProjectDetail({
 
                   <button
                     onClick={handleRetrigger}
-                    className="w-full flex items-center justify-center px-4 py-2.5 border border-amber-300 text-sm font-medium rounded-lg text-amber-900 bg-amber-50 hover:bg-amber-100 hover:border-amber-400 transition-all shadow-sm"
+                    disabled={isRetriggering}
+                    className="w-full flex items-center justify-center px-4 py-2.5 border border-amber-300 text-sm font-medium rounded-lg text-amber-900 bg-amber-50 hover:bg-amber-100 hover:border-amber-400 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-sm"
                   >
-                    <Loader2 className="-ml-1 mr-2 h-4 w-4" />
-                    Re-trigger Generation
+                    {isRetriggering ? (
+                      <>
+                        <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
+                        Regenerating Data...
+                      </>
+                    ) : (
+                      <>
+                        <Loader2 className="-ml-1 mr-2 h-4 w-4" />
+                        Re-trigger Generation
+                      </>
+                    )}
                   </button>
                 </>
               )}
