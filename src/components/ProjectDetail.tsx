@@ -551,6 +551,26 @@ export default function ProjectDetail({
                   disabled={isApproved}
                 />
               </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Est. Acres Disturbed
+                </label>
+                <input
+                  type="number"
+                  value={formData.landDisturbanceArea ?? ""}
+                  onChange={(e) =>
+                    handleChange(
+                      "landDisturbanceArea",
+                      parseFloat(e.target.value)
+                    )
+                  }
+                  onBlur={() => onUpdate(formData)}
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  placeholder="e.g., 2.5"
+                  disabled={isApproved}
+                />
+              </div>
             </div>
           </div>
 
@@ -679,25 +699,6 @@ export default function ProjectDetail({
                   type="text"
                   value={formData.waterway || ""}
                   onChange={(e) => handleChange("waterway", e.target.value)}
-                  onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
-                  disabled={isApproved}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
-                  Est. Acres Disturbed
-                </label>
-                <input
-                  type="number"
-                  value={formData.landDisturbanceArea ?? ""}
-                  onChange={(e) =>
-                    handleChange(
-                      "landDisturbanceArea",
-                      parseFloat(e.target.value)
-                    )
-                  }
                   onBlur={() => onUpdate(formData)}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
                   disabled={isApproved}
