@@ -216,11 +216,19 @@ export default function ProjectDetail({
       );
 
       if (response.ok) {
+        const regeneratedData = await response.json();
+
+        // Update project with all regenerated data from n8n
+        // This includes environmental data, coordinates, etc.
+        onUpdate({
+          ...formData,
+          ...regeneratedData,
+          status: "Pending Review", // Keep as Pending Review for manual approval
+        });
+
         alert(
-          "Project re-triggered successfully! Data regeneration in progress..."
+          "Project data regenerated successfully! Please review the updated information before approving."
         );
-        // Keep the current status - don't change to Processing/Ready
-        // The webhook will handle regenerating the environmental data
       } else {
         alert("Failed to re-trigger project. Please try again.");
       }
