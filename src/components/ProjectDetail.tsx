@@ -187,6 +187,7 @@ export default function ProjectDetail({
       const retriggerData = {
         projectName: formData.projectName,
         email: formData.email,
+        dateReceived: formData.dateReceived,
         stateTemplateId: formData.stateTemplateId,
         stateTemplateName: formData.stateTemplateName,
         // Customer Details
