@@ -202,6 +202,7 @@ export default function ProjectDetail({
         projectDescription: formData.projectDescription,
         sequenceActivities: formData.sequenceActivities,
         specialRequirements: formData.specialRequirements,
+        landDisturbanceArea: formData.landDisturbanceArea,
       };
 
       const response = await fetch(
