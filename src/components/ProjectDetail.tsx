@@ -216,12 +216,11 @@ export default function ProjectDetail({
       );
 
       if (response.ok) {
-        alert("Project re-triggered successfully! Generation in progress...");
-        // Update local state to show it's processing
-        onUpdate({
-          ...formData,
-          status: "Processing",
-        });
+        alert(
+          "Project re-triggered successfully! Data regeneration in progress..."
+        );
+        // Keep the current status - don't change to Processing/Ready
+        // The webhook will handle regenerating the environmental data
       } else {
         alert("Failed to re-trigger project. Please try again.");
       }
