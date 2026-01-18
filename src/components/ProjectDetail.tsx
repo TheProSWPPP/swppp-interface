@@ -183,30 +183,25 @@ export default function ProjectDetail({
       return;
 
     try {
-      // Prepare data with only editable fields (no auto-generated content)
+      // Prepare data with only Customer Details and Project Details fields
       const retriggerData = {
         projectName: formData.projectName,
-        projectAddress: formData.projectAddress,
-        projectStartDate: formData.projectStartDate,
-        projectFinishDate: formData.projectFinishDate,
-        projectDescription: formData.projectDescription,
-        sequenceActivities: formData.sequenceActivities,
-        civilDrawingsLink: formData.civilDrawingsLink,
-        specialRequirements: formData.specialRequirements,
+        email: formData.email,
+        stateTemplateId: formData.stateTemplateId,
+        stateTemplateName: formData.stateTemplateName,
+        // Customer Details
         companyName: formData.companyName,
         contactName: formData.contactName,
         phone: formData.phone,
         customerAddress: formData.customerAddress,
-        email: formData.email,
-        latitude: formData.latitude,
-        longitude: formData.longitude,
-        state: formData.state,
-        county: formData.county,
-        landDisturbanceArea: formData.landDisturbanceArea,
-        stateTemplateId: formData.stateTemplateId,
-        stateTemplateName: formData.stateTemplateName,
-        dueDate: formData.dueDate,
-        projectId: formData.id,
+        // Project Details
+        projectAddress: formData.projectAddress,
+        projectStartDate: formData.projectStartDate,
+        projectFinishDate: formData.projectFinishDate,
+        civilDrawingsLink: formData.civilDrawingsLink,
+        projectDescription: formData.projectDescription,
+        sequenceActivities: formData.sequenceActivities,
+        specialRequirements: formData.specialRequirements,
       };
 
       const response = await fetch(
