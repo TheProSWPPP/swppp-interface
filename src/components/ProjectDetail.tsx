@@ -174,6 +174,68 @@ export default function ProjectDetail({
     }
   };
 
+  const handleRetrigger = async () => {
+    if (
+      !confirm(
+        "This will re-trigger the project generation with updated details. Continue?"
+      )
+    )
+      return;
+
+    try {
+      // Prepare data with only editable fields (no auto-generated content)
+      const retriggerData = {
+        projectName: formData.projectName,
+        projectAddress: formData.projectAddress,
+        projectStartDate: formData.projectStartDate,
+        projectFinishDate: formData.projectFinishDate,
+        projectDescription: formData.projectDescription,
+        sequenceActivities: formData.sequenceActivities,
+        civilDrawingsLink: formData.civilDrawingsLink,
+        specialRequirements: formData.specialRequirements,
+        companyName: formData.companyName,
+        contactName: formData.contactName,
+        phone: formData.phone,
+        customerAddress: formData.customerAddress,
+        email: formData.email,
+        latitude: formData.latitude,
+        longitude: formData.longitude,
+        state: formData.state,
+        county: formData.county,
+        landDisturbanceArea: formData.landDisturbanceArea,
+        stateTemplateId: formData.stateTemplateId,
+        stateTemplateName: formData.stateTemplateName,
+        dueDate: formData.dueDate,
+        projectId: formData.id,
+      };
+
+      const response = await fetch(
+        "https://proswppp.app.n8n.cloud/webhook/re-trigger",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(retriggerData),
+        }
+      );
+
+      if (response.ok) {
+        alert("Project re-triggered successfully! Generation in progress...");
+        // Update local state to show it's processing
+        onUpdate({
+          ...formData,
+          status: "Processing",
+        });
+      } else {
+        alert("Failed to re-trigger project. Please try again.");
+      }
+    } catch (error) {
+      console.error("Re-trigger failed:", error);
+      alert("Error re-triggering project. Please check your connection.");
+    }
+  };
+
   return (
     <div className="bg-white shadow-sm rounded-2xl border border-slate-200 overflow-hidden">
       {/* Header */}
@@ -960,25 +1022,35 @@ export default function ProjectDetail({
               )}
 
               {(isApproved || isManual) && (
-                <div
-                  className={cn(
-                    "flex items-center justify-center p-3 rounded-lg border font-medium text-sm",
-                    isManual
-                      ? "bg-orange-50 text-orange-700 border-orange-200"
-                      : "bg-green-50 text-green-700 border-green-200"
-                  )}
-                >
-                  {isManual ? (
-                    <>
-                      <AlertTriangle className="h-4 w-4 mr-2" /> Manual
-                      Processing
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="h-4 w-4 mr-2" /> Approved
-                    </>
-                  )}
-                </div>
+                <>
+                  <div
+                    className={cn(
+                      "flex items-center justify-center p-3 rounded-lg border font-medium text-sm",
+                      isManual
+                        ? "bg-orange-50 text-orange-700 border-orange-200"
+                        : "bg-green-50 text-green-700 border-green-200"
+                    )}
+                  >
+                    {isManual ? (
+                      <>
+                        <AlertTriangle className="h-4 w-4 mr-2" /> Manual
+                        Processing
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="h-4 w-4 mr-2" /> Approved
+                      </>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleRetrigger}
+                    className="w-full flex items-center justify-center px-4 py-2.5 border border-amber-300 text-sm font-medium rounded-lg text-amber-900 bg-amber-50 hover:bg-amber-100 hover:border-amber-400 transition-all shadow-sm"
+                  >
+                    <Loader2 className="-ml-1 mr-2 h-4 w-4" />
+                    Re-trigger Generation
+                  </button>
+                </>
               )}
             </div>
           </div>
