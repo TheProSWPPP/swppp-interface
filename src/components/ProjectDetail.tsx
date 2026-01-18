@@ -992,28 +992,38 @@ export default function ProjectDetail({
               )}
 
               {canApprove && !isApproved && !isNew && (
-                <button
-                  onClick={handleApprove}
-                  disabled={
-                    isGenerating ||
-                    (!formData.plansUploaded && !formData.isIndustrial)
-                  }
-                  className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-500/20 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-indigo-600/20"
-                >
-                  {isGenerating ? (
-                    <>
-                      <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="-ml-1 mr-2 h-4 w-4" />
-                      {formData.isIndustrial
-                        ? "Confirm Manual Processing"
-                        : "Approve & Generate"}
-                    </>
-                  )}
-                </button>
+                <>
+                  <button
+                    onClick={handleRetrigger}
+                    className="w-full flex items-center justify-center px-4 py-2.5 border border-amber-300 text-sm font-medium rounded-lg text-amber-900 bg-amber-50 hover:bg-amber-100 hover:border-amber-400 transition-all shadow-sm"
+                  >
+                    <Loader2 className="-ml-1 mr-2 h-4 w-4" />
+                    Re-trigger with Corrected Data
+                  </button>
+
+                  <button
+                    onClick={handleApprove}
+                    disabled={
+                      isGenerating ||
+                      (!formData.plansUploaded && !formData.isIndustrial)
+                    }
+                    className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-500/20 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-indigo-600/20"
+                  >
+                    {isGenerating ? (
+                      <>
+                        <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="-ml-1 mr-2 h-4 w-4" />
+                        {formData.isIndustrial
+                          ? "Confirm Manual Processing"
+                          : "Approve & Generate"}
+                      </>
+                    )}
+                  </button>
+                </>
               )}
 
               {(isApproved || isManual) && (
