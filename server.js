@@ -130,8 +130,8 @@ app.get("/api/projects", async (req, res) => {
 app.post("/api/projects", async (req, res) => {
   const newProject = req.body;
   if (!newProject.id) newProject.id = Date.now().toString();
-  // FORCE status to Pending Review regardless of payload for new creations
-  newProject.status = "Pending Review";
+  // Default to "New" status if not provided (allows external webhooks to set their own status)
+  if (!newProject.status) newProject.status = "New";
   if (!newProject.projectName) newProject.projectName = "Untitled Project";
   if (!newProject.dateReceived)
     newProject.dateReceived = new Date().toLocaleDateString("en-GB");
