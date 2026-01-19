@@ -138,12 +138,64 @@ app.post("/api/projects", async (req, res) => {
   // Default to "New" status if not provided (allows external webhooks to set their own status)
   if (!newProject.status) newProject.status = "New";
   if (!newProject.projectName) newProject.projectName = "Untitled Project";
+
+  // Convert date to MM/DD/YY format
+  const convertToMMDDYY = (dateStr) => {
+    if (!dateStr) return "";
+    // If already MM/DD/YY, return as is
+    if (/^\d{1,2}\/\d{1,2}\/\d{2}$/.test(dateStr)) return dateStr;
+
+    try {
+      let date;
+      // Handle DD/MM/YYYY or DD/MM/YY
+      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(dateStr)) {
+        const parts = dateStr.split("/");
+        // If first part > 12, assume DD/MM/YYYY
+        if (parseInt(parts[0]) > 12) {
+          const day = parseInt(parts[0]);
+          const month = parseInt(parts[1]) - 1;
+          const year =
+            parts[2].length === 2
+              ? 2000 + parseInt(parts[2])
+              : parseInt(parts[2]);
+          date = new Date(year, month, day);
+        } else {
+          // Already MM/DD format, parse normally
+          date = new Date(dateStr);
+        }
+      } else {
+        date = new Date(dateStr);
+      }
+
+      if (isNaN(date.getTime())) return dateStr;
+
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      const year = String(date.getFullYear()).slice(-2);
+      return `${month}/${day}/${year}`;
+    } catch {
+      return dateStr;
+    }
+  };
+
   if (!newProject.dateReceived) {
     const now = new Date();
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
     const year = String(now.getFullYear()).slice(-2);
     newProject.dateReceived = `${month}/${day}/${year}`;
+  } else {
+    newProject.dateReceived = convertToMMDDYY(newProject.dateReceived);
+  }
+
+  // Convert other date fields
+  if (newProject.projectStartDate) {
+    newProject.projectStartDate = convertToMMDDYY(newProject.projectStartDate);
+  }
+  if (newProject.projectFinishDate) {
+    newProject.projectFinishDate = convertToMMDDYY(
+      newProject.projectFinishDate
+    );
   }
 
   // Add creation timestamp

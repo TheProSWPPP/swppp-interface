@@ -32,6 +32,7 @@ export interface Project {
   waterbodyImpaired?: boolean;
   bestManagementPractices?: string[];
   projectAddress?: string;
+  city?: string;
   projectStartDate?: string;
   projectFinishDate?: string;
   projectDescription?: string;

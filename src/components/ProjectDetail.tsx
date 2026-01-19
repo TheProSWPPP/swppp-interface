@@ -192,7 +192,7 @@ export default function ProjectDetail({
     setIsRetriggering(true);
 
     try {
-      // Prepare data with only Customer Details and Project Details fields
+      // Prepare data with Customer Details and Project Details fields
       const retriggerData = {
         projectName: formData.projectName,
         email: formData.email,
@@ -206,6 +206,7 @@ export default function ProjectDetail({
         customerAddress: formData.customerAddress,
         // Project Details
         projectAddress: formData.projectAddress,
+        city: formData.city,
         projectStartDate: formData.projectStartDate,
         projectFinishDate: formData.projectFinishDate,
         civilDrawingsLink: formData.civilDrawingsLink,
@@ -441,6 +442,19 @@ export default function ProjectDetail({
                   disabled={isApproved}
                 />
               </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={formData.email || ""}
+                  onChange={(e) => handleChange("email", e.target.value)}
+                  onBlur={() => onUpdate(formData)}
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  disabled={isApproved}
+                />
+              </div>
             </div>
           </div>
 
@@ -451,7 +465,7 @@ export default function ProjectDetail({
             </h4>
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
+                <div className="md:col-span-2 space-y-2">
                   <label className="text-sm font-medium text-slate-700">
                     Project Address
                   </label>
@@ -463,6 +477,20 @@ export default function ProjectDetail({
                     }
                     onBlur={() => onUpdate(formData)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                    disabled={isApproved}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">
+                    City
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.city || ""}
+                    onChange={(e) => handleChange("city", e.target.value)}
+                    onBlur={() => onUpdate(formData)}
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                    placeholder="e.g., Chalmette"
                     disabled={isApproved}
                   />
                 </div>
