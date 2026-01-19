@@ -138,8 +138,13 @@ app.post("/api/projects", async (req, res) => {
   // Default to "New" status if not provided (allows external webhooks to set their own status)
   if (!newProject.status) newProject.status = "New";
   if (!newProject.projectName) newProject.projectName = "Untitled Project";
-  if (!newProject.dateReceived)
-    newProject.dateReceived = new Date().toLocaleDateString("en-GB");
+  if (!newProject.dateReceived) {
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    const year = String(now.getFullYear()).slice(-2);
+    newProject.dateReceived = `${month}/${day}/${year}`;
+  }
 
   // Add creation timestamp
   if (!newProject.createdAt) newProject.createdAt = new Date().toISOString();

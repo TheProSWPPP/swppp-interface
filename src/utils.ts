@@ -5,6 +5,23 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function formatDate(dateStr: string): string {
+  try {
+    // If already in MM/DD/YY format, return as is
+    if (/^\d{1,2}\/\d{1,2}\/\d{2}$/.test(dateStr)) {
+      return dateStr;
+    }
+
+    const date = new Date(dateStr);
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const year = String(date.getFullYear()).slice(-2);
+    return `${month}/${day}/${year}`;
+  } catch (e) {
+    return dateStr;
+  }
+}
+
 export function formatGeorgiaTime(dateStr: string): string {
   try {
     // If the input date doesn't include a timezone, assume it's UTC

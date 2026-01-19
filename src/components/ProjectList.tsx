@@ -13,7 +13,7 @@ import {
   ShieldCheck,
   Globe,
 } from "lucide-react";
-import { cn, formatGeorgiaTime } from "../utils";
+import { cn, formatDate } from "../utils";
 import { getTemplateName } from "../templates";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -236,7 +236,7 @@ export default function ProjectList({
                         <Calendar className="h-4 w-4" />
                       </div>
                       <span className="font-medium tracking-tight">
-                        {formatGeorgiaTime(project.dateReceived)}
+                        {formatDate(project.dateReceived)}
                       </span>
                     </div>
                   </div>
