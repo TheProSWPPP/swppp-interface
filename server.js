@@ -124,7 +124,7 @@ app.get("/api/projects", async (req, res) => {
     );
 
     const result = await pool.query(
-      "SELECT data FROM projects WHERE archived = FALSE ORDER BY (data->>'dateReceived') DESC"
+      "SELECT data FROM projects WHERE archived = FALSE ORDER BY id DESC"
     );
     res.json(result.rows.map((r) => r.data));
   } catch (err) {
@@ -140,6 +140,9 @@ app.post("/api/projects", async (req, res) => {
   if (!newProject.projectName) newProject.projectName = "Untitled Project";
   if (!newProject.dateReceived)
     newProject.dateReceived = new Date().toLocaleDateString("en-GB");
+
+  // Add creation timestamp
+  if (!newProject.createdAt) newProject.createdAt = new Date().toISOString();
 
   // Map API fields
   if (newProject.CivilDrawings)
