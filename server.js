@@ -35,8 +35,13 @@ console.log(
 );
 
 app.use((req, res, next) => {
-  // Skip auth for health check
-  if (req.path === "/health") return next();
+  // Skip auth for health check and external webhook endpoints
+  if (
+    req.path === "/health" ||
+    (req.path === "/api/projects" && req.method === "POST")
+  ) {
+    return next();
+  }
 
   const authHeader = req.headers.authorization || "";
   if (authHeader.startsWith("Basic ")) {
