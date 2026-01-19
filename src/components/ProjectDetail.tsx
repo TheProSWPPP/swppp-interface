@@ -93,12 +93,12 @@ export default function ProjectDetail({
     return () => clearTimeout(timer);
   }, [formData, isApproved]); // Trigger whenever formData changes
 
-  // Automatic County Extraction
+  // Automatic County and City Extraction
   useEffect(() => {
     if (
       !formData.latitude ||
       !formData.longitude ||
-      formData.county ||
+      (formData.county && formData.city) ||
       isApproved
     )
       return;
@@ -114,11 +114,31 @@ export default function ProjectDetail({
       )
         .then((res) => res.json())
         .then((data) => {
-          if (data.address && data.address.county) {
-            handleChange("county", data.address.county.replace(" County", ""));
+          if (data.address) {
+            // Extract county
+            if (data.address.county && !formData.county) {
+              handleChange(
+                "county",
+                data.address.county.replace(" County", ""),
+              );
+            }
+
+            // Extract city (try multiple fields as they vary by location)
+            if (!formData.city) {
+              const city =
+                data.address.city ||
+                data.address.town ||
+                data.address.village ||
+                data.address.municipality ||
+                data.address.hamlet;
+
+              if (city) {
+                handleChange("city", city);
+              }
+            }
           }
         })
-        .catch((err) => console.error("County lookup failed:", err));
+        .catch((err) => console.error("Location lookup failed:", err));
     }, 1000); // Debounce to avoid hitting rate limits
 
     return () => clearTimeout(timer);
