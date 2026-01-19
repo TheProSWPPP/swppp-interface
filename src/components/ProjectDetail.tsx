@@ -110,7 +110,7 @@ export default function ProjectDetail({
 
     const timer = setTimeout(() => {
       fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`,
       )
         .then((res) => res.json())
         .then((data) => {
@@ -184,7 +184,7 @@ export default function ProjectDetail({
   const handleRetrigger = async () => {
     if (
       !confirm(
-        "This will re-trigger the project generation with updated details. Continue?"
+        "This will re-trigger the project generation with updated details. Continue?",
       )
     )
       return;
@@ -224,7 +224,7 @@ export default function ProjectDetail({
             "Content-Type": "application/json",
           },
           body: JSON.stringify(retriggerData),
-        }
+        },
       );
 
       if (response.ok) {
@@ -239,7 +239,7 @@ export default function ProjectDetail({
         });
 
         alert(
-          "Project data regenerated successfully! Please review the updated information before approving."
+          "Project data regenerated successfully! Please review the updated information before approving.",
         );
       } else {
         alert("Failed to re-trigger project. Please try again.");
@@ -290,13 +290,13 @@ export default function ProjectDetail({
                   className={cn(
                     "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold border shadow-sm transition-all",
                     getTemplateColor(
-                      project.stateTemplateId || project.stateTemplateName
-                    )
+                      project.stateTemplateId || project.stateTemplateName,
+                    ),
                   )}
                 >
                   <FileCode className="h-3 w-3" />
                   {getTemplateName(
-                    project.stateTemplateId || project.stateTemplateName
+                    project.stateTemplateId || project.stateTemplateName,
                   )}
                 </span>
               )}
@@ -341,14 +341,14 @@ export default function ProjectDetail({
                     project.status === "Approved for Generation"
                       ? "bg-purple-50 text-purple-700 border-purple-200"
                       : project.status === "Complete"
-                      ? "bg-green-50 text-green-700 border-green-200"
-                      : project.status === "Manual Processing"
-                      ? "bg-orange-50 text-orange-700 border-orange-200"
-                      : project.status === "Ready"
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                      : project.status === "New"
-                      ? "bg-slate-100 text-slate-700 border-slate-200"
-                      : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                        ? "bg-green-50 text-green-700 border-green-200"
+                        : project.status === "Manual Processing"
+                          ? "bg-orange-50 text-orange-700 border-orange-200"
+                          : project.status === "Ready"
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : project.status === "New"
+                              ? "bg-slate-100 text-slate-700 border-slate-200"
+                              : "bg-indigo-50 text-indigo-700 border-indigo-200",
                   )}
                 >
                   {project.status || "Draft"}
@@ -482,20 +482,6 @@ export default function ProjectDetail({
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">
-                    City
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.city || ""}
-                    onChange={(e) => handleChange("city", e.target.value)}
-                    onBlur={() => onUpdate(formData)}
-                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
-                    placeholder="e.g., Chalmette"
-                    disabled={isApproved}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
                     Start Date
                   </label>
                   <input
@@ -504,7 +490,7 @@ export default function ProjectDetail({
                     onChange={(e) =>
                       handleChange(
                         "projectStartDate",
-                        fromDateInputFormat(e.target.value)
+                        fromDateInputFormat(e.target.value),
                       )
                     }
                     onBlur={() => onUpdate(formData)}
@@ -522,7 +508,7 @@ export default function ProjectDetail({
                     onChange={(e) =>
                       handleChange(
                         "projectFinishDate",
-                        fromDateInputFormat(e.target.value)
+                        fromDateInputFormat(e.target.value),
                       )
                     }
                     onBlur={() => onUpdate(formData)}
@@ -608,7 +594,7 @@ export default function ProjectDetail({
                   onChange={(e) =>
                     handleChange(
                       "landDisturbanceArea",
-                      parseFloat(e.target.value)
+                      parseFloat(e.target.value),
                     )
                   }
                   onBlur={() => onUpdate(formData)}
@@ -633,7 +619,7 @@ export default function ProjectDetail({
                   </label>
                   <a
                     href={`https://www.google.com/maps?q=${parseCoordinate(
-                      formData.latitude
+                      formData.latitude,
                     )},${parseCoordinate(formData.longitude)}`}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -693,8 +679,23 @@ export default function ProjectDetail({
                 />
               </div>
 
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-slate-700">
+                  City
+                </label>
+                <input
+                  type="text"
+                  value={formData.city || ""}
+                  onChange={(e) => handleChange("city", e.target.value)}
+                  onBlur={() => onUpdate(formData)}
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  placeholder="e.g., Chalmette"
+                  disabled={isApproved}
+                />
+              </div>
+
               {getTemplateName(
-                project.stateTemplateId || project.stateTemplateName
+                project.stateTemplateId || project.stateTemplateName,
               )?.includes("Texas") && (
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">
@@ -931,7 +932,7 @@ export default function ProjectDetail({
                     "p-2 rounded-xl transition-all border",
                     project.folderLink
                       ? "text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-100"
-                      : "text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed"
+                      : "text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed",
                   )}
                   title="Dropbox Folder"
                   onClick={(e) => !project.folderLink && e.preventDefault()}
@@ -945,7 +946,7 @@ export default function ProjectDetail({
                     "p-2 rounded-xl transition-all border",
                     project.trelloLink
                       ? "text-[#0079BF] bg-blue-50 border-blue-100 hover:bg-blue-100"
-                      : "text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed"
+                      : "text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed",
                   )}
                   title="Trello Card"
                   onClick={(e) => !project.trelloLink && e.preventDefault()}
@@ -963,10 +964,10 @@ export default function ProjectDetail({
               isApproved
                 ? "bg-white border-green-200 ring-1 ring-green-500/10"
                 : isManual
-                ? "bg-white border-orange-200 ring-1 ring-orange-500/10"
-                : isNew
-                ? "bg-white border-slate-200"
-                : "bg-white border-indigo-200 ring-1 ring-indigo-500/10"
+                  ? "bg-white border-orange-200 ring-1 ring-orange-500/10"
+                  : isNew
+                    ? "bg-white border-slate-200"
+                    : "bg-white border-indigo-200 ring-1 ring-indigo-500/10",
             )}
           >
             {/* Status Indicator Bar */}
@@ -976,10 +977,10 @@ export default function ProjectDetail({
                 isApproved
                   ? "bg-green-500"
                   : isManual
-                  ? "bg-orange-500"
-                  : isNew
-                  ? "bg-slate-500"
-                  : "bg-indigo-500"
+                    ? "bg-orange-500"
+                    : isNew
+                      ? "bg-slate-500"
+                      : "bg-indigo-500",
               )}
             />
 
@@ -990,10 +991,10 @@ export default function ProjectDetail({
               {isApproved
                 ? "Documents queued for generation. Downloads available below."
                 : isManual
-                ? "Marked for manual processing. Handled outside system."
-                : isNew
-                ? "Review request details. Accept to process or delete if invalid."
-                : "Review accuracy. Approve to trigger generation."}
+                  ? "Marked for manual processing. Handled outside system."
+                  : isNew
+                    ? "Review request details. Accept to process or delete if invalid."
+                    : "Review accuracy. Approve to trigger generation."}
             </p>
 
             <div className="space-y-4">
@@ -1098,7 +1099,7 @@ export default function ProjectDetail({
                       "flex items-center justify-center p-3 rounded-lg border font-medium text-sm",
                       isManual
                         ? "bg-orange-50 text-orange-700 border-orange-200"
-                        : "bg-green-50 text-green-700 border-green-200"
+                        : "bg-green-50 text-green-700 border-green-200",
                     )}
                   >
                     {isManual ? (
@@ -1143,7 +1144,7 @@ export default function ProjectDetail({
             <div className="space-y-2">
               {[
                 ...getDocumentsForTemplate(
-                  project.stateTemplateId || project.stateTemplateName
+                  project.stateTemplateId || project.stateTemplateName,
                 ),
                 "Job Order PDF",
               ].map((doc) => {
@@ -1157,13 +1158,13 @@ export default function ProjectDetail({
                   doc === "Job Order PDF"
                     ? project.jobOrderLink
                     : isProjectReady
-                    ? "#" // Placeholder for ready documents
-                    : null;
+                      ? "#" // Placeholder for ready documents
+                      : null;
 
                 const isClickable = !!docLink;
                 const templateLink = getTemplateDocLink(
                   project.stateTemplateId || project.stateTemplateName,
-                  doc
+                  doc,
                 );
 
                 return (
@@ -1173,7 +1174,7 @@ export default function ProjectDetail({
                       "flex flex-col border rounded-xl transition-all overflow-hidden",
                       isClickable
                         ? "bg-white border-slate-200 shadow-sm"
-                        : "bg-slate-50 border-slate-200 opacity-80"
+                        : "bg-slate-50 border-slate-200 opacity-80",
                     )}
                   >
                     <a
@@ -1182,7 +1183,7 @@ export default function ProjectDetail({
                       rel={docLink ? "noopener noreferrer" : undefined}
                       className={cn(
                         "flex items-center p-3 group relative",
-                        isClickable ? "cursor-pointer" : "cursor-default"
+                        isClickable ? "cursor-pointer" : "cursor-default",
                       )}
                       onClick={(e) => !isClickable && e.preventDefault()}
                     >
@@ -1191,7 +1192,7 @@ export default function ProjectDetail({
                           "h-8 w-8 rounded-lg flex items-center justify-center mr-3 transition-colors",
                           isClickable
                             ? "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"
-                            : "bg-slate-200 text-slate-500"
+                            : "bg-slate-200 text-slate-500",
                         )}
                       >
                         <FileText className="h-4 w-4" />
@@ -1202,7 +1203,7 @@ export default function ProjectDetail({
                             "text-sm font-medium transition-colors",
                             isClickable
                               ? "text-slate-700 group-hover:text-indigo-600"
-                              : "text-slate-500"
+                              : "text-slate-500",
                           )}
                         >
                           {doc}{" "}
