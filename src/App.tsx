@@ -21,9 +21,8 @@ function App() {
 
   const fetchProjects = () => {
     setIsLoading(true);
-    const authHeader = "Basic " + btoa("admin:swppp2026");
     fetch("/api/projects", {
-      headers: { Authorization: authHeader },
+      credentials: "include",
     })
       .then((res) => res.json())
       .then((data) => {
@@ -42,16 +41,15 @@ function App() {
 
   const handleUpdateProject = (updatedProject: Project) => {
     setProjects((prev) =>
-      prev.map((p) => (p.id === updatedProject.id ? updatedProject : p))
+      prev.map((p) => (p.id === updatedProject.id ? updatedProject : p)),
     );
 
-    const authHeader = "Basic " + btoa("admin:swppp2026");
     fetch(`/api/projects/${updatedProject.id}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        Authorization: authHeader,
       },
+      credentials: "include",
       body: JSON.stringify(updatedProject),
     }).catch((err) => console.error("Failed to update project:", err));
   };
@@ -59,23 +57,21 @@ function App() {
   const handleDeleteProject = (projectId: string) => {
     setProjects((prev) => prev.filter((p) => p.id !== projectId));
 
-    const authHeader = "Basic " + btoa("admin:swppp2026");
     fetch(`/api/projects/${projectId}`, {
       method: "DELETE",
-      headers: { Authorization: authHeader },
+      credentials: "include",
     }).catch((err) => console.error("Failed to delete project:", err));
   };
 
   const handleBulkDeleteProjects = (projectIds: string[]) => {
     setProjects((prev) => prev.filter((p) => !projectIds.includes(p.id)));
 
-    const authHeader = "Basic " + btoa("admin:swppp2026");
     fetch("/api/projects/delete", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: authHeader,
       },
+      credentials: "include",
       body: JSON.stringify({ ids: projectIds }),
     }).catch((err) => console.error("Failed to bulk delete projects:", err));
   };
@@ -108,7 +104,7 @@ function App() {
                     "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
                     view === "dashboard"
                       ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
-                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50",
                   )}
                 >
                   <LayoutDashboard className="h-4 w-4" />
@@ -120,7 +116,7 @@ function App() {
                     "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
                     view === "archive"
                       ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
-                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50",
                   )}
                 >
                   <Archive className="h-4 w-4" />
@@ -132,7 +128,7 @@ function App() {
                     "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
                     view === "methodology"
                       ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
-                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50",
                   )}
                 >
                   <BookOpen className="h-4 w-4" />
@@ -144,7 +140,7 @@ function App() {
                     "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
                     view === "settings"
                       ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
-                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50",
                   )}
                 >
                   <SettingsIcon className="h-4 w-4" />
