@@ -34,28 +34,39 @@ export function toDateInputFormat(dateStr: string | undefined): string {
 
     let date: Date;
 
-    // Handle DD/MM/YYYY or DD/MM/YY format
+    // Handle slash-separated dates
     if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(dateStr)) {
       const parts = dateStr.split("/");
+      const part0 = parseInt(parts[0]);
+      const part1 = parseInt(parts[1]);
+      const part2 = parts[2];
+
       let day, month, year;
 
-      // Check if it's DD/MM/YYYY or MM/DD/YY
-      if (parseInt(parts[0]) > 12) {
-        // First part > 12, must be DD/MM/YYYY
-        day = parseInt(parts[0]);
-        month = parseInt(parts[1]) - 1;
-        year =
-          parts[2].length === 2
-            ? 2000 + parseInt(parts[2])
-            : parseInt(parts[2]);
+      // Determine format based on values and year length
+      if (part2.length === 4) {
+        // Four-digit year - likely DD/MM/YYYY format
+        if (part0 > 12) {
+          // First part > 12, must be DD/MM/YYYY
+          day = part0;
+          month = part1 - 1;
+          year = parseInt(part2);
+        } else if (part1 > 12) {
+          // Second part > 12, must be MM/DD/YYYY
+          month = part0 - 1;
+          day = part1;
+          year = parseInt(part2);
+        } else {
+          // Ambiguous - assume DD/MM/YYYY (international standard)
+          day = part0;
+          month = part1 - 1;
+          year = parseInt(part2);
+        }
       } else {
-        // Assume MM/DD/YY or MM/DD/YYYY
-        month = parseInt(parts[0]) - 1;
-        day = parseInt(parts[1]);
-        year =
-          parts[2].length === 2
-            ? 2000 + parseInt(parts[2])
-            : parseInt(parts[2]);
+        // Two-digit year - assume MM/DD/YY (US format)
+        month = part0 - 1;
+        day = part1;
+        year = 2000 + parseInt(part2);
       }
 
       date = new Date(year, month, day);
@@ -117,7 +128,7 @@ export function formatGeorgiaTime(dateStr: string): string {
 }
 
 export function parseCoordinate(
-  coord: string | number | undefined | null
+  coord: string | number | undefined | null,
 ): string {
   if (!coord) return "0";
   const coordStr = String(coord);
