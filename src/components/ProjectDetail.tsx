@@ -24,7 +24,13 @@ import {
   Printer,
   Globe,
 } from "lucide-react";
-import { cn, parseCoordinate, formatWaterwayUrl } from "../utils";
+import {
+  cn,
+  parseCoordinate,
+  formatWaterwayUrl,
+  toDateInputFormat,
+  fromDateInputFormat,
+} from "../utils";
 import {
   getDocumentsForTemplate,
   getTemplateColor,
@@ -466,9 +472,12 @@ export default function ProjectDetail({
                   </label>
                   <input
                     type="date"
-                    value={formData.projectStartDate || ""}
+                    value={toDateInputFormat(formData.projectStartDate)}
                     onChange={(e) =>
-                      handleChange("projectStartDate", e.target.value)
+                      handleChange(
+                        "projectStartDate",
+                        fromDateInputFormat(e.target.value)
+                      )
                     }
                     onBlur={() => onUpdate(formData)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
@@ -481,9 +490,12 @@ export default function ProjectDetail({
                   </label>
                   <input
                     type="date"
-                    value={formData.projectFinishDate || ""}
+                    value={toDateInputFormat(formData.projectFinishDate)}
                     onChange={(e) =>
-                      handleChange("projectFinishDate", e.target.value)
+                      handleChange(
+                        "projectFinishDate",
+                        fromDateInputFormat(e.target.value)
+                      )
                     }
                     onBlur={() => onUpdate(formData)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
