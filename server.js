@@ -15,7 +15,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyB25ZhtxQZ6RrYryK6zsauImZwWemn9SoY";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_PROMPT = `You are the greatest Stormwater Consultant and Stormwater Pollution Prevention Plan (SWPPP) preparer in the world. You are also an expert civil engineering plan reader. Analyze these construction/civil drawings thoroughly and extract everything we need to know for SWPPP preparation.
 
