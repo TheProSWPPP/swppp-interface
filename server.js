@@ -15,6 +15,8 @@ const port = process.env.PORT || 3000;
 
 const N8N_WEBHOOK_URL =
   "https://proswppp.app.n8n.cloud/webhook/state-document-generator";
+const N8N_ANALYZE_PLANS_URL =
+  "https://proswppp.app.n8n.cloud/webhook/analyze-civil-plans";
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -376,6 +378,68 @@ app.post("/api/projects/delete", async (req, res) => {
     );
     res.status(204).send();
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Analyze Civil Plans with Gemini
+app.post("/api/projects/:id/analyze-plans", async (req, res) => {
+  const { id } = req.params;
+  const { civilDrawingsLink, companyName, projectName } = req.body;
+
+  // Set long timeout for Gemini processing
+  req.setTimeout(180000);
+  res.setTimeout(180000);
+
+  try {
+    console.log(`Analyzing civil plans for project: ${projectName || id}`);
+
+    const n8nResponse = await fetch(N8N_ANALYZE_PLANS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: id,
+        civilDrawingsLink,
+        companyName,
+        projectName,
+      }),
+      signal: AbortSignal.timeout(180000),
+    });
+
+    if (!n8nResponse.ok) {
+      const errorText = await n8nResponse.text();
+      console.error("n8n analyze-plans failed:", errorText);
+      return res.status(502).json({ error: "Analysis workflow failed", details: errorText });
+    }
+
+    const analysisData = await n8nResponse.json();
+
+    // Save analysis results to project record
+    if (process.env.DATABASE_URL) {
+      const current = await pool.query(
+        "SELECT data FROM projects WHERE id = $1",
+        [id]
+      );
+      if (current.rows.length > 0) {
+        const updatedData = {
+          ...current.rows[0].data,
+          planAnalysisSummary: analysisData.summary || "",
+          planAnalysisDate: new Date().toISOString(),
+          planAnalysisRaw: analysisData,
+        };
+        await pool.query(
+          "UPDATE projects SET data = $1 WHERE id = $2",
+          [updatedData, id]
+        );
+      }
+    }
+
+    res.json({ data: analysisData });
+  } catch (err) {
+    console.error("Plan analysis error:", err);
+    if (err.name === "TimeoutError") {
+      return res.status(504).json({ error: "Analysis timed out. The civil drawings may be too large." });
+    }
     res.status(500).json({ error: err.message });
   }
 });

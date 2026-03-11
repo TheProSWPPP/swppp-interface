@@ -55,6 +55,9 @@ export interface Project {
   civilDrawingsLink?: string;
   folderLink: string;
   invoiceLink: string;
+  planAnalysisSummary?: string;
+  planAnalysisDate?: string;
+  planAnalysisRaw?: Record<string, any>;
 }
 
 export const projects: Project[] = [
