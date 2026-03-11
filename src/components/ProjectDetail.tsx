@@ -56,9 +56,8 @@ export default function ProjectDetail({
 }: ProjectDetailProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRetriggering, setIsRetriggering] = useState(false);
-  // TODO: Re-enable when AI analysis is ready
-  // const [isAnalyzing, setIsAnalyzing] = useState(false);
-  // const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [formData, setFormData] = useState<Project>(project);
 
   const isPending =
@@ -277,81 +276,102 @@ export default function ProjectDetail({
     }
   };
 
-  // TODO: Re-enable when AI analysis is ready
-  // const handleAnalyzePlans = async () => {
-  //   setIsAnalyzing(true);
-  //   try {
-  //     const body: Record<string, any> = {
-  //       civilDrawingsLink: formData.civilDrawingsLink,
-  //       companyName: formData.companyName,
-  //       projectName: formData.projectName,
-  //     };
-  //     let response: Response;
-  //     if (uploadedFile) {
-  //       const formPayload = new FormData();
-  //       formPayload.append("file", uploadedFile);
-  //       formPayload.append("companyName", formData.companyName || "");
-  //       formPayload.append("projectName", formData.projectName || "");
-  //       response = await fetch(`/api/projects/${project.id}/analyze-plans`, {
-  //         method: "POST",
-  //         body: formPayload,
-  //       });
-  //     } else {
-  //       response = await fetch(`/api/projects/${project.id}/analyze-plans`, {
-  //         method: "POST",
-  //         headers: { "Content-Type": "application/json" },
-  //         body: JSON.stringify(body),
-  //       });
-  //     }
-  //     if (response.ok) {
-  //       const analysis = await response.json();
-  //       const raw = analysis.data || analysis;
-  //       const updates: Partial<Project> = {
-  //         planAnalysisSummary: raw.summary || "",
-  //         planAnalysisDate: new Date().toISOString(),
-  //         planAnalysisRaw: raw,
-  //       };
-  //       if (!formData.landDisturbanceArea && raw.estimatedDisturbedArea?.value) {
-  //         updates.landDisturbanceArea = parseFloat(raw.estimatedDisturbedArea.value);
-  //       }
-  //       if (!formData.projectDescription && raw.projectDescription) {
-  //         updates.projectDescription = raw.projectDescription;
-  //       }
-  //       if (!formData.sequenceActivities && raw.sequenceOfActivities) {
-  //         updates.sequenceActivities = raw.sequenceOfActivities;
-  //       }
-  //       if (!formData.contactName && (raw.contactPerson || raw.ownerName)) {
-  //         updates.contactName = raw.contactPerson || raw.ownerName;
-  //       }
-  //       if (!formData.phone && raw.ownerPhone) {
-  //         updates.phone = raw.ownerPhone;
-  //       }
-  //       if (!formData.customerAddress && raw.ownerAddress) {
-  //         updates.customerAddress = raw.ownerAddress;
-  //       }
-  //       if (!formData.projectStartDate && raw.projectStartDate) {
-  //         updates.projectStartDate = raw.projectStartDate;
-  //       }
-  //       if (!formData.projectFinishDate && raw.projectFinishDate) {
-  //         updates.projectFinishDate = raw.projectFinishDate;
-  //       }
-  //       if (!formData.projectAddress && raw.siteAddress) {
-  //         updates.projectAddress = raw.siteAddress;
-  //       }
-  //       const updatedForm = { ...formData, ...updates };
-  //       setFormData(updatedForm);
-  //       onUpdate(updatedForm);
-  //       setUploadedFile(null);
-  //     } else {
-  //       alert("Analysis failed. Please check the civil drawings link and try again.");
-  //     }
-  //   } catch (error) {
-  //     console.error("Plan analysis failed:", error);
-  //     alert("Error analyzing plans. Please check your connection and try again.");
-  //   } finally {
-  //     setIsAnalyzing(false);
-  //   }
-  // };
+  const handleAnalyzePlans = async () => {
+    if (!uploadedFile && !formData.civilDrawingsLink) {
+      alert("Please add a Civil Drawings link or upload a PDF first.");
+      return;
+    }
+    setIsAnalyzing(true);
+    try {
+      let response: Response;
+      if (uploadedFile) {
+        const formPayload = new FormData();
+        formPayload.append("file", uploadedFile);
+        formPayload.append("companyName", formData.companyName || "");
+        formPayload.append("projectName", formData.projectName || "");
+        response = await fetch(`/api/projects/${project.id}/analyze-plans`, {
+          method: "POST",
+          body: formPayload,
+        });
+      } else {
+        response = await fetch(`/api/projects/${project.id}/analyze-plans`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            civilDrawingsLink: formData.civilDrawingsLink,
+            companyName: formData.companyName,
+            projectName: formData.projectName,
+          }),
+        });
+      }
+      if (response.ok) {
+        const analysis = await response.json();
+        const raw = analysis.data || analysis;
+        const updates: Partial<Project> = {
+          planAnalysisSummary: raw.summary || "",
+          planAnalysisDate: new Date().toISOString(),
+          planAnalysisRaw: raw,
+        };
+        // Only auto-fill fields that are currently empty
+        if (!formData.landDisturbanceArea && raw.estimatedDisturbedArea?.value && raw.estimatedDisturbedArea.value !== "N/A") {
+          const parsed = parseFloat(raw.estimatedDisturbedArea.value);
+          if (!isNaN(parsed)) updates.landDisturbanceArea = parsed;
+        }
+        if (!formData.projectDescription && raw.projectDescription && raw.projectDescription !== "N/A") {
+          updates.projectDescription = raw.projectDescription;
+        }
+        if (!formData.sequenceActivities && raw.sequenceOfActivities && raw.sequenceOfActivities !== "N/A") {
+          updates.sequenceActivities = raw.sequenceOfActivities;
+        }
+        if (!formData.latitude && raw.latitude && raw.latitude !== "N/A") {
+          updates.latitude = raw.latitude;
+        }
+        if (!formData.longitude && raw.longitude && raw.longitude !== "N/A") {
+          updates.longitude = raw.longitude;
+        }
+        if (!formData.soilData && raw.soilComposition && raw.soilComposition !== "N/A") {
+          updates.soilData = raw.soilComposition;
+        }
+        if (!formData.waterway && raw.nearestWaterbody && raw.nearestWaterbody !== "N/A") {
+          updates.waterway = raw.nearestWaterbody;
+        }
+        if (formData.waterbodyImpaired === undefined && raw.waterbodyImpairment && raw.waterbodyImpairment !== "N/A") {
+          updates.waterbodyImpaired = raw.waterbodyImpairment.toLowerCase() !== "not impaired" && raw.waterbodyImpairment.toLowerCase() !== "none";
+        }
+        if (!formData.contactName && (raw.contactPerson || raw.ownerName)) {
+          const val = raw.contactPerson !== "N/A" ? raw.contactPerson : raw.ownerName !== "N/A" ? raw.ownerName : null;
+          if (val) updates.contactName = val;
+        }
+        if (!formData.phone && raw.ownerPhone && raw.ownerPhone !== "N/A") {
+          updates.phone = raw.ownerPhone;
+        }
+        if (!formData.customerAddress && raw.ownerAddress && raw.ownerAddress !== "N/A") {
+          updates.customerAddress = raw.ownerAddress;
+        }
+        if (!formData.projectStartDate && raw.projectStartDate && raw.projectStartDate !== "N/A") {
+          updates.projectStartDate = raw.projectStartDate;
+        }
+        if (!formData.projectFinishDate && raw.projectFinishDate && raw.projectFinishDate !== "N/A") {
+          updates.projectFinishDate = raw.projectFinishDate;
+        }
+        if (!formData.projectAddress && raw.siteAddress && raw.siteAddress !== "N/A") {
+          updates.projectAddress = raw.siteAddress;
+        }
+        const updatedForm = { ...formData, ...updates };
+        setFormData(updatedForm);
+        onUpdate(updatedForm);
+        setUploadedFile(null);
+      } else {
+        const err = await response.json().catch(() => ({}));
+        alert(err.error || "Analysis failed. Please check the civil drawings link and try again.");
+      }
+    } catch (error) {
+      console.error("Plan analysis failed:", error);
+      alert("Error analyzing plans. Please check your connection and try again.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   return (
     <div className="bg-white shadow-sm rounded-2xl border border-slate-200 overflow-hidden">
@@ -646,44 +666,80 @@ export default function ProjectDetail({
                     )}
                   </div>
 
-                  {/* AI Plan Analysis - In Construction */}
-                  <div className="relative overflow-hidden rounded-lg border border-slate-200 p-4 mt-1 group/analyze">
-                    <div className="absolute inset-0 bg-slate-50/40 backdrop-blur-[1px] z-10 flex items-center justify-center opacity-0 group-hover/analyze:opacity-100 transition-opacity">
-                      <span className="bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest shadow-xl">
-                        In Construction
-                      </span>
-                    </div>
-                    <div className="opacity-40 pointer-events-none grayscale space-y-3">
+                  {/* AI Plan Analysis */}
+                  <div className="rounded-lg border border-slate-200 p-4 mt-1 space-y-3">
                       {/* File Upload */}
                       <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-2 px-3 py-2 text-sm border border-dashed border-slate-300 rounded-lg cursor-pointer">
+                        <label className="flex items-center gap-2 px-3 py-2 text-sm border border-dashed border-slate-300 rounded-lg cursor-pointer hover:border-violet-400 hover:text-violet-600 transition-colors">
                           <Upload className="h-4 w-4 text-slate-400" />
                           <span className="text-slate-500">
-                            Or upload PDF directly
+                            {uploadedFile ? uploadedFile.name : "Upload PDF directly"}
                           </span>
+                          <input
+                            type="file"
+                            accept="application/pdf"
+                            className="hidden"
+                            onChange={(e) => setUploadedFile(e.target.files?.[0] ?? null)}
+                            disabled={isApproved}
+                          />
                         </label>
+                        {uploadedFile && (
+                          <button
+                            onClick={() => setUploadedFile(null)}
+                            className="p-1.5 rounded text-slate-400 hover:text-red-500 transition-colors"
+                            title="Remove file"
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
 
                       {/* Analyze Button */}
                       <button
-                        disabled
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg text-white bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-violet-600/20"
+                        onClick={handleAnalyzePlans}
+                        disabled={isAnalyzing || isApproved || (!formData.civilDrawingsLink && !uploadedFile)}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-violet-600/20 transition-colors"
                       >
-                        <Sparkles className="h-4 w-4" />
-                        Analyze Civil Plans
+                        {isAnalyzing ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Analyzing... (may take ~30s)
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4" />
+                            Analyze Civil Plans
+                          </>
+                        )}
                       </button>
 
-                      {/* Analysis Summary Preview */}
-                      <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-2">
-                        <h5 className="text-xs font-bold text-violet-700 uppercase tracking-wider flex items-center gap-1.5">
-                          <Sparkles className="h-3.5 w-3.5" />
-                          AI Plan Analysis
-                        </h5>
-                        <p className="text-sm text-slate-500">
-                          Gemini 3.1 Pro will analyze civil drawings and extract disturbed area, project description, activities, owner info, and more.
-                        </p>
-                      </div>
-                    </div>
+                      {/* Analysis Result */}
+                      {formData.planAnalysisSummary ? (
+                        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-2">
+                          <h5 className="text-xs font-bold text-violet-700 uppercase tracking-wider flex items-center gap-1.5">
+                            <Sparkles className="h-3.5 w-3.5" />
+                            AI Plan Analysis
+                            {formData.planAnalysisDate && (
+                              <span className="ml-auto text-[10px] font-normal text-violet-400 normal-case tracking-normal">
+                                {new Date(formData.planAnalysisDate).toLocaleDateString()}
+                              </span>
+                            )}
+                          </h5>
+                          <p className="text-sm text-slate-600 leading-relaxed">
+                            {formData.planAnalysisSummary}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-2">
+                          <h5 className="text-xs font-bold text-violet-700 uppercase tracking-wider flex items-center gap-1.5">
+                            <Sparkles className="h-3.5 w-3.5" />
+                            AI Plan Analysis
+                          </h5>
+                          <p className="text-sm text-slate-500">
+                            Gemini will analyze civil drawings and auto-fill disturbed area, coordinates, soil, waterway, project description, activities, owner info, and more.
+                          </p>
+                        </div>
+                      )}
                   </div>
                 </div>
               </div>
