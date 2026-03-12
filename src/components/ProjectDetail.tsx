@@ -743,7 +743,7 @@ export default function ProjectDetail({
 
                       {/* Analysis Result */}
                       {formData.planAnalysisSummary ? (
-                        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-2">
+                        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-3">
                           <h5 className="text-xs font-bold text-violet-700 uppercase tracking-wider flex items-center gap-1.5">
                             <Sparkles className="h-3.5 w-3.5" />
                             AI Plan Analysis
@@ -756,6 +756,50 @@ export default function ProjectDetail({
                           <p className="text-sm text-slate-600 leading-relaxed">
                             {formData.planAnalysisSummary}
                           </p>
+                          {/* Field extraction results */}
+                          {formData.planAnalysisRaw && (
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-violet-100">
+                              {([
+                                { label: "Disturbed Area", val: formData.planAnalysisRaw.estimatedDisturbedArea?.value ? `${formData.planAnalysisRaw.estimatedDisturbedArea.value} ac` : null },
+                                { label: "Owner", val: formData.planAnalysisRaw.ownerName },
+                                { label: "Site Address", val: formData.planAnalysisRaw.siteAddress },
+                                { label: "Phone", val: formData.planAnalysisRaw.ownerPhone },
+                                { label: "Contact", val: formData.planAnalysisRaw.contactPerson },
+                                { label: "Email", val: formData.planAnalysisRaw.ownerEmail },
+                                { label: "Start Date", val: formData.planAnalysisRaw.projectStartDate },
+                                { label: "Finish Date", val: formData.planAnalysisRaw.projectFinishDate },
+                                { label: "Description", val: formData.planAnalysisRaw.projectDescription ? "found" : null },
+                                { label: "Activities", val: formData.planAnalysisRaw.sequenceOfActivities ? "found" : null },
+                              ] as { label: string; val: string | null }[]).map(({ label, val }) => {
+                                const found = val && val !== "N/A" && val !== "null";
+                                return (
+                                  <div key={label} className="flex items-baseline gap-1 text-[11px]">
+                                    <span className={found ? "text-emerald-500" : "text-slate-300"}>
+                                      {found ? "✓" : "✗"}
+                                    </span>
+                                    <span className="text-slate-400 shrink-0">{label}:</span>
+                                    <span className={cn("truncate", found ? "text-slate-700" : "text-slate-300")}>
+                                      {found ? val : "not found"}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {/* Token usage */}
+                          {formData.planAnalysisRaw?._usage && (
+                            <div className="flex items-center gap-1.5 pt-2 border-t border-violet-100 text-[10px] text-violet-400">
+                              <Zap className="h-3 w-3 shrink-0" />
+                              <span>
+                                {formData.planAnalysisRaw._usage.inputTokens.toLocaleString()} in
+                                {" / "}
+                                {formData.planAnalysisRaw._usage.outputTokens.toLocaleString()} out
+                                {formData.planAnalysisRaw._usage.thoughtsTokens > 0 && ` / ${formData.planAnalysisRaw._usage.thoughtsTokens.toLocaleString()} thinking`}
+                                {" — "}
+                                ~${formData.planAnalysisRaw._usage.estimatedCostUSD.toFixed(4)} USD
+                              </span>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-2">

@@ -73,7 +73,22 @@ async function callGemini(base64Data) {
   const json = await res.json();
   const text = json.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const cleaned = text.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
-  return JSON.parse(cleaned);
+  const analysisData = JSON.parse(cleaned);
+
+  // Attach token usage + estimated cost (Gemini 2.5 Flash pricing)
+  const u = json.usageMetadata || {};
+  const inputTokens = u.promptTokenCount || 0;
+  const outputTokens = u.candidatesTokenCount || 0;
+  const thoughtsTokens = u.thoughtsTokenCount || 0;
+  analysisData._usage = {
+    inputTokens,
+    outputTokens,
+    thoughtsTokens,
+    totalTokens: u.totalTokenCount || 0,
+    estimatedCostUSD: (inputTokens * 0.075 + outputTokens * 0.30) / 1_000_000,
+  };
+  console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
+  return analysisData;
 }
 
 app.use(cors());
