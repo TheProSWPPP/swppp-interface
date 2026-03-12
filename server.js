@@ -19,8 +19,62 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 
 
 const N8N_WEBHOOK_URL =
   "https://proswppp.app.n8n.cloud/webhook/state-document-generator";
-const N8N_ANALYZE_PLANS_URL =
-  "https://proswppp.app.n8n.cloud/webhook/analyze-civil-plans";
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_PROMPT = `You are an expert civil engineering plan reader. Analyze these construction/civil drawings thoroughly and extract the following information.
+
+CRITICAL INSTRUCTIONS FOR AREA CALCULATION:
+- Look for explicitly stated "Estimated Disturbed Area", "Total Disturbed Area", "Site Area", or similar labels
+- If NO explicit area is stated, estimate it from the drawings using scale bar, boundary dimensions, or lot dimensions
+- Always convert to acres (1 acre = 43,560 sq ft)
+- Report both the value and how you determined it
+
+EXTRACT ALL OF THE FOLLOWING (set to null if truly not findable):
+
+{
+  "estimatedDisturbedArea": { "value": "number in acres", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale", "details": "how you determined this" },
+  "totalProjectArea": { "value": "number in acres", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale", "details": "how you determined this" },
+  "projectDescription": "description of the construction project",
+  "sequenceOfActivities": "ordered list of major construction activities (e.g., site prep, grading, utilities, paving, building, landscaping, stabilization)",
+  "endangeredSpeciesNotes": "any notes about endangered species, wetlands, or environmental concerns on the plans",
+  "historicalPlacesNotes": "any notes about historical places or cultural resources",
+  "projectStartDate": "MM/DD/YY if found",
+  "projectFinishDate": "MM/DD/YY if found",
+  "ownerName": "property or project owner name from title block or cover sheet",
+  "ownerAddress": "owner address",
+  "ownerPhone": "owner phone number",
+  "ownerEmail": "owner email",
+  "contactPerson": "primary contact or engineer of record name",
+  "siteAddress": "project site address from plans",
+  "summary": "3-5 sentence overview of these civil plans including project type, key features, and notable site conditions"
+}
+
+Return ONLY valid JSON, no markdown formatting.`;
+
+async function callGemini(base64Data) {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ inline_data: { mime_type: "application/pdf", data: base64Data } }, { text: GEMINI_PROMPT }] }],
+        generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
+      }),
+      signal: AbortSignal.timeout(160000),
+    }
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+  const json = await res.json();
+  const text = json.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const cleaned = text.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
+  return JSON.parse(cleaned);
+}
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -395,149 +449,70 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
   try {
     let analysisData;
 
-    if (req.file) {
-      // File upload — base64 encode and forward to n8n (all AI logic lives in n8n)
-      const { companyName, projectName } = req.body;
-      console.log(`Analyzing uploaded PDF for project: ${projectName || id} (${(req.file.size / 1024 / 1024).toFixed(1)} MB)`);
+    const LIMIT = 15 * 1024 * 1024;
+    let pdfBuffer;
 
+    if (req.file) {
+      const { projectName } = req.body;
+      console.log(`Analyzing uploaded PDF: ${projectName || id} (${(req.file.size / 1024 / 1024).toFixed(1)} MB)`);
       if (!req.file.originalname.toLowerCase().endsWith(".pdf")) {
         return res.status(400).json({ error: "Only PDF files are supported." });
       }
-
-      const LIMIT = 10 * 1024 * 1024;
-      let pdfBuffer = req.file.buffer;
-
-      if (pdfBuffer.length > LIMIT) {
-        console.log(`PDF too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB), attempting compression...`);
-        try {
-          const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-          pdfBuffer = Buffer.from(await pdfDoc.save({ useObjectStreams: true }));
-          console.log(`Compressed to ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`);
-        } catch (err) {
-          console.warn("PDF compression failed:", err.message);
-        }
-      }
-
-      if (pdfBuffer.length > LIMIT) {
-        return res.status(400).json({
-          error: `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB. Please split the drawings into smaller files or reduce image quality before uploading.`,
-        });
-      }
-
-      const base64Data = pdfBuffer.toString("base64");
-      const n8nResponse = await fetch(N8N_ANALYZE_PLANS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId: id,
-          companyName,
-          projectName,
-          base64Data,
-          fileName: req.file.originalname,
-          fileSize: req.file.size,
-        }),
-        signal: AbortSignal.timeout(170000),
-      });
-
-      const n8nText = await n8nResponse.text();
-      if (!n8nResponse.ok || !n8nText) {
-        console.error("n8n analyze-plans (upload) failed:", n8nResponse.status, n8nText);
-        return res.status(502).json({ error: "Analysis workflow failed", details: n8nText });
-      }
-      const wrapper = JSON.parse(n8nText);
-      analysisData = wrapper.data || wrapper;
+      pdfBuffer = req.file.buffer;
 
     } else {
-      // URL-based — download PDF in backend, compress, then send as base64 to n8n
-      const { civilDrawingsLink, companyName, projectName } = req.body;
+      const { civilDrawingsLink, projectName } = req.body;
       if (!civilDrawingsLink) {
         return res.status(400).json({ error: "No file or civilDrawingsLink provided." });
       }
-      console.log(`Downloading civil plans from link for project: ${projectName || id}`);
+      console.log(`Downloading civil plans from link: ${projectName || id}`);
 
-      // Force direct download for Dropbox shared links
       let downloadUrl = civilDrawingsLink;
       if (downloadUrl.includes("dropbox.com")) {
         downloadUrl = downloadUrl.replace(/([?&])dl=0/, "$1dl=1");
-        if (!downloadUrl.includes("dl=")) {
-          downloadUrl += (downloadUrl.includes("?") ? "&" : "?") + "dl=1";
-        }
+        if (!downloadUrl.includes("dl=")) downloadUrl += (downloadUrl.includes("?") ? "&" : "?") + "dl=1";
       }
 
       const pdfFetch = await fetch(downloadUrl, { signal: AbortSignal.timeout(90000) });
       if (!pdfFetch.ok) {
-        return res.status(400).json({
-          error: `Could not download PDF from link (HTTP ${pdfFetch.status}). Try uploading the file directly instead.`,
-        });
+        return res.status(400).json({ error: `Could not download PDF (HTTP ${pdfFetch.status}). Try uploading directly.` });
       }
-      const contentType = pdfFetch.headers.get("content-type") || "";
-      if (contentType.includes("text/html")) {
-        return res.status(400).json({
-          error: "Link returned an HTML page instead of a PDF. For Dropbox, use a direct file link (not a folder link). Or upload the file directly.",
-        });
+      if ((pdfFetch.headers.get("content-type") || "").includes("text/html")) {
+        return res.status(400).json({ error: "Link returned an HTML page, not a PDF. Use a direct file link or upload directly." });
       }
-
-      // Reject before downloading if Content-Length already shows it's too big
-      const LIMIT = 10 * 1024 * 1024;
       const MAX_DOWNLOAD = 40 * 1024 * 1024;
-      const contentLength = parseInt(pdfFetch.headers.get("content-length") || "0");
-      if (contentLength > MAX_DOWNLOAD) {
-        return res.status(400).json({
-          error: `PDF is too large to download via link (${(contentLength / 1024 / 1024).toFixed(0)} MB). Please upload the file directly instead.`,
-        });
-      }
-
-      // Stream with a hard cap to avoid OOM on Railway
       const chunks = [];
       let totalSize = 0;
       for await (const chunk of pdfFetch.body) {
         totalSize += chunk.length;
-        if (totalSize > MAX_DOWNLOAD) {
-          return res.status(400).json({
-            error: `PDF exceeds 40 MB download limit. Please upload the file directly instead.`,
-          });
-        }
+        if (totalSize > MAX_DOWNLOAD) return res.status(400).json({ error: "PDF exceeds 40 MB. Please upload directly." });
         chunks.push(chunk);
       }
-      let pdfBuffer = Buffer.concat(chunks);
-      console.log(`Downloaded ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB from link`);
-
-      if (pdfBuffer.length > LIMIT) {
-        console.log(`Compressing PDF from link...`);
-        try {
-          const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-          pdfBuffer = Buffer.from(await pdfDoc.save({ useObjectStreams: true }));
-          console.log(`Compressed to ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`);
-        } catch (err) {
-          console.warn("PDF compression failed:", err.message);
-        }
-      }
-
-      if (pdfBuffer.length > LIMIT) {
-        return res.status(400).json({
-          error: `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB) even after compression. Maximum is 10 MB. Please upload the file directly.`,
-        });
-      }
-
-      const base64Data = pdfBuffer.toString("base64");
-      let fileName = "civil_plans.pdf";
-      try { fileName = new URL(downloadUrl).pathname.split("/").pop() || fileName; } catch (_) {}
-
-      const n8nResponse = await fetch(N8N_ANALYZE_PLANS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: id, companyName, projectName, base64Data, fileName, fileSize: pdfBuffer.length }),
-        signal: AbortSignal.timeout(170000),
-      });
-
-      const n8nText = await n8nResponse.text();
-      if (!n8nResponse.ok || !n8nText) {
-        console.error("n8n analyze-plans (link) failed:", n8nResponse.status, n8nText);
-        return res.status(502).json({ error: "Analysis workflow failed", details: n8nText });
-      }
-      const wrapper = JSON.parse(n8nText);
-      analysisData = wrapper.data || wrapper;
+      pdfBuffer = Buffer.concat(chunks);
+      console.log(`Downloaded ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`);
     }
+
+    // Compress if over limit
+    if (pdfBuffer.length > LIMIT) {
+      console.log(`Compressing PDF (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB)...`);
+      try {
+        const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+        pdfBuffer = Buffer.from(await pdfDoc.save({ useObjectStreams: true }));
+        console.log(`Compressed to ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`);
+      } catch (err) {
+        console.warn("Compression failed:", err.message);
+      }
+    }
+    if (pdfBuffer.length > LIMIT) {
+      return res.status(400).json({
+        error: `PDF is ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB after compression (max 15 MB). Please split the drawings or reduce image quality.`,
+      });
+    }
+
+    // Call Gemini directly
+    const base64Data = pdfBuffer.toString("base64");
+    console.log(`Sending ${(base64Data.length / 1024 / 1024).toFixed(1)} MB base64 to Gemini...`);
+    analysisData = await callGemini(base64Data);
 
     // Save to DB
     if (process.env.DATABASE_URL) {
