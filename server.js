@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 
 
 const N8N_WEBHOOK_URL =
@@ -493,6 +493,14 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
     }
     res.status(500).json({ error: err.message });
   }
+});
+
+// Multer error handler — returns JSON instead of Express default HTML
+app.use((err, _req, res, next) => {
+  if (err?.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({ error: "File is too large. Maximum upload size is 30 MB." });
+  }
+  next(err);
 });
 
 // Cleanup Task
