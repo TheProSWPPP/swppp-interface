@@ -1163,40 +1163,39 @@ export default function ProjectDetail({
         <div className="space-y-6">
           {/* Quick Resources */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                Quick Links
-              </h4>
-              <div className="flex items-center gap-2">
-                <a
-                  href={project.folderLink || "#"}
-                  target={project.folderLink ? "_blank" : undefined}
-                  className={cn(
-                    "p-2 rounded-xl transition-all border",
-                    project.folderLink
-                      ? "text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-100"
-                      : "text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed",
-                  )}
-                  title="Dropbox Folder"
-                  onClick={(e) => !project.folderLink && e.preventDefault()}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                </a>
-                <a
-                  href={project.trelloLink || "#"}
-                  target={project.trelloLink ? "_blank" : undefined}
-                  className={cn(
-                    "p-2 rounded-xl transition-all border",
-                    project.trelloLink
-                      ? "text-[#0079BF] bg-blue-50 border-blue-100 hover:bg-blue-100"
-                      : "text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed",
-                  )}
-                  title="Trello Card"
-                  onClick={(e) => !project.trelloLink && e.preventDefault()}
-                >
-                  <Trello className="h-4 w-4" />
-                </a>
-              </div>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
+              Quick Links
+            </h4>
+            <div className="flex flex-col gap-1">
+              {[
+                { href: project.folderLink, icon: FolderOpen, label: "Dropbox Folder" },
+                { href: project.jobOrderLink, icon: FileText, label: "Job Order PDF" },
+                { href: project.civilDrawingsLink, icon: FileCode, label: "Civil Drawings" },
+                { href: project.invoiceLink, icon: CreditCard, label: "Invoice" },
+                { href: project.trelloLink, icon: Trello, label: "Trello Card" },
+              ].map(({ href, icon: Icon, label }) =>
+                href ? (
+                  <a
+                    key={label}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 transition-colors group"
+                  >
+                    <Icon className="h-4 w-4 text-slate-400 group-hover:text-indigo-500 shrink-0" />
+                    <span className="flex-1 truncate">{label}</span>
+                    <ExternalLink className="h-3 w-3 text-slate-300 group-hover:text-indigo-400 shrink-0" />
+                  </a>
+                ) : (
+                  <div
+                    key={label}
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-slate-300 cursor-not-allowed"
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className="flex-1 truncate">{label}</span>
+                  </div>
+                )
+              )}
             </div>
           </div>
 
