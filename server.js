@@ -5,6 +5,7 @@ import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
 import pg from "pg";
+import { PDFDocument } from "pdf-lib";
 
 const { Pool } = pg;
 
@@ -402,11 +403,28 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       if (!req.file.originalname.toLowerCase().endsWith(".pdf")) {
         return res.status(400).json({ error: "Only PDF files are supported." });
       }
-      if (req.file.size > 15 * 1024 * 1024) {
-        return res.status(400).json({ error: "PDF must be under 15 MB. Please reduce the file size." });
+
+      const LIMIT = 15 * 1024 * 1024;
+      let pdfBuffer = req.file.buffer;
+
+      if (pdfBuffer.length > LIMIT) {
+        console.log(`PDF too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB), attempting compression...`);
+        try {
+          const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+          pdfBuffer = Buffer.from(await pdfDoc.save({ useObjectStreams: true }));
+          console.log(`Compressed to ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`);
+        } catch (err) {
+          console.warn("PDF compression failed:", err.message);
+        }
       }
 
-      const base64Data = req.file.buffer.toString("base64");
+      if (pdfBuffer.length > LIMIT) {
+        return res.status(400).json({
+          error: `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB). Maximum is 15 MB. Please split the drawings into smaller files or reduce image quality before uploading.`,
+        });
+      }
+
+      const base64Data = pdfBuffer.toString("base64");
       const n8nResponse = await fetch(N8N_ANALYZE_PLANS_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
