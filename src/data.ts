@@ -58,6 +58,7 @@ export interface Project {
   planAnalysisSummary?: string;
   planAnalysisDate?: string;
   planAnalysisRaw?: Record<string, any>;
+  aiFilledFields?: string[];
 }
 
 export const projects: Project[] = [

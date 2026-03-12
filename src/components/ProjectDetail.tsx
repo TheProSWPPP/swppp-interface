@@ -312,51 +312,72 @@ export default function ProjectDetail({
           planAnalysisDate: new Date().toISOString(),
           planAnalysisRaw: raw,
         };
-        // Only auto-fill fields that are currently empty
-        if (!formData.landDisturbanceArea && raw.estimatedDisturbedArea?.value && raw.estimatedDisturbedArea.value !== "N/A") {
+        const filledFields: string[] = [];
+
+        // Always overwrite — API-sourced fields, civil drawings are more authoritative
+        if (raw.estimatedDisturbedArea?.value && raw.estimatedDisturbedArea.value !== "N/A") {
           const parsed = parseFloat(raw.estimatedDisturbedArea.value);
-          if (!isNaN(parsed)) updates.landDisturbanceArea = parsed;
+          if (!isNaN(parsed)) { updates.landDisturbanceArea = parsed; filledFields.push("landDisturbanceArea"); }
         }
+        if (raw.soilComposition && raw.soilComposition !== "N/A") {
+          updates.soilData = raw.soilComposition;
+          filledFields.push("soilData");
+        }
+        if (raw.nearestWaterbody && raw.nearestWaterbody !== "N/A") {
+          updates.waterway = raw.nearestWaterbody;
+          filledFields.push("waterway");
+        }
+        if (raw.waterbodyImpairment && raw.waterbodyImpairment !== "N/A") {
+          updates.waterbodyImpaired = raw.waterbodyImpairment.toLowerCase() !== "not impaired" && raw.waterbodyImpairment.toLowerCase() !== "none";
+          filledFields.push("waterbodyImpaired");
+        }
+
+        // Fill if empty only — human-entered fields, never overwrite
         if (!formData.projectDescription && raw.projectDescription && raw.projectDescription !== "N/A") {
           updates.projectDescription = raw.projectDescription;
+          filledFields.push("projectDescription");
         }
         if (!formData.sequenceActivities && raw.sequenceOfActivities && raw.sequenceOfActivities !== "N/A") {
           updates.sequenceActivities = raw.sequenceOfActivities;
+          filledFields.push("sequenceActivities");
         }
         if (!formData.latitude && raw.latitude && raw.latitude !== "N/A") {
           updates.latitude = raw.latitude;
+          filledFields.push("latitude");
         }
         if (!formData.longitude && raw.longitude && raw.longitude !== "N/A") {
           updates.longitude = raw.longitude;
-        }
-        if (!formData.soilData && raw.soilComposition && raw.soilComposition !== "N/A") {
-          updates.soilData = raw.soilComposition;
-        }
-        if (!formData.waterway && raw.nearestWaterbody && raw.nearestWaterbody !== "N/A") {
-          updates.waterway = raw.nearestWaterbody;
-        }
-        if (formData.waterbodyImpaired === undefined && raw.waterbodyImpairment && raw.waterbodyImpairment !== "N/A") {
-          updates.waterbodyImpaired = raw.waterbodyImpairment.toLowerCase() !== "not impaired" && raw.waterbodyImpairment.toLowerCase() !== "none";
+          filledFields.push("longitude");
         }
         if (!formData.contactName && (raw.contactPerson || raw.ownerName)) {
           const val = raw.contactPerson !== "N/A" ? raw.contactPerson : raw.ownerName !== "N/A" ? raw.ownerName : null;
-          if (val) updates.contactName = val;
+          if (val) { updates.contactName = val; filledFields.push("contactName"); }
         }
         if (!formData.phone && raw.ownerPhone && raw.ownerPhone !== "N/A") {
           updates.phone = raw.ownerPhone;
+          filledFields.push("phone");
         }
         if (!formData.customerAddress && raw.ownerAddress && raw.ownerAddress !== "N/A") {
           updates.customerAddress = raw.ownerAddress;
+          filledFields.push("customerAddress");
         }
         if (!formData.projectStartDate && raw.projectStartDate && raw.projectStartDate !== "N/A") {
           updates.projectStartDate = raw.projectStartDate;
+          filledFields.push("projectStartDate");
         }
         if (!formData.projectFinishDate && raw.projectFinishDate && raw.projectFinishDate !== "N/A") {
           updates.projectFinishDate = raw.projectFinishDate;
+          filledFields.push("projectFinishDate");
         }
         if (!formData.projectAddress && raw.siteAddress && raw.siteAddress !== "N/A") {
           updates.projectAddress = raw.siteAddress;
+          filledFields.push("projectAddress");
         }
+
+        // Merge with existing aiFilledFields (union — previous badges persist)
+        const existing = formData.aiFilledFields || [];
+        updates.aiFilledFields = Array.from(new Set([...existing, ...filledFields]));
+
         const updatedForm = { ...formData, ...updates };
         setFormData(updatedForm);
         onUpdate(updatedForm);
@@ -372,6 +393,13 @@ export default function ProjectDetail({
       setIsAnalyzing(false);
     }
   };
+
+  const AiBadge = ({ field }: { field: string }) =>
+    formData.aiFilledFields?.includes(field) ? (
+      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-200 rounded px-1 py-0.5 ml-1.5 align-middle leading-none">
+        <Sparkles className="h-2.5 w-2.5" />AI
+      </span>
+    ) : null;
 
   return (
     <div className="bg-white shadow-sm rounded-2xl border border-slate-200 overflow-hidden">
@@ -524,7 +552,7 @@ export default function ProjectDetail({
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">
-                  Contact Name
+                  Contact Name<AiBadge field="contactName" />
                 </label>
                 <input
                   type="text"
@@ -537,7 +565,7 @@ export default function ProjectDetail({
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">
-                  Phone
+                  Phone<AiBadge field="phone" />
                 </label>
                 <input
                   type="text"
@@ -550,7 +578,7 @@ export default function ProjectDetail({
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">
-                  Customer Address
+                  Customer Address<AiBadge field="customerAddress" />
                 </label>
                 <input
                   type="text"
@@ -588,7 +616,7 @@ export default function ProjectDetail({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="md:col-span-2 space-y-2">
                   <label className="text-sm font-medium text-slate-700">
-                    Project Address
+                    Project Address<AiBadge field="projectAddress" />
                   </label>
                   <input
                     type="text"
@@ -603,7 +631,7 @@ export default function ProjectDetail({
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">
-                    Start Date
+                    Start Date<AiBadge field="projectStartDate" />
                   </label>
                   <input
                     type="date"
@@ -621,7 +649,7 @@ export default function ProjectDetail({
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">
-                    Finish Date
+                    Finish Date<AiBadge field="projectFinishDate" />
                   </label>
                   <input
                     type="date"
@@ -745,7 +773,7 @@ export default function ProjectDetail({
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">
-                  Project Description
+                  Project Description<AiBadge field="projectDescription" />
                 </label>
                 <textarea
                   value={formData.projectDescription || ""}
@@ -761,7 +789,7 @@ export default function ProjectDetail({
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">
-                  Sequence of Major Activities
+                  Sequence of Major Activities<AiBadge field="sequenceActivities" />
                 </label>
                 <textarea
                   value={formData.sequenceActivities || ""}
@@ -796,7 +824,7 @@ export default function ProjectDetail({
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">
-                  Est. Acres Disturbed
+                  Est. Acres Disturbed<AiBadge field="landDisturbanceArea" />
                 </label>
                 <input
                   type="number"
@@ -826,6 +854,11 @@ export default function ProjectDetail({
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-slate-700">
                     Coordinates
+                    {(formData.aiFilledFields?.includes("latitude") || formData.aiFilledFields?.includes("longitude")) && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-200 rounded px-1 py-0.5 ml-1.5 align-middle leading-none">
+                        <Sparkles className="h-2.5 w-2.5" />AI
+                      </span>
+                    )}
                   </label>
                   <a
                     href={`https://www.google.com/maps?q=${parseCoordinate(
@@ -941,7 +974,7 @@ export default function ProjectDetail({
               <div className="md:col-span-2 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-slate-700">
-                    Contributing Waterbodies
+                    Contributing Waterbodies<AiBadge field="waterway" />
                   </label>
                   <a
                     href={formatWaterwayUrl(formData.projectAddress || "")}
@@ -966,7 +999,7 @@ export default function ProjectDetail({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-slate-700">
-                      Soil Data
+                      Soil Data<AiBadge field="soilData" />
                     </label>
                     <a
                       href="https://websoilsurvey.nrcs.usda.gov/app/WebSoilSurvey.aspx"
