@@ -15,48 +15,6 @@ const app = express();
 const port = process.env.PORT || 3000;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = "gemini-2.5-flash";
-const GEMINI_PROMPT = `You are the greatest Stormwater Consultant and Stormwater Pollution Prevention Plan (SWPPP) preparer in the world. You are also an expert civil engineering plan reader. Analyze these construction/civil drawings thoroughly and extract everything we need to know for SWPPP preparation.
-
-CRITICAL INSTRUCTIONS FOR AREA CALCULATION:
-- Look for explicitly stated 'Estimated Disturbed Area', 'Total Disturbed Area', 'Site Area', or similar labels
-- If NO explicit area is stated, you MUST estimate it from the drawings:
-  - Look for site boundary dimensions, property lines, or lot dimensions
-  - Look for the scale bar or drawing scale (e.g., 1"=50', 1:100)
-  - Use the scale to calculate approximate area from boundary dimensions
-  - If dimensions are shown (e.g., 200' x 300'), calculate: (200 * 300) / 43560 = 1.38 acres
-  - Always convert to acres (1 acre = 43,560 sq ft)
-- Report BOTH the value and how you determined it
-
-IMPORTANT: For fields not found in the drawings, return "N/A" (not null).
-
-EXTRACT ALL OF THE FOLLOWING:
-
-{
-  "estimatedDisturbedArea": { "value": "number in acres or N/A", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale | N/A", "details": "how you determined this value" },
-  "totalProjectArea": { "value": "number in acres or N/A", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale | N/A", "details": "how you determined this value" },
-  "projectDescription": "detailed description of the construction project, or N/A",
-  "sequenceOfActivities": "ordered list of major construction activities, or N/A",
-  "latitude": "latitude coordinate if shown, or N/A",
-  "longitude": "longitude coordinate if shown, or N/A",
-  "soilComposition": "soil types/composition if shown, or N/A",
-  "nearestWaterbody": "nearest contributing waterbody name and info, or N/A",
-  "waterbodyImpairment": "any impairment information for nearby waterbodies, or N/A",
-  "endangeredSpeciesNotes": "any notes about endangered species or environmental concerns, or N/A",
-  "historicalPlacesNotes": "any notes about historical places or cultural resources, or N/A",
-  "projectStartDate": "MM/DD/YY if found, or N/A",
-  "projectFinishDate": "MM/DD/YY if found, or N/A",
-  "ownerName": "property or project owner name, or N/A",
-  "ownerAddress": "owner address, or N/A",
-  "ownerPhone": "owner phone number, or N/A",
-  "ownerEmail": "owner email, or N/A",
-  "contactPerson": "primary contact or engineer of record name, or N/A",
-  "siteAddress": "project site address, or N/A",
-  "summary": "3-5 sentence overview including project type, key features, and notable environmental or site conditions relevant to SWPPP preparation"
-}
-
-Return ONLY valid JSON, no markdown formatting.`;
 
 const N8N_WEBHOOK_URL =
   "https://proswppp.app.n8n.cloud/webhook/state-document-generator";
@@ -437,8 +395,8 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
     let analysisData;
 
     if (req.file) {
-      // Direct file upload — call Gemini inline_data directly (no n8n)
-      const { projectName } = req.body;
+      // File upload — base64 encode and forward to n8n (all AI logic lives in n8n)
+      const { companyName, projectName } = req.body;
       console.log(`Analyzing uploaded PDF for project: ${projectName || id} (${(req.file.size / 1024 / 1024).toFixed(1)} MB)`);
 
       if (!req.file.originalname.toLowerCase().endsWith(".pdf")) {
@@ -449,34 +407,28 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       }
 
       const base64Data = req.file.buffer.toString("base64");
-      const geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [
-              { inline_data: { mime_type: "application/pdf", data: base64Data } },
-              { text: GEMINI_PROMPT },
-            ]}],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 16384 },
-          }),
-          signal: AbortSignal.timeout(170000),
-        }
-      );
+      const n8nResponse = await fetch(N8N_ANALYZE_PLANS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: id,
+          companyName,
+          projectName,
+          base64Data,
+          fileName: req.file.originalname,
+          fileSize: req.file.size,
+        }),
+        signal: AbortSignal.timeout(170000),
+      });
 
-      if (!geminiRes.ok) {
-        const err = await geminiRes.json().catch(() => ({}));
-        console.error("Gemini error:", err);
-        return res.status(502).json({ error: err?.error?.message || "Gemini analysis failed." });
+      if (!n8nResponse.ok) {
+        const errorText = await n8nResponse.text();
+        console.error("n8n analyze-plans (upload) failed:", errorText);
+        return res.status(502).json({ error: "Analysis workflow failed", details: errorText });
       }
 
-      const geminiData = await geminiRes.json();
-      let text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (text.startsWith("```json")) text = text.slice(7);
-      else if (text.startsWith("```")) text = text.slice(3);
-      if (text.endsWith("```")) text = text.slice(0, -3);
-      analysisData = JSON.parse(text.trim());
+      const wrapper = await n8nResponse.json();
+      analysisData = wrapper.data || wrapper;
 
     } else {
       // URL-based — route through n8n workflow
