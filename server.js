@@ -421,13 +421,12 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         signal: AbortSignal.timeout(170000),
       });
 
-      if (!n8nResponse.ok) {
-        const errorText = await n8nResponse.text();
-        console.error("n8n analyze-plans (upload) failed:", errorText);
-        return res.status(502).json({ error: "Analysis workflow failed", details: errorText });
+      const n8nText = await n8nResponse.text();
+      if (!n8nResponse.ok || !n8nText) {
+        console.error("n8n analyze-plans (upload) failed:", n8nResponse.status, n8nText);
+        return res.status(502).json({ error: "Analysis workflow failed", details: n8nText });
       }
-
-      const wrapper = await n8nResponse.json();
+      const wrapper = JSON.parse(n8nText);
       analysisData = wrapper.data || wrapper;
 
     } else {
@@ -445,13 +444,12 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         signal: AbortSignal.timeout(170000),
       });
 
-      if (!n8nResponse.ok) {
-        const errorText = await n8nResponse.text();
-        console.error("n8n analyze-plans failed:", errorText);
-        return res.status(502).json({ error: "Analysis workflow failed", details: errorText });
+      const n8nText = await n8nResponse.text();
+      if (!n8nResponse.ok || !n8nText) {
+        console.error("n8n analyze-plans (link) failed:", n8nResponse.status, n8nText);
+        return res.status(502).json({ error: "Analysis workflow failed", details: n8nText });
       }
-
-      const wrapper = await n8nResponse.json();
+      const wrapper = JSON.parse(n8nText);
       analysisData = wrapper.data || wrapper;
     }
 
