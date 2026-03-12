@@ -448,17 +448,64 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       analysisData = wrapper.data || wrapper;
 
     } else {
-      // URL-based — route through n8n workflow
+      // URL-based — download PDF in backend, compress, then send as base64 to n8n
       const { civilDrawingsLink, companyName, projectName } = req.body;
       if (!civilDrawingsLink) {
         return res.status(400).json({ error: "No file or civilDrawingsLink provided." });
       }
-      console.log(`Analyzing civil plans via link for project: ${projectName || id}`);
+      console.log(`Downloading civil plans from link for project: ${projectName || id}`);
+
+      // Force direct download for Dropbox shared links
+      let downloadUrl = civilDrawingsLink;
+      if (downloadUrl.includes("dropbox.com")) {
+        downloadUrl = downloadUrl.replace(/([?&])dl=0/, "$1dl=1");
+        if (!downloadUrl.includes("dl=")) {
+          downloadUrl += (downloadUrl.includes("?") ? "&" : "?") + "dl=1";
+        }
+      }
+
+      const pdfFetch = await fetch(downloadUrl, { signal: AbortSignal.timeout(60000) });
+      if (!pdfFetch.ok) {
+        return res.status(400).json({
+          error: `Could not download PDF from link (HTTP ${pdfFetch.status}). Try uploading the file directly instead.`,
+        });
+      }
+      const contentType = pdfFetch.headers.get("content-type") || "";
+      if (contentType.includes("text/html")) {
+        return res.status(400).json({
+          error: "Link returned an HTML page instead of a PDF. For Dropbox, use a direct file link (not a folder link). Or upload the file directly.",
+        });
+      }
+
+      const LIMIT = 15 * 1024 * 1024;
+      let pdfBuffer = Buffer.from(await pdfFetch.arrayBuffer());
+      console.log(`Downloaded ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB from link`);
+
+      if (pdfBuffer.length > LIMIT) {
+        console.log(`Compressing PDF from link...`);
+        try {
+          const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+          pdfBuffer = Buffer.from(await pdfDoc.save({ useObjectStreams: true }));
+          console.log(`Compressed to ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`);
+        } catch (err) {
+          console.warn("PDF compression failed:", err.message);
+        }
+      }
+
+      if (pdfBuffer.length > LIMIT) {
+        return res.status(400).json({
+          error: `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB) even after compression. Maximum is 15 MB. Please upload the file directly.`,
+        });
+      }
+
+      const base64Data = pdfBuffer.toString("base64");
+      let fileName = "civil_plans.pdf";
+      try { fileName = new URL(downloadUrl).pathname.split("/").pop() || fileName; } catch (_) {}
 
       const n8nResponse = await fetch(N8N_ANALYZE_PLANS_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: id, civilDrawingsLink, companyName, projectName }),
+        body: JSON.stringify({ projectId: id, companyName, projectName, base64Data, fileName, fileSize: pdfBuffer.length }),
         signal: AbortSignal.timeout(170000),
       });
 
