@@ -404,7 +404,7 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         return res.status(400).json({ error: "Only PDF files are supported." });
       }
 
-      const LIMIT = 15 * 1024 * 1024;
+      const LIMIT = 10 * 1024 * 1024;
       let pdfBuffer = req.file.buffer;
 
       if (pdfBuffer.length > LIMIT) {
@@ -420,7 +420,7 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
 
       if (pdfBuffer.length > LIMIT) {
         return res.status(400).json({
-          error: `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB). Maximum is 15 MB. Please split the drawings into smaller files or reduce image quality before uploading.`,
+          error: `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB. Please split the drawings into smaller files or reduce image quality before uploading.`,
         });
       }
 
@@ -478,7 +478,7 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       }
 
       // Reject before downloading if Content-Length already shows it's too big
-      const LIMIT = 15 * 1024 * 1024;
+      const LIMIT = 10 * 1024 * 1024;
       const MAX_DOWNLOAD = 40 * 1024 * 1024;
       const contentLength = parseInt(pdfFetch.headers.get("content-length") || "0");
       if (contentLength > MAX_DOWNLOAD) {
@@ -515,7 +515,7 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
 
       if (pdfBuffer.length > LIMIT) {
         return res.status(400).json({
-          error: `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB) even after compression. Maximum is 15 MB. Please upload the file directly.`,
+          error: `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB) even after compression. Maximum is 10 MB. Please upload the file directly.`,
         });
       }
 
