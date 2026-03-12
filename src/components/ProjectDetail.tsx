@@ -397,7 +397,7 @@ export default function ProjectDetail({
   const AiBadge = ({ field }: { field: string }) =>
     formData.aiFilledFields?.includes(field) ? (
       <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-200 rounded px-1 py-0.5 ml-1.5 align-middle leading-none">
-        <Sparkles className="h-2.5 w-2.5" />AI
+        <Sparkles className="h-2.5 w-2.5" />AI Civil Drawings
       </span>
     ) : null;
 
@@ -856,7 +856,7 @@ export default function ProjectDetail({
                     Coordinates
                     {(formData.aiFilledFields?.includes("latitude") || formData.aiFilledFields?.includes("longitude")) && (
                       <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-200 rounded px-1 py-0.5 ml-1.5 align-middle leading-none">
-                        <Sparkles className="h-2.5 w-2.5" />AI
+                        <Sparkles className="h-2.5 w-2.5" />AI Civil Drawings
                       </span>
                     )}
                   </label>
