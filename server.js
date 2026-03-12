@@ -464,7 +464,7 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         }
       }
 
-      const pdfFetch = await fetch(downloadUrl, { signal: AbortSignal.timeout(60000) });
+      const pdfFetch = await fetch(downloadUrl, { signal: AbortSignal.timeout(90000) });
       if (!pdfFetch.ok) {
         return res.status(400).json({
           error: `Could not download PDF from link (HTTP ${pdfFetch.status}). Try uploading the file directly instead.`,
@@ -477,8 +477,29 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         });
       }
 
+      // Reject before downloading if Content-Length already shows it's too big
       const LIMIT = 15 * 1024 * 1024;
-      let pdfBuffer = Buffer.from(await pdfFetch.arrayBuffer());
+      const MAX_DOWNLOAD = 40 * 1024 * 1024;
+      const contentLength = parseInt(pdfFetch.headers.get("content-length") || "0");
+      if (contentLength > MAX_DOWNLOAD) {
+        return res.status(400).json({
+          error: `PDF is too large to download via link (${(contentLength / 1024 / 1024).toFixed(0)} MB). Please upload the file directly instead.`,
+        });
+      }
+
+      // Stream with a hard cap to avoid OOM on Railway
+      const chunks = [];
+      let totalSize = 0;
+      for await (const chunk of pdfFetch.body) {
+        totalSize += chunk.length;
+        if (totalSize > MAX_DOWNLOAD) {
+          return res.status(400).json({
+            error: `PDF exceeds 40 MB download limit. Please upload the file directly instead.`,
+          });
+        }
+        chunks.push(chunk);
+      }
+      let pdfBuffer = Buffer.concat(chunks);
       console.log(`Downloaded ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB from link`);
 
       if (pdfBuffer.length > LIMIT) {
@@ -537,6 +558,9 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
     console.error("Plan analysis error:", err);
     if (err.name === "TimeoutError") {
       return res.status(504).json({ error: "Analysis timed out. The civil drawings may be too large." });
+    }
+    if (err.message === "terminated" || err.message === "fetch failed") {
+      return res.status(502).json({ error: "PDF download was interrupted (file may be too large). Please upload the file directly instead." });
     }
     res.status(500).json({ error: err.message });
   }
