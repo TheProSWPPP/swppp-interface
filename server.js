@@ -31,20 +31,32 @@ CRITICAL INSTRUCTIONS FOR AREA CALCULATION:
 - Report both the value and how you determined it
 
 CRITICAL INSTRUCTIONS FOR SEQUENCE OF ACTIVITIES:
-- This is used directly in a SWPPP document — provide a detailed, numbered sequence of ALL construction phases
-- Standard SWPPP phases to look for and include (adapt based on what the project actually shows):
-  1. Mobilization and installation of erosion/sediment controls (silt fence, inlet protection, construction entrance)
-  2. Site clearing, demolition, and tree removal (if applicable)
-  3. Rough grading and earthwork/mass excavation
-  4. Underground utilities installation (water, sewer, storm drain, electrical, gas)
-  5. Subgrade preparation
-  6. Paving, curb and gutter, concrete flatwork
-  7. Vertical construction (foundations, framing, building construction)
-  8. Finish grading and final earthwork
-  9. Landscaping, seeding, sodding, and permanent stabilization
-  10. Removal of temporary erosion controls and site cleanup
-- Write each activity as a complete sentence. Be specific to the project type (residential, commercial, utility, road, etc.)
-- Minimum 6-8 activities; more if the project warrants it
+- This is inserted directly into a SWPPP document — use the exact heading+description format shown below
+- FORMAT: Each phase has a short bold heading on its own line, followed by 1-2 descriptive sentences on the next line. Separate phases with a blank line.
+- Example format:
+  Mobilization and Site Preparation
+  Mobilization of equipment and personnel, installation of stabilized construction entrance, perimeter silt fence, and inlet protection BMPs.
+
+  Clearing, Grubbing, and Demolition
+  Removal of existing vegetation, structures, and site improvements within the project limits.
+
+  Rough Grading and Earthwork
+  Mass grading operations and subgrade preparation to establish design elevations and drainage patterns.
+
+  [continue for all phases...]
+
+- Always include these phases (adapt wording to project type):
+  1. Mobilization and Site Preparation (erosion controls, construction entrance)
+  2. Clearing, Grubbing, and Demolition (if applicable)
+  3. Rough Grading and Earthwork
+  4. Underground Utility Installation (water, sewer, storm, electrical — list what applies)
+  5. Subgrade Preparation and Paving (if applicable)
+  6. Structural/Vertical Construction (if applicable)
+  7. Finish Grading
+  8. Permanent Stabilization and Landscaping
+  9. Removal of Temporary Erosion Controls and Site Cleanup
+- Be specific to the project type (pipeline, building, road, utility, residential, etc.)
+- Minimum 6 phases; omit phases not applicable to this project type
 
 INSTRUCTIONS FOR SOIL AND WATERWAY DATA:
 - soilComposition: Look for soil boring logs, geotechnical notes, soil survey references, or any mention of soil types (clay, sandy loam, etc.). If none found, return null.

@@ -326,16 +326,18 @@ export default function ProjectDetail({
         };
         const filledFields: string[] = [];
 
-        // Always overwrite — API-sourced fields, civil drawings are more authoritative
+        // Always overwrite — disturbed area from civil drawings is authoritative
         if (raw.estimatedDisturbedArea?.value && raw.estimatedDisturbedArea.value !== "N/A") {
           const parsed = parseFloat(raw.estimatedDisturbedArea.value);
           if (!isNaN(parsed)) { updates.landDisturbanceArea = parsed; filledFields.push("landDisturbanceArea"); }
         }
-        if (raw.soilComposition && raw.soilComposition !== "N/A") {
+        // Fill if empty — soil and waterway come from SSURGO/ATTAINS APIs which are more precise;
+        // only use AI extraction as a fallback when those APIs haven't populated the field yet
+        if (!formData.soilData && raw.soilComposition && raw.soilComposition !== "N/A") {
           updates.soilData = raw.soilComposition;
           filledFields.push("soilData");
         }
-        if (raw.nearestWaterbody && raw.nearestWaterbody !== "N/A") {
+        if (!formData.waterway && raw.nearestWaterbody && raw.nearestWaterbody !== "N/A") {
           updates.waterway = raw.nearestWaterbody;
           filledFields.push("waterway");
         }
@@ -790,32 +792,51 @@ export default function ProjectDetail({
                           </p>
                           {/* Field extraction results */}
                           {formData.planAnalysisRaw && (
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-violet-100">
-                              {([
-                                { label: "Disturbed Area", val: formData.planAnalysisRaw.estimatedDisturbedArea?.value ? `${formData.planAnalysisRaw.estimatedDisturbedArea.value} ac` : null },
-                                { label: "Owner", val: formData.planAnalysisRaw.ownerName },
-                                { label: "Site Address", val: formData.planAnalysisRaw.siteAddress },
-                                { label: "Phone", val: formData.planAnalysisRaw.ownerPhone },
-                                { label: "Contact", val: formData.planAnalysisRaw.contactPerson },
-                                { label: "Email", val: formData.planAnalysisRaw.ownerEmail },
-                                { label: "Start Date", val: formData.planAnalysisRaw.projectStartDate },
-                                { label: "Finish Date", val: formData.planAnalysisRaw.projectFinishDate },
-                                { label: "Soil Data", val: formData.planAnalysisRaw.soilComposition ? "found" : null },
-                                { label: "Waterway", val: formData.planAnalysisRaw.nearestWaterbody },
-                                { label: "Species Notes", val: formData.planAnalysisRaw.endangeredSpeciesNotes ? "found" : null },
-                                { label: "Description", val: formData.planAnalysisRaw.projectDescription ? "found" : null },
-                                { label: "Activities", val: formData.planAnalysisRaw.sequenceOfActivities ? "found" : null },
-                              ] as { label: string; val: string | null }[]).map(({ label, val }) => {
+                            <div className="pt-2 border-t border-violet-100 space-y-3">
+                              {/* Short fields grid */}
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                                {([
+                                  { label: "Disturbed Area", val: formData.planAnalysisRaw.estimatedDisturbedArea?.value ? `${formData.planAnalysisRaw.estimatedDisturbedArea.value} ac` : null },
+                                  { label: "Owner", val: formData.planAnalysisRaw.ownerName },
+                                  { label: "Site Address", val: formData.planAnalysisRaw.siteAddress },
+                                  { label: "Phone", val: formData.planAnalysisRaw.ownerPhone },
+                                  { label: "Contact", val: formData.planAnalysisRaw.contactPerson },
+                                  { label: "Email", val: formData.planAnalysisRaw.ownerEmail },
+                                  { label: "Start Date", val: formData.planAnalysisRaw.projectStartDate },
+                                  { label: "Finish Date", val: formData.planAnalysisRaw.projectFinishDate },
+                                  { label: "Waterway", val: formData.planAnalysisRaw.nearestWaterbody },
+                                ] as { label: string; val: string | null }[]).map(({ label, val }) => {
+                                  const found = val && val !== "N/A" && val !== "null";
+                                  return (
+                                    <div key={label} className="flex items-baseline gap-1 text-[11px]">
+                                      <span className={found ? "text-emerald-500" : "text-slate-300"}>{found ? "✓" : "✗"}</span>
+                                      <span className="text-slate-400 shrink-0">{label}:</span>
+                                      <span className={cn("truncate", found ? "text-slate-700" : "text-slate-300")}>{found ? val : "not found"}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {/* Long text fields — show actual content */}
+                              {[
+                                { label: "Soil Data", val: formData.planAnalysisRaw.soilComposition },
+                                { label: "Endangered Species Notes", val: formData.planAnalysisRaw.endangeredSpeciesNotes },
+                                { label: "Project Description", val: formData.planAnalysisRaw.projectDescription },
+                                { label: "Sequence of Activities", val: formData.planAnalysisRaw.sequenceOfActivities },
+                              ].map(({ label, val }) => {
                                 const found = val && val !== "N/A" && val !== "null";
                                 return (
-                                  <div key={label} className="flex items-baseline gap-1 text-[11px]">
-                                    <span className={found ? "text-emerald-500" : "text-slate-300"}>
-                                      {found ? "✓" : "✗"}
-                                    </span>
-                                    <span className="text-slate-400 shrink-0">{label}:</span>
-                                    <span className={cn("truncate", found ? "text-slate-700" : "text-slate-300")}>
-                                      {found ? val : "not found"}
-                                    </span>
+                                  <div key={label} className="text-[11px]">
+                                    <div className="flex items-center gap-1 mb-0.5">
+                                      <span className={found ? "text-emerald-500" : "text-slate-300"}>{found ? "✓" : "✗"}</span>
+                                      <span className="text-slate-500 font-semibold">{label}</span>
+                                    </div>
+                                    {found ? (
+                                      <p className="text-slate-600 leading-relaxed whitespace-pre-line pl-3 border-l-2 border-violet-100">
+                                        {val}
+                                      </p>
+                                    ) : (
+                                      <p className="text-slate-300 pl-3">not found</p>
+                                    )}
                                   </div>
                                 );
                               })}
