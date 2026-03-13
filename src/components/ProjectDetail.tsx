@@ -805,7 +805,13 @@ export default function ProjectDetail({
                               {/* Short fields grid */}
                               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                                 {([
-                                  { label: "Disturbed Area", val: formData.planAnalysisRaw.estimatedDisturbedArea?.value ? `${formData.planAnalysisRaw.estimatedDisturbedArea.value} ac` : null },
+                                  {
+                                    label: "Disturbed Area",
+                                    val: formData.planAnalysisRaw.estimatedDisturbedArea?.value ? `${formData.planAnalysisRaw.estimatedDisturbedArea.value} ac` : null,
+                                    sub: formData.planAnalysisRaw.estimatedDisturbedArea?.method === "explicit_label"
+                                      ? null
+                                      : formData.planAnalysisRaw.estimatedDisturbedArea?.details || null,
+                                  },
                                   { label: "Owner", val: formData.planAnalysisRaw.ownerName },
                                   { label: "Site Address", val: formData.planAnalysisRaw.siteAddress },
                                   { label: "Phone", val: formData.planAnalysisRaw.ownerPhone },
@@ -814,13 +820,16 @@ export default function ProjectDetail({
                                   { label: "Start Date", val: formData.planAnalysisRaw.projectStartDate },
                                   { label: "Finish Date", val: formData.planAnalysisRaw.projectFinishDate },
                                   { label: "Waterway", val: formData.planAnalysisRaw.nearestWaterbody },
-                                ] as { label: string; val: string | null }[]).map(({ label, val }) => {
+                                ] as { label: string; val: string | null; sub?: string | null }[]).map(({ label, val, sub }) => {
                                   const found = val && val !== "N/A" && val !== "null";
                                   return (
                                     <div key={label} className="flex items-baseline gap-1 text-[11px]">
                                       <span className={found ? "text-emerald-500" : "text-slate-300"}>{found ? "✓" : "✗"}</span>
                                       <span className="text-slate-400 shrink-0">{label}:</span>
                                       <span className={cn("truncate", found ? "text-slate-700" : "text-slate-300")}>{found ? val : "not found"}</span>
+                                      {found && sub && (
+                                        <span className="text-amber-500 shrink-0" title={sub}>⚠ estimated</span>
+                                      )}
                                     </div>
                                   );
                                 })}
