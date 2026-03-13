@@ -326,13 +326,11 @@ export default function ProjectDetail({
         };
         const filledFields: string[] = [];
 
-        // Always overwrite — disturbed area from civil drawings is authoritative
-        if (raw.estimatedDisturbedArea?.value && raw.estimatedDisturbedArea.value !== "N/A") {
+        // Fill if empty only — never overwrite existing data
+        if (!formData.landDisturbanceArea && raw.estimatedDisturbedArea?.value && raw.estimatedDisturbedArea.value !== "N/A") {
           const parsed = parseFloat(raw.estimatedDisturbedArea.value);
           if (!isNaN(parsed)) { updates.landDisturbanceArea = parsed; filledFields.push("landDisturbanceArea"); }
         }
-        // Fill if empty — soil and waterway come from SSURGO/ATTAINS APIs which are more precise;
-        // only use AI extraction as a fallback when those APIs haven't populated the field yet
         if (!formData.soilData && raw.soilComposition && raw.soilComposition !== "N/A") {
           updates.soilData = raw.soilComposition;
           filledFields.push("soilData");
@@ -341,7 +339,7 @@ export default function ProjectDetail({
           updates.waterway = raw.nearestWaterbody;
           filledFields.push("waterway");
         }
-        if (raw.waterbodyImpairment && raw.waterbodyImpairment !== "N/A") {
+        if (formData.waterbodyImpaired === undefined && raw.waterbodyImpairment && raw.waterbodyImpairment !== "N/A") {
           updates.waterbodyImpaired = raw.waterbodyImpairment.toLowerCase() !== "not impaired" && raw.waterbodyImpairment.toLowerCase() !== "none";
           filledFields.push("waterbodyImpaired");
         }
