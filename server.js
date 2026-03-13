@@ -77,7 +77,7 @@ EXTRACT ALL OF THE FOLLOWING (set to null if truly not findable):
   "summary": "3-5 sentence overview of these civil plans including project type, key features, notable environmental or site conditions, and any stormwater-relevant details"
 }
 
-Return ONLY valid JSON, no markdown formatting.\`
+Return ONLY valid JSON, no markdown formatting.`;
 
 async function callGemini(base64Data) {
   if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
