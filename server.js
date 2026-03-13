@@ -22,7 +22,7 @@ const N8N_WEBHOOK_URL =
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = "gemini-3.1-pro-preview";
-const GEMINI_PROMPT = `You are an expert civil engineering plan reader. Analyze these construction/civil drawings thoroughly and extract the following information.
+const GEMINI_PROMPT = `You are an expert civil engineering plan reader specializing in stormwater pollution prevention plans (SWPPP). Analyze these construction/civil drawings thoroughly and extract the following information.
 
 CRITICAL INSTRUCTIONS FOR AREA CALCULATION:
 - Look for explicitly stated "Estimated Disturbed Area", "Total Disturbed Area", "Site Area", or similar labels
@@ -30,27 +30,54 @@ CRITICAL INSTRUCTIONS FOR AREA CALCULATION:
 - Always convert to acres (1 acre = 43,560 sq ft)
 - Report both the value and how you determined it
 
+CRITICAL INSTRUCTIONS FOR SEQUENCE OF ACTIVITIES:
+- This is used directly in a SWPPP document — provide a detailed, numbered sequence of ALL construction phases
+- Standard SWPPP phases to look for and include (adapt based on what the project actually shows):
+  1. Mobilization and installation of erosion/sediment controls (silt fence, inlet protection, construction entrance)
+  2. Site clearing, demolition, and tree removal (if applicable)
+  3. Rough grading and earthwork/mass excavation
+  4. Underground utilities installation (water, sewer, storm drain, electrical, gas)
+  5. Subgrade preparation
+  6. Paving, curb and gutter, concrete flatwork
+  7. Vertical construction (foundations, framing, building construction)
+  8. Finish grading and final earthwork
+  9. Landscaping, seeding, sodding, and permanent stabilization
+  10. Removal of temporary erosion controls and site cleanup
+- Write each activity as a complete sentence. Be specific to the project type (residential, commercial, utility, road, etc.)
+- Minimum 6-8 activities; more if the project warrants it
+
+INSTRUCTIONS FOR SOIL AND WATERWAY DATA:
+- soilComposition: Look for soil boring logs, geotechnical notes, soil survey references, or any mention of soil types (clay, sandy loam, etc.). If none found, return null.
+- nearestWaterbody: Look for any streams, rivers, lakes, creeks, drainage channels, or water features labeled on the plans or in drainage notes.
+- waterbodyImpairment: Look for any notes about 303(d) listed waters, impaired waters, TMDL, or water quality concerns. Return "not impaired" if plans show no impairment notes.
+- siteCoordinates: Look for any GPS coordinates, latitude/longitude, or geographic coordinates on the plans (often on cover sheet or location map).
+
 EXTRACT ALL OF THE FOLLOWING (set to null if truly not findable):
 
 {
   "estimatedDisturbedArea": { "value": "number in acres", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale", "details": "how you determined this" },
   "totalProjectArea": { "value": "number in acres", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale", "details": "how you determined this" },
-  "projectDescription": "description of the construction project",
-  "sequenceOfActivities": "ordered list of major construction activities (e.g., site prep, grading, utilities, paving, building, landscaping, stabilization)",
-  "endangeredSpeciesNotes": "any notes about endangered species, wetlands, or environmental concerns on the plans",
-  "historicalPlacesNotes": "any notes about historical places or cultural resources",
-  "projectStartDate": "MM/DD/YY if found",
-  "projectFinishDate": "MM/DD/YY if found",
+  "projectDescription": "2-3 sentence description of the construction project type, scope, and key features",
+  "sequenceOfActivities": "Full numbered sequence of construction activities as described above — write as a numbered list with each item on a new line (1. Activity one\n2. Activity two\n...)",
+  "soilComposition": "soil types found in geotechnical notes or soil survey (e.g., 'Clay loam, sandy clay')",
+  "nearestWaterbody": "name of nearest stream, river, lake, or water feature shown on or near the plans",
+  "waterbodyImpairment": "impairment status — look for 303(d) listing, TMDL notes, or water quality notes. Use 'not impaired' if no issues noted.",
+  "endangeredSpeciesNotes": "any notes about endangered/threatened species, critical habitat, wetlands, or sensitive ecological areas on the plans",
+  "historicalPlacesNotes": "any notes about historical places, cultural resources, or archaeological sites",
+  "projectStartDate": "MM/DD/YY if found on plans",
+  "projectFinishDate": "MM/DD/YY if found on plans",
   "ownerName": "property or project owner name from title block or cover sheet",
-  "ownerAddress": "owner address",
-  "ownerPhone": "owner phone number",
-  "ownerEmail": "owner email",
-  "contactPerson": "primary contact or engineer of record name",
-  "siteAddress": "project site address from plans",
-  "summary": "3-5 sentence overview of these civil plans including project type, key features, and notable site conditions"
+  "ownerAddress": "owner mailing address",
+  "ownerPhone": "owner or primary contact phone number",
+  "ownerEmail": "owner or primary contact email",
+  "contactPerson": "engineer of record, project manager, or primary contact name and credentials",
+  "siteAddress": "project site street address from plans",
+  "latitude": "decimal degrees latitude if shown on plans (e.g., 29.7604)",
+  "longitude": "decimal degrees longitude if shown on plans (e.g., -95.3698)",
+  "summary": "3-5 sentence overview of these civil plans including project type, key features, notable environmental or site conditions, and any stormwater-relevant details"
 }
 
-Return ONLY valid JSON, no markdown formatting.`;
+Return ONLY valid JSON, no markdown formatting.\`
 
 async function callGemini(base64Data) {
   if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");

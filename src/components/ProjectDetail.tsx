@@ -373,6 +373,10 @@ export default function ProjectDetail({
           updates.projectAddress = raw.siteAddress;
           filledFields.push("projectAddress");
         }
+        if (!formData.endangeredSpecies && raw.endangeredSpeciesNotes && raw.endangeredSpeciesNotes !== "N/A") {
+          updates.endangeredSpecies = raw.endangeredSpeciesNotes;
+          filledFields.push("endangeredSpecies");
+        }
 
         // Merge with existing aiFilledFields (union — previous badges persist)
         const existing = formData.aiFilledFields || [];
@@ -768,6 +772,9 @@ export default function ProjectDetail({
                                 { label: "Email", val: formData.planAnalysisRaw.ownerEmail },
                                 { label: "Start Date", val: formData.planAnalysisRaw.projectStartDate },
                                 { label: "Finish Date", val: formData.planAnalysisRaw.projectFinishDate },
+                                { label: "Soil Data", val: formData.planAnalysisRaw.soilComposition ? "found" : null },
+                                { label: "Waterway", val: formData.planAnalysisRaw.nearestWaterbody },
+                                { label: "Species Notes", val: formData.planAnalysisRaw.endangeredSpeciesNotes ? "found" : null },
                                 { label: "Description", val: formData.planAnalysisRaw.projectDescription ? "found" : null },
                                 { label: "Activities", val: formData.planAnalysisRaw.sequenceOfActivities ? "found" : null },
                               ] as { label: string; val: string | null }[]).map(({ label, val }) => {
@@ -1069,7 +1076,7 @@ export default function ProjectDetail({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-slate-700">
-                      Endangered Species
+                      Endangered Species<AiBadge field="endangeredSpecies" />
                     </label>
                     <a
                       href={`https://ecos.fws.gov/ecp/report/species-listings-by-current-range-county?fips=${
