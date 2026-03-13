@@ -3,6 +3,7 @@ import type { Project } from "../data";
 import {
   ArrowLeft,
   CheckCircle,
+  CheckCircle2,
   FileText,
   ExternalLink,
   Map,
@@ -58,6 +59,7 @@ export default function ProjectDetail({
   const [isRetriggering, setIsRetriggering] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [savedToast, setSavedToast] = useState(false);
   const [formData, setFormData] = useState<Project>(project);
 
   const isPending =
@@ -91,6 +93,8 @@ export default function ProjectDetail({
       // Only save if formData has actually changed from the original project
       if (JSON.stringify(formData) !== JSON.stringify(project)) {
         onUpdate(formData);
+        setSavedToast(true);
+        setTimeout(() => setSavedToast(false), 2000);
       }
     }, 1000); // Wait 1 second after last change
 
@@ -170,6 +174,14 @@ export default function ProjectDetail({
   ];
 
   const handleApprove = () => {
+    const missingFields: string[] = [];
+    if (!formData.landDisturbanceArea) missingFields.push("Disturbed Area");
+    if (!formData.projectAddress) missingFields.push("Project Address");
+    if (!formData.projectDescription) missingFields.push("Project Description");
+    const warning = missingFields.length
+      ? `\n\nNote: The following fields are empty:\n• ${missingFields.join("\n• ")}\n\nProceed anyway?`
+      : "";
+    if (!confirm(`Approve "${formData.projectName}" for document generation?${warning}`)) return;
     // Mock API call / Generation process
     setIsGenerating(true);
     setTimeout(() => {
@@ -406,6 +418,14 @@ export default function ProjectDetail({
     ) : null;
 
   return (
+    <>
+    {/* Auto-save toast */}
+    {savedToast && (
+      <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 bg-slate-900 text-white text-sm font-medium px-4 py-2.5 rounded-xl shadow-xl animate-in fade-in slide-in-from-bottom-2">
+        <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+        Saved
+      </div>
+    )}
     <div className="bg-white shadow-sm rounded-2xl border border-slate-200 overflow-hidden">
       {/* Header */}
       <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
@@ -698,6 +718,14 @@ export default function ProjectDetail({
                     )}
                   </div>
 
+                  {/* Dropbox link quality warning */}
+                  {formData.civilDrawingsLink && !formData.civilDrawingsLink.includes("dl=1") && formData.civilDrawingsLink.includes("dropbox.com") && (
+                    <p className="text-[11px] text-amber-600 flex items-center gap-1.5 mt-1">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      Shared Dropbox links may not be directly downloadable. Use "Upload PDF directly" for best results.
+                    </p>
+                  )}
+
                   {/* AI Plan Analysis */}
                   <div className="rounded-lg border border-slate-200 p-4 mt-1 space-y-3">
                       {/* File Upload */}
@@ -793,6 +821,18 @@ export default function ProjectDetail({
                               })}
                             </div>
                           )}
+                          {/* Empty state hint when many fields not found */}
+                          {(() => {
+                            const raw = formData.planAnalysisRaw!;
+                            const notFoundCount = [raw.ownerName, raw.ownerPhone, raw.siteAddress, raw.projectStartDate, raw.projectFinishDate, raw.soilComposition, raw.nearestWaterbody]
+                              .filter(v => !v || v === "N/A" || v === "null").length;
+                            return notFoundCount >= 4 ? (
+                              <p className="text-[10px] text-amber-500 flex items-center gap-1.5 pt-1">
+                                <AlertTriangle className="h-3 w-3 shrink-0" />
+                                Many fields not found — this may be a scanned/image PDF. Text-based PDFs yield better results.
+                              </p>
+                            ) : null;
+                          })()}
                           {/* Token usage */}
                           {formData.planAnalysisRaw?._usage && (
                             <div className="flex items-center gap-1.5 pt-2 border-t border-violet-100 text-[10px] text-violet-400">
@@ -1599,5 +1639,6 @@ export default function ProjectDetail({
         </div>
       </div>
     </div>
+    </>
   );
 }

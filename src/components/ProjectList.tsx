@@ -12,6 +12,8 @@ import {
   Printer,
   ShieldCheck,
   Globe,
+  Search,
+  X,
 } from "lucide-react";
 import { cn, formatDate } from "../utils";
 import { getTemplateName } from "../templates";
@@ -42,6 +44,20 @@ export default function ProjectList({
   onBulkDeleteProjects,
 }: ProjectListProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  const filtered = projects.filter((p) => {
+    const q = searchQuery.toLowerCase();
+    const matchesSearch =
+      !q ||
+      p.projectName.toLowerCase().includes(q) ||
+      p.email.toLowerCase().includes(q) ||
+      (p.companyName || "").toLowerCase().includes(q) ||
+      (p.projectAddress || "").toLowerCase().includes(q);
+    const matchesStatus = statusFilter === "all" || p.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
 
   const toggleSelect = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -101,9 +117,58 @@ export default function ProjectList({
         </AnimatePresence>
       </div>
 
+      {/* Search + Filter bar */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search by name, email, company, address…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-9 py-2.5 text-sm bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder:text-slate-400"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="text-sm bg-white border border-slate-200 rounded-xl px-3 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700 font-medium"
+        >
+          <option value="all">All Statuses</option>
+          <option value="New">New</option>
+          <option value="Pending Review">Pending Review</option>
+          <option value="Processing">Processing</option>
+          <option value="Manual Processing">Manual Processing</option>
+          <option value="Approved for Generation">Approved for Generation</option>
+          <option value="Complete">Complete</option>
+          <option value="Ready">Ready</option>
+        </select>
+        {(searchQuery || statusFilter !== "all") && (
+          <span className="text-sm text-slate-500 whitespace-nowrap">
+            {filtered.length} of {projects.length}
+          </span>
+        )}
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="text-center py-16 text-slate-400">
+          <Search className="h-8 w-8 mx-auto mb-3 opacity-40" />
+          <p className="font-medium">No projects match your search.</p>
+          <button onClick={() => { setSearchQuery(""); setStatusFilter("all"); }} className="mt-2 text-indigo-500 text-sm hover:underline">Clear filters</button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4">
         <AnimatePresence mode="popLayout">
-          {projects.map((project) => (
+          {filtered.map((project) => (
             <motion.div
               layout
               key={project.id}
