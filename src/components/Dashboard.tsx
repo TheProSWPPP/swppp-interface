@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { Project } from "../data";
 import ProjectList from "./ProjectList";
 import ProjectDetail from "./ProjectDetail";
@@ -18,6 +18,40 @@ export default function Dashboard({
   onBulkDeleteProjects,
 }: DashboardProps) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+
+  // Restore selected project from URL hash on load / projects change
+  useEffect(() => {
+    const match = window.location.hash.match(/^#project-(.+)$/);
+    if (match) {
+      const found = projects.find((p) => p.id === match[1]);
+      if (found) setSelectedProject(found);
+    }
+  }, [projects]);
+
+  // Sync hash with browser back button
+  useEffect(() => {
+    const handlePop = () => {
+      const match = window.location.hash.match(/^#project-(.+)$/);
+      if (match) {
+        const found = projects.find((p) => p.id === match[1]);
+        setSelectedProject(found ?? null);
+      } else {
+        setSelectedProject(null);
+      }
+    };
+    window.addEventListener("popstate", handlePop);
+    return () => window.removeEventListener("popstate", handlePop);
+  }, [projects]);
+
+  const openProject = (project: Project) => {
+    setSelectedProject(project);
+    window.location.hash = `project-${project.id}`;
+  };
+
+  const closeProject = () => {
+    setSelectedProject(null);
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+  };
 
   const stats = {
     total: projects.length,
@@ -90,20 +124,20 @@ export default function Dashboard({
       {selectedProject ? (
         <ProjectDetail
           project={selectedProject}
-          onBack={() => setSelectedProject(null)}
+          onBack={closeProject}
           onUpdate={(updated) => {
             onUpdateProject(updated);
             setSelectedProject(updated);
           }}
           onDelete={() => {
             onDeleteProject(selectedProject.id);
-            setSelectedProject(null);
+            closeProject();
           }}
         />
       ) : (
         <ProjectList
           projects={projects}
-          onSelectProject={setSelectedProject}
+          onSelectProject={openProject}
           onDeleteProject={onDeleteProject}
           onBulkDeleteProjects={onBulkDeleteProjects}
         />
