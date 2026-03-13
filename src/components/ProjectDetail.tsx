@@ -49,6 +49,17 @@ interface ProjectDetailProps {
   onDelete: () => void;
 }
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/^#{1,6}\s+/gm, "")       // ## headings
+    .replace(/\*\*(.+?)\*\*/g, "$1")   // **bold**
+    .replace(/\*(.+?)\*/g, "$1")       // *italic*
+    .replace(/^[-*]\s+/gm, "")         // - bullet or * bullet at line start (keep numbered)
+    .replace(/__(.+?)__/g, "$1")       // __bold__
+    .replace(/_(.+?)_/g, "$1")         // _italic_
+    .trim();
+}
+
 export default function ProjectDetail({
   project,
   onBack,
@@ -350,7 +361,7 @@ export default function ProjectDetail({
           filledFields.push("projectDescription");
         }
         if (!formData.sequenceActivities && raw.sequenceOfActivities && raw.sequenceOfActivities !== "N/A") {
-          updates.sequenceActivities = raw.sequenceOfActivities;
+          updates.sequenceActivities = stripMarkdown(raw.sequenceOfActivities);
           filledFields.push("sequenceActivities");
         }
         if (!formData.latitude && raw.latitude && raw.latitude !== "N/A") {
@@ -821,7 +832,8 @@ export default function ProjectDetail({
                                 { label: "Project Description", val: formData.planAnalysisRaw.projectDescription },
                                 { label: "Sequence of Activities", val: formData.planAnalysisRaw.sequenceOfActivities },
                               ].map(({ label, val }) => {
-                                const found = val && val !== "N/A" && val !== "null";
+                                const clean = val ? stripMarkdown(val) : val;
+                                const found = clean && clean !== "N/A" && clean !== "null";
                                 return (
                                   <div key={label} className="text-[11px]">
                                     <div className="flex items-center gap-1 mb-0.5">
@@ -830,7 +842,7 @@ export default function ProjectDetail({
                                     </div>
                                     {found ? (
                                       <p className="text-slate-600 leading-relaxed whitespace-pre-line pl-3 border-l-2 border-violet-100">
-                                        {val}
+                                        {clean}
                                       </p>
                                     ) : (
                                       <p className="text-slate-300 pl-3">not found</p>
