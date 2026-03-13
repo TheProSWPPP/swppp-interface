@@ -799,10 +799,7 @@ export default function ProjectDetail({
                                 {formData.planAnalysisRaw._usage.outputTokens.toLocaleString()} out
                                 {formData.planAnalysisRaw._usage.thoughtsTokens > 0 && ` / ${formData.planAnalysisRaw._usage.thoughtsTokens.toLocaleString()} thinking`}
                                 {" — "}
-                                ~${formData.planAnalysisRaw._usage.estimatedCostUSD.toFixed(4)}
-                                {formData.planAnalysisRaw._usage.pdfPages > 1 && formData.planAnalysisRaw._usage.costPerPage != null && (
-                                  <> · ${(formData.planAnalysisRaw._usage.costPerPage * 1000).toFixed(3)}/page</>
-                                )}
+                                ~${formData.planAnalysisRaw._usage.estimatedCostUSD.toFixed(5)} total
                               </span>
                             </div>
                           )}
