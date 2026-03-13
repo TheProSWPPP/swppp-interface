@@ -21,7 +21,7 @@ const N8N_WEBHOOK_URL =
   "https://proswppp.app.n8n.cloud/webhook/state-document-generator";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-3.1-pro-preview";
 const GEMINI_PROMPT = `You are an expert civil engineering plan reader. Analyze these construction/civil drawings thoroughly and extract the following information.
 
 CRITICAL INSTRUCTIONS FOR AREA CALCULATION:
@@ -75,7 +75,7 @@ async function callGemini(base64Data) {
   const cleaned = text.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
   const analysisData = JSON.parse(cleaned);
 
-  // Attach token usage + estimated cost (Gemini 2.5 Flash pricing)
+  // Attach token usage + estimated cost (Gemini 3.1 Pro Preview pricing: $1.25 in / $10.00 out per 1M)
   const u = json.usageMetadata || {};
   const inputTokens = u.promptTokenCount || 0;
   const outputTokens = u.candidatesTokenCount || 0;
@@ -85,7 +85,7 @@ async function callGemini(base64Data) {
     outputTokens,
     thoughtsTokens,
     totalTokens: u.totalTokenCount || 0,
-    estimatedCostUSD: (inputTokens * 0.075 + outputTokens * 0.30) / 1_000_000,
+    estimatedCostUSD: (inputTokens * 1.25 + outputTokens * 10.00) / 1_000_000,
   };
   console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
   return analysisData;
