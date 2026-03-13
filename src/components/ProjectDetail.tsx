@@ -350,11 +350,6 @@ export default function ProjectDetail({
           updates.waterway = raw.nearestWaterbody;
           filledFields.push("waterway");
         }
-        if (formData.waterbodyImpaired === undefined && raw.waterbodyImpairment && raw.waterbodyImpairment !== "N/A") {
-          updates.waterbodyImpaired = raw.waterbodyImpairment.toLowerCase() !== "not impaired" && raw.waterbodyImpairment.toLowerCase() !== "none";
-          filledFields.push("waterbodyImpaired");
-        }
-
         // Fill if empty only — human-entered fields, never overwrite
         if (!formData.projectDescription && raw.projectDescription && raw.projectDescription !== "N/A") {
           updates.projectDescription = raw.projectDescription;

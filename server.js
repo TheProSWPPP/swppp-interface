@@ -57,33 +57,31 @@ CRITICAL INSTRUCTIONS FOR SEQUENCE OF ACTIVITIES:
 - Omit phases not applicable; minimum 6 phases
 
 INSTRUCTIONS FOR SOIL AND WATERWAY DATA:
-- soilComposition: Look for soil boring logs, geotechnical notes, soil survey references, or any mention of soil types (clay, sandy loam, etc.). If none found, return null.
+- soilComposition: Look for soil boring logs, geotechnical notes, soil survey references, or any mention of soil types. If none found, return null.
 - nearestWaterbody: Look for any streams, rivers, lakes, creeks, drainage channels, or water features labeled on the plans or in drainage notes.
-- waterbodyImpairment: Look for any notes about 303(d) listed waters, impaired waters, TMDL, or water quality concerns. Return "not impaired" if plans show no impairment notes.
-- siteCoordinates: Look for any GPS coordinates, latitude/longitude, or geographic coordinates on the plans (often on cover sheet or location map).
+- siteCoordinates: Look for any GPS coordinates, latitude/longitude, or geographic coordinates on the plans (often on cover sheet or location map). Convert DMS (degrees/minutes/seconds) to decimal degrees if needed.
 
 EXTRACT ALL OF THE FOLLOWING (set to null if truly not findable):
 
 {
-  "estimatedDisturbedArea": { "value": "number in acres", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale", "details": "how you determined this" },
-  "totalProjectArea": { "value": "number in acres", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale", "details": "how you determined this" },
-  "projectDescription": "2-3 sentence description of the construction project type, scope, and key features",
+  "estimatedDisturbedArea": { "value": "plain decimal number only, no text (e.g., 0.72 or 4.5)", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale", "details": "how you determined this" },
+  "totalProjectArea": { "value": "plain decimal number only", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale", "details": "how you determined this" },
+  "projectDescription": "Follow this exact format: 'This project consists of [construction type] located at [address] in [City], [County] County, [State]. Plans call for, but are not limited to, [key work items listed from the plans].' Two sentences maximum.",
   "sequenceOfActivities": "Full sequence of construction activities using the heading+description format described above. Plain text only, no markdown.",
   "soilComposition": "soil types found in geotechnical notes or soil survey (e.g., 'Clay loam, sandy clay')",
   "nearestWaterbody": "name of nearest stream, river, lake, or water feature shown on or near the plans",
-  "waterbodyImpairment": "impairment status — look for 303(d) listing, TMDL notes, or water quality notes. Use 'not impaired' if no issues noted.",
   "endangeredSpecies": "comma-separated list of threatened/endangered species common names if explicitly mentioned on the plans (e.g., 'Whooping crane, golden-cheeked warbler'). Civil drawings rarely contain this — return null if not found. Do NOT infer from location.",
   "historicalPlacesNotes": "any notes about historical places, cultural resources, or archaeological sites",
   "projectStartDate": "MM/DD/YY if found on plans",
   "projectFinishDate": "MM/DD/YY if found on plans",
   "ownerName": "property or project owner name from title block or cover sheet",
   "ownerAddress": "owner mailing address",
-  "ownerPhone": "owner or primary contact phone number",
+  "ownerPhone": "primary contact phone number in (XXX) XXX-XXXX format",
   "ownerEmail": "owner or primary contact email",
-  "contactPerson": "engineer of record, project manager, or primary contact name and credentials",
+  "contactPerson": "primary contact or engineer name only — no credentials, no title (e.g., 'John Smith')",
   "siteAddress": "project site street address from plans",
-  "latitude": "decimal degrees latitude if shown on plans (e.g., 29.7604)",
-  "longitude": "decimal degrees longitude if shown on plans (e.g., -95.3698)",
+  "latitude": "decimal degrees latitude (e.g., 29.7604) — convert from DMS if needed",
+  "longitude": "decimal degrees longitude (e.g., -95.3698) — convert from DMS if needed, use negative for West",
   "summary": "3-5 sentence overview of these civil plans including project type, key features, notable environmental or site conditions, and any stormwater-relevant details"
 }
 
