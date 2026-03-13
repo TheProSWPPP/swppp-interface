@@ -396,8 +396,8 @@ export default function ProjectDetail({
           updates.projectAddress = raw.siteAddress;
           filledFields.push("projectAddress");
         }
-        if (!formData.endangeredSpecies && raw.endangeredSpeciesNotes && raw.endangeredSpeciesNotes !== "N/A") {
-          updates.endangeredSpecies = raw.endangeredSpeciesNotes;
+        if (!formData.endangeredSpecies && raw.endangeredSpecies && raw.endangeredSpecies !== "N/A") {
+          updates.endangeredSpecies = raw.endangeredSpecies;
           filledFields.push("endangeredSpecies");
         }
 
@@ -828,7 +828,7 @@ export default function ProjectDetail({
                               {/* Long text fields — show actual content */}
                               {[
                                 { label: "Soil Data", val: formData.planAnalysisRaw.soilComposition },
-                                { label: "Endangered Species Notes", val: formData.planAnalysisRaw.endangeredSpeciesNotes },
+                                { label: "Endangered Species", val: formData.planAnalysisRaw.endangeredSpecies },
                                 { label: "Project Description", val: formData.planAnalysisRaw.projectDescription },
                                 { label: "Sequence of Activities", val: formData.planAnalysisRaw.sequenceOfActivities },
                               ].map(({ label, val }) => {

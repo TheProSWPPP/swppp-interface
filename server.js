@@ -31,32 +31,30 @@ CRITICAL INSTRUCTIONS FOR AREA CALCULATION:
 - Report both the value and how you determined it
 
 CRITICAL INSTRUCTIONS FOR SEQUENCE OF ACTIVITIES:
-- This is inserted directly into a SWPPP document — use the exact heading+description format shown below
-- FORMAT: Each phase has a short bold heading on its own line, followed by 1-2 descriptive sentences on the next line. Separate phases with a blank line.
-- Example format:
+- This goes directly into a SWPPP document. Use plain text heading+description format — NO markdown, NO asterisks, NO numbering, NO bullet symbols.
+- FORMAT: Each phase is a short heading on its own line, followed immediately by 1-2 descriptive sentences on the next line. One blank line between phases.
+- Example:
   Mobilization and Site Preparation
   Mobilization of equipment and personnel, installation of stabilized construction entrance, perimeter silt fence, and inlet protection BMPs.
 
-  Clearing, Grubbing, and Demolition
-  Removal of existing vegetation, structures, and site improvements within the project limits.
+  Clearing and Grubbing
+  Removal of existing vegetation and site improvements within the limits of disturbance.
 
   Rough Grading and Earthwork
   Mass grading operations and subgrade preparation to establish design elevations and drainage patterns.
 
-  [continue for all phases...]
+- FIRST identify the project type from the plans (e.g., waterline/utility, building, road, residential subdivision, wastewater, etc.) — then write ONLY the phases that apply to that type:
 
-- Always include these phases (adapt wording to project type):
-  1. Mobilization and Site Preparation (erosion controls, construction entrance)
-  2. Clearing, Grubbing, and Demolition (if applicable)
-  3. Rough Grading and Earthwork
-  4. Underground Utility Installation (water, sewer, storm, electrical — list what applies)
-  5. Subgrade Preparation and Paving (if applicable)
-  6. Structural/Vertical Construction (if applicable)
-  7. Finish Grading
-  8. Permanent Stabilization and Landscaping
-  9. Removal of Temporary Erosion Controls and Site Cleanup
-- Be specific to the project type (pipeline, building, road, utility, residential, etc.)
-- Minimum 6 phases; omit phases not applicable to this project type
+  WATERLINE / LINEAR UTILITY projects: Mobilization → ROW Preparation → Trench Excavation Safety Setup → Pipe/Utility Installation (name the pipe sizes and materials shown) → Tie-ins and Connections → Backfill and Compaction → Pavement/Surface Restoration → Final Stabilization → Temporary Controls Removal
+
+  BUILDING / COMMERCIAL projects: Mobilization → Demolition/Clearing → Rough Grading → Underground Utilities → Subgrade/Paving → Structural/Vertical Construction → Finish Grading → Landscaping/Stabilization → Temporary Controls Removal
+
+  ROAD / PAVEMENT projects: Mobilization → Demolition/Clearing → Subgrade Preparation → Drainage/Storm Sewer → Base Course → Paving → Curb/Sidewalk → Striping/Signage → Stabilization → Temporary Controls Removal
+
+  RESIDENTIAL SUBDIVISION: Mobilization → Clearing/Grubbing → Mass Grading → Detention/Drainage Infrastructure → Utilities → Street/Paving → Lot Grading → Landscaping/Stabilization → Temporary Controls Removal
+
+- Be specific: name actual pipe materials, sizes, or key features shown on the plans
+- Omit phases not applicable; minimum 6 phases
 
 INSTRUCTIONS FOR SOIL AND WATERWAY DATA:
 - soilComposition: Look for soil boring logs, geotechnical notes, soil survey references, or any mention of soil types (clay, sandy loam, etc.). If none found, return null.
@@ -70,11 +68,11 @@ EXTRACT ALL OF THE FOLLOWING (set to null if truly not findable):
   "estimatedDisturbedArea": { "value": "number in acres", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale", "details": "how you determined this" },
   "totalProjectArea": { "value": "number in acres", "method": "explicit_label | calculated_from_dimensions | estimated_from_scale", "details": "how you determined this" },
   "projectDescription": "2-3 sentence description of the construction project type, scope, and key features",
-  "sequenceOfActivities": "Full numbered sequence of construction activities as described above — write as a numbered list with each item on a new line (1. Activity one\n2. Activity two\n...)",
+  "sequenceOfActivities": "Full sequence of construction activities using the heading+description format described above. Plain text only, no markdown.",
   "soilComposition": "soil types found in geotechnical notes or soil survey (e.g., 'Clay loam, sandy clay')",
   "nearestWaterbody": "name of nearest stream, river, lake, or water feature shown on or near the plans",
   "waterbodyImpairment": "impairment status — look for 303(d) listing, TMDL notes, or water quality notes. Use 'not impaired' if no issues noted.",
-  "endangeredSpeciesNotes": "any notes about endangered/threatened species, critical habitat, wetlands, or sensitive ecological areas on the plans",
+  "endangeredSpecies": "comma-separated list of threatened/endangered species common names if explicitly mentioned on the plans (e.g., 'Whooping crane, golden-cheeked warbler'). Civil drawings rarely contain this — return null if not found. Do NOT infer from location.",
   "historicalPlacesNotes": "any notes about historical places, cultural resources, or archaeological sites",
   "projectStartDate": "MM/DD/YY if found on plans",
   "projectFinishDate": "MM/DD/YY if found on plans",
