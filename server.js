@@ -524,10 +524,26 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       });
     }
 
+    // Get page count
+    let pdfPages = null;
+    try {
+      const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+      pdfPages = pdfDoc.getPageCount();
+    } catch (_) {}
+
     // Call Gemini directly
     const base64Data = pdfBuffer.toString("base64");
-    console.log(`Sending ${(base64Data.length / 1024 / 1024).toFixed(1)} MB base64 to Gemini...`);
+    console.log(`Sending ${(base64Data.length / 1024 / 1024).toFixed(1)} MB base64 (${pdfPages ?? "?"} pages) to Gemini...`);
     analysisData = await callGemini(base64Data);
+    if (analysisData._usage && pdfPages !== null) {
+      analysisData._usage.pdfPages = pdfPages;
+      // Refine cost estimate: Gemini charges 258 tokens/page for PDFs
+      // promptTokenCount already includes page tokens, so formula is still correct
+      // but show per-page cost as additional context
+      analysisData._usage.costPerPage = pdfPages > 0
+        ? analysisData._usage.estimatedCostUSD / pdfPages
+        : null;
+    }
 
     // Save to DB
     if (process.env.DATABASE_URL) {

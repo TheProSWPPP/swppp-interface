@@ -791,12 +791,18 @@ export default function ProjectDetail({
                             <div className="flex items-center gap-1.5 pt-2 border-t border-violet-100 text-[10px] text-violet-400">
                               <Zap className="h-3 w-3 shrink-0" />
                               <span>
+                                {formData.planAnalysisRaw._usage.pdfPages != null && (
+                                  <>{formData.planAnalysisRaw._usage.pdfPages}pp · </>
+                                )}
                                 {formData.planAnalysisRaw._usage.inputTokens.toLocaleString()} in
                                 {" / "}
                                 {formData.planAnalysisRaw._usage.outputTokens.toLocaleString()} out
                                 {formData.planAnalysisRaw._usage.thoughtsTokens > 0 && ` / ${formData.planAnalysisRaw._usage.thoughtsTokens.toLocaleString()} thinking`}
                                 {" — "}
-                                ~${formData.planAnalysisRaw._usage.estimatedCostUSD.toFixed(4)} USD
+                                ~${formData.planAnalysisRaw._usage.estimatedCostUSD.toFixed(4)}
+                                {formData.planAnalysisRaw._usage.pdfPages > 1 && formData.planAnalysisRaw._usage.costPerPage != null && (
+                                  <> · ${(formData.planAnalysisRaw._usage.costPerPage * 1000).toFixed(3)}/page</>
+                                )}
                               </span>
                             </div>
                           )}
