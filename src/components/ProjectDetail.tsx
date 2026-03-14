@@ -884,7 +884,9 @@ export default function ProjectDetail({
                               {/* Long text fields — show actual content */}
                               {[
                                 { label: "Soil Data", val: formData.planAnalysisRaw.soilComposition },
+                                { label: "Waterbody Impairment", val: formData.planAnalysisRaw.waterbodyImpairment },
                                 { label: "Endangered Species", val: formData.planAnalysisRaw.endangeredSpecies },
+                                { label: "Historical Places", val: formData.planAnalysisRaw.historicalPlacesNotes },
                                 { label: "Project Description", val: formData.planAnalysisRaw.projectDescription },
                                 { label: "Sequence of Activities", val: formData.planAnalysisRaw.sequenceOfActivities },
                               ].map(({ label, val }) => {
