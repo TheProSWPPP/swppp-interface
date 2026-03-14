@@ -164,7 +164,14 @@ export default function ProjectDetail({
   }, [formData.latitude, formData.longitude, isApproved]);
 
   const handleChange = (field: keyof Project, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    setFormData((prev) => {
+      const updated = { ...prev, [field]: value };
+      // Clear AI badge when user manually edits a field
+      if (prev.aiFilledFields?.includes(field as string)) {
+        updated.aiFilledFields = prev.aiFilledFields.filter((f) => f !== field);
+      }
+      return updated;
+    });
   };
 
   const toggleBMP = (bmp: string) => {
@@ -352,24 +359,36 @@ export default function ProjectDetail({
         }
         // Fill if empty only — human-entered fields, never overwrite
         if (!formData.projectDescription && raw.projectDescription && raw.projectDescription !== "N/A") {
-          updates.projectDescription = raw.projectDescription;
+          updates.projectDescription = stripMarkdown(raw.projectDescription);
           filledFields.push("projectDescription");
         }
         if (!formData.sequenceActivities && raw.sequenceOfActivities && raw.sequenceOfActivities !== "N/A") {
           updates.sequenceActivities = stripMarkdown(raw.sequenceOfActivities);
           filledFields.push("sequenceActivities");
         }
+        // Coordinate validation: only accept valid decimal degrees
         if (!formData.latitude && raw.latitude && raw.latitude !== "N/A") {
-          updates.latitude = raw.latitude;
-          filledFields.push("latitude");
+          const lat = parseFloat(raw.latitude);
+          if (!isNaN(lat) && lat >= -90 && lat <= 90) {
+            updates.latitude = String(lat);
+            filledFields.push("latitude");
+          }
         }
         if (!formData.longitude && raw.longitude && raw.longitude !== "N/A") {
-          updates.longitude = raw.longitude;
-          filledFields.push("longitude");
+          const lng = parseFloat(raw.longitude);
+          if (!isNaN(lng) && lng >= -180 && lng <= 180) {
+            updates.longitude = String(lng);
+            filledFields.push("longitude");
+          }
         }
+        // Contact: only use if it looks like a person name, not an entity
         if (!formData.contactName && (raw.contactPerson || raw.ownerName)) {
-          const val = raw.contactPerson !== "N/A" ? raw.contactPerson : raw.ownerName !== "N/A" ? raw.ownerName : null;
-          if (val) { updates.contactName = val; filledFields.push("contactName"); }
+          const val = (raw.contactPerson && raw.contactPerson !== "N/A") ? raw.contactPerson
+            : (raw.ownerName && raw.ownerName !== "N/A") ? raw.ownerName : null;
+          if (val && !/\b(city|county|district|LLC|Inc|Corp|department|authority|MUD|ISD)\b/i.test(val)) {
+            updates.contactName = val;
+            filledFields.push("contactName");
+          }
         }
         if (!formData.phone && raw.ownerPhone && raw.ownerPhone !== "N/A") {
           updates.phone = raw.ownerPhone;
@@ -379,13 +398,39 @@ export default function ProjectDetail({
           updates.customerAddress = raw.ownerAddress;
           filledFields.push("customerAddress");
         }
+        // Date validation: only accept MM/DD/YY format
         if (!formData.projectStartDate && raw.projectStartDate && raw.projectStartDate !== "N/A") {
-          updates.projectStartDate = raw.projectStartDate;
-          filledFields.push("projectStartDate");
+          const d = raw.projectStartDate;
+          if (/^\d{2}\/\d{2}\/\d{2}$/.test(d)) {
+            updates.projectStartDate = d;
+            filledFields.push("projectStartDate");
+          } else {
+            // Try to parse and reformat common alternatives
+            const parsed = new Date(d);
+            if (!isNaN(parsed.getTime())) {
+              const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+              const dd = String(parsed.getDate()).padStart(2, "0");
+              const yy = String(parsed.getFullYear()).slice(-2);
+              updates.projectStartDate = `${mm}/${dd}/${yy}`;
+              filledFields.push("projectStartDate");
+            }
+          }
         }
         if (!formData.projectFinishDate && raw.projectFinishDate && raw.projectFinishDate !== "N/A") {
-          updates.projectFinishDate = raw.projectFinishDate;
-          filledFields.push("projectFinishDate");
+          const d = raw.projectFinishDate;
+          if (/^\d{2}\/\d{2}\/\d{2}$/.test(d)) {
+            updates.projectFinishDate = d;
+            filledFields.push("projectFinishDate");
+          } else {
+            const parsed = new Date(d);
+            if (!isNaN(parsed.getTime())) {
+              const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+              const dd = String(parsed.getDate()).padStart(2, "0");
+              const yy = String(parsed.getFullYear()).slice(-2);
+              updates.projectFinishDate = `${mm}/${dd}/${yy}`;
+              filledFields.push("projectFinishDate");
+            }
+          }
         }
         if (!formData.projectAddress && raw.siteAddress && raw.siteAddress !== "N/A") {
           updates.projectAddress = raw.siteAddress;
@@ -806,6 +851,13 @@ export default function ProjectDetail({
                                     sub: formData.planAnalysisRaw.estimatedDisturbedArea?.method === "explicit_label"
                                       ? null
                                       : formData.planAnalysisRaw.estimatedDisturbedArea?.details || null,
+                                  },
+                                  {
+                                    label: "Total Project Area",
+                                    val: formData.planAnalysisRaw.totalProjectArea?.value ? `${formData.planAnalysisRaw.totalProjectArea.value} ac` : null,
+                                    sub: formData.planAnalysisRaw.totalProjectArea?.method === "explicit_label"
+                                      ? null
+                                      : formData.planAnalysisRaw.totalProjectArea?.details || null,
                                   },
                                   { label: "Owner", val: formData.planAnalysisRaw.ownerName },
                                   { label: "Site Address", val: formData.planAnalysisRaw.siteAddress },

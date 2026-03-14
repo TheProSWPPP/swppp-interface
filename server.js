@@ -14,7 +14,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
+// Gemini inline_data limit is ~20MB base64 (15MB raw). Multer limit matches.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 
 const N8N_WEBHOOK_URL =
@@ -107,8 +108,19 @@ async function callGemini(base64Data) {
   }
   const json = await res.json();
   const text = json.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  if (!text) throw new Error("Gemini returned empty response — PDF may be unreadable or too large.");
   const cleaned = text.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
-  const analysisData = JSON.parse(cleaned);
+  let analysisData;
+  try {
+    analysisData = JSON.parse(cleaned);
+  } catch (parseErr) {
+    console.error("Gemini JSON parse failed. Raw text:", cleaned.slice(0, 500));
+    throw new Error(`Gemini returned invalid JSON: ${parseErr.message}. This usually means the PDF was too complex or Gemini hit its output limit.`);
+  }
+  // Validate required fields exist
+  if (!analysisData.summary && !analysisData.projectDescription) {
+    console.warn("Gemini response missing key fields:", Object.keys(analysisData));
+  }
 
   // Attach token usage + estimated cost (Gemini 3.1 Pro Preview pricing: $1.25 in / $10.00 out per 1M)
   const u = json.usageMetadata || {};
@@ -530,12 +542,12 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       if ((pdfFetch.headers.get("content-type") || "").includes("text/html")) {
         return res.status(400).json({ error: "Link returned an HTML page, not a PDF. Use a direct file link or upload directly." });
       }
-      const MAX_DOWNLOAD = 40 * 1024 * 1024;
+      const MAX_DOWNLOAD = 20 * 1024 * 1024;
       const chunks = [];
       let totalSize = 0;
       for await (const chunk of pdfFetch.body) {
         totalSize += chunk.length;
-        if (totalSize > MAX_DOWNLOAD) return res.status(400).json({ error: "PDF exceeds 40 MB. Please upload directly." });
+        if (totalSize > MAX_DOWNLOAD) return res.status(400).json({ error: "PDF exceeds 20 MB. Please upload a smaller file directly." });
         chunks.push(chunk);
       }
       pdfBuffer = Buffer.concat(chunks);
@@ -610,7 +622,7 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
 // Multer error handler — returns JSON instead of Express default HTML
 app.use((err, _req, res, next) => {
   if (err?.code === "LIMIT_FILE_SIZE") {
-    return res.status(400).json({ error: "File is too large. Maximum upload size is 30 MB." });
+    return res.status(400).json({ error: "File is too large. Maximum upload size is 20 MB." });
   }
   next(err);
 });
