@@ -695,26 +695,10 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       console.log(`Downloaded ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`);
     }
 
-    // Get page count (only for files small enough for pdf-lib)
     let pdfPages = null;
-    if (pdfBuffer.length <= PDFLIB_LIMIT) {
-      try {
-        const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-        pdfPages = pdfDoc.getPageCount();
-      } catch (_) {}
-    }
 
-    // === Decide analysis approach based on file size ===
-    if (pdfBuffer.length <= INLINE_LIMIT) {
-      // FAST PATH: inline base64 (≤ 15 MB)
-      const base64Data = pdfBuffer.toString("base64");
-      console.log(`Sending ${(base64Data.length / 1024 / 1024).toFixed(1)} MB base64 (${pdfPages ?? "?"} pages) to Gemini...`);
-      analysisData = await callGemini([
-        { inline_data: { mime_type: "application/pdf", data: base64Data } },
-        { text: GEMINI_PROMPT },
-      ]);
-    } else {
-      // LARGE FILE PATH: compression → Gemini File API fallback
+    // === Reduce to fit under Gemini inline limit (15 MB) ===
+    if (pdfBuffer.length > INLINE_LIMIT) {
       console.log(`PDF is ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — above ${(INLINE_LIMIT / 1024 / 1024).toFixed(0)} MB inline limit`);
 
       // Step 1: Try pdf-lib compression (fast, local — only for files < 50 MB to avoid OOM)
@@ -722,6 +706,7 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         try {
           console.log("Trying pdf-lib compression...");
           const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+          pdfPages = pdfDoc.getPageCount();
           const compressed = Buffer.from(await pdfDoc.save({ useObjectStreams: true }));
           if (compressed.length < pdfBuffer.length) {
             console.log(`pdf-lib: ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB → ${(compressed.length / 1024 / 1024).toFixed(1)} MB`);
@@ -741,24 +726,69 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         }
       }
 
-      // Step 3: Choose final analysis method
-      if (pdfBuffer.length <= INLINE_LIMIT) {
-        // Compression worked — use inline base64
-        const base64Data = pdfBuffer.toString("base64");
-        console.log(`Compressed to ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — using inline_data`);
-        analysisData = await callGemini([
-          { inline_data: { mime_type: "application/pdf", data: base64Data } },
-          { text: GEMINI_PROMPT },
-        ]);
-      } else {
-        // Still large — upload via Gemini File API (SDK handles protocol)
-        console.log(`Still ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — using Gemini File API...`);
-        const tempPath = path.join(os.tmpdir(), `swppp-gemini-${Date.now()}.pdf`);
-        fs.writeFileSync(tempPath, pdfBuffer);
-        tempFiles.push(tempPath);
-        pdfBuffer = null; // Free memory before the analysis call
-        analysisData = await callGeminiWithFile(tempPath);
+      // Step 3: Extract first N pages to fit under inline limit (most reliable approach)
+      if (pdfBuffer.length > INLINE_LIMIT) {
+        const PAGE_EXTRACT_LIMIT = 150 * 1024 * 1024; // pdf-lib can handle up to ~150 MB for page extraction
+        if (pdfBuffer.length <= PAGE_EXTRACT_LIMIT) {
+          try {
+            console.log("Extracting pages to fit under inline limit...");
+            const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+            const totalPages = pdfDoc.getPageCount();
+            pdfPages = totalPages;
+
+            let pagesToExtract = Math.min(totalPages, 60);
+            while (pagesToExtract >= 5) {
+              const newDoc = await PDFDocument.create();
+              const indices = Array.from({ length: pagesToExtract }, (_, i) => i);
+              const copiedPages = await newDoc.copyPages(pdfDoc, indices);
+              for (const page of copiedPages) newDoc.addPage(page);
+              const extracted = Buffer.from(await newDoc.save());
+
+              if (extracted.length <= INLINE_LIMIT) {
+                console.log(`Extracted ${pagesToExtract}/${totalPages} pages: ${(extracted.length / 1024 / 1024).toFixed(1)} MB`);
+                pdfBuffer = extracted;
+                break;
+              }
+              pagesToExtract = Math.floor(pagesToExtract * 0.7); // Reduce by 30% and retry
+            }
+          } catch (e) {
+            console.warn("Page extraction failed:", e.message);
+          }
+        }
       }
+
+      // Step 4: Last resort — Gemini File API via SDK
+      if (pdfBuffer.length > INLINE_LIMIT) {
+        try {
+          console.log(`Still ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — trying Gemini File API...`);
+          const tempPath = path.join(os.tmpdir(), `swppp-gemini-${Date.now()}.pdf`);
+          fs.writeFileSync(tempPath, pdfBuffer);
+          tempFiles.push(tempPath);
+          pdfBuffer = null;
+          analysisData = await callGeminiWithFile(tempPath);
+        } catch (fileApiErr) {
+          console.error("Gemini File API failed:", fileApiErr.message);
+          throw new Error(`PDF is too large for analysis (${(fs.statSync(tempFiles[tempFiles.length - 1]).size / 1024 / 1024).toFixed(0)} MB). Try a smaller file or add PDF_CO_API_KEY for compression.`);
+        }
+      }
+    }
+
+    // Get page count if not already set
+    if (pdfPages === null && pdfBuffer && pdfBuffer.length <= PDFLIB_LIMIT) {
+      try {
+        const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+        pdfPages = pdfDoc.getPageCount();
+      } catch (_) {}
+    }
+
+    // === Send to Gemini via inline base64 (if not already handled by File API above) ===
+    if (!analysisData && pdfBuffer) {
+      const base64Data = pdfBuffer.toString("base64");
+      console.log(`Sending ${(base64Data.length / 1024 / 1024).toFixed(1)} MB base64 (${pdfPages ?? "?"} pages) to Gemini...`);
+      analysisData = await callGemini([
+        { inline_data: { mime_type: "application/pdf", data: base64Data } },
+        { text: GEMINI_PROMPT },
+      ]);
     }
 
     if (analysisData._usage && pdfPages !== null) {
