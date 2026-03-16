@@ -6,6 +6,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import pg from "pg";
 import { PDFDocument } from "pdf-lib";
+import fs from "fs";
+import os from "os";
 
 const { Pool } = pg;
 
@@ -14,14 +16,15 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
-// Gemini inline_data limit is ~20MB base64 (15MB raw). Multer limit matches.
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+// Disk storage for large PDFs (up to 300MB). Temp files cleaned up after processing.
+const upload = multer({ dest: os.tmpdir(), limits: { fileSize: 300 * 1024 * 1024 } });
 
 
 const N8N_WEBHOOK_URL =
   "https://proswppp.app.n8n.cloud/webhook/state-document-generator";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY;
 const GEMINI_MODEL = "gemini-3.1-pro-preview";
 const GEMINI_PROMPT = `You are an expert civil engineering plan reader specializing in stormwater pollution prevention plans (SWPPP). Analyze these construction/civil drawings thoroughly and extract the following information.
 
@@ -89,7 +92,7 @@ EXTRACT ALL OF THE FOLLOWING (set to null if truly not findable):
 
 Return ONLY valid JSON, no markdown formatting.`;
 
-async function callGemini(base64Data) {
+async function callGemini(contentParts, timeoutMs = 180000) {
   if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
@@ -97,10 +100,10 @@ async function callGemini(base64Data) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ inline_data: { mime_type: "application/pdf", data: base64Data } }, { text: GEMINI_PROMPT }] }],
+        contents: [{ parts: contentParts }],
         generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
       }),
-      signal: AbortSignal.timeout(160000),
+      signal: AbortSignal.timeout(timeoutMs),
     }
   );
   if (!res.ok) {
@@ -137,6 +140,140 @@ async function callGemini(base64Data) {
   };
   console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
   return analysisData;
+}
+
+// Compress PDF using pdf.co optimize API (runs on their server, no local memory spike)
+async function compressWithPdfCo(pdfBuffer) {
+  try {
+    // Step 1: Upload file to pdf.co temp storage
+    const formData = new FormData();
+    formData.append("file", new Blob([pdfBuffer], { type: "application/pdf" }), "plans.pdf");
+
+    const uploadRes = await fetch("https://api.pdf.co/v1/file/upload", {
+      method: "POST",
+      headers: { "x-api-key": PDF_CO_API_KEY },
+      body: formData,
+      signal: AbortSignal.timeout(180000),
+    });
+    if (!uploadRes.ok) {
+      console.warn(`pdf.co upload failed: ${uploadRes.status}`);
+      return null;
+    }
+    const uploadJson = await uploadRes.json();
+    if (uploadJson.error) {
+      console.warn("pdf.co upload error:", uploadJson.message);
+      return null;
+    }
+
+    // Step 2: Optimize/compress (high quality profile — preserves engineering drawing detail)
+    const optimizeRes = await fetch("https://api.pdf.co/v1/pdf/optimize", {
+      method: "POST",
+      headers: { "x-api-key": PDF_CO_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: uploadJson.url,
+        name: "compressed.pdf",
+        profiles: JSON.stringify({
+          ImageOptimizationFormat: "JPEG",
+          JPEGQuality: 85,
+          ResampleImages: true,
+          ResamplingResolution: 200,
+          GrayscaleImages: false,
+        }),
+      }),
+      signal: AbortSignal.timeout(180000),
+    });
+    if (!optimizeRes.ok) {
+      console.warn(`pdf.co optimize failed: ${optimizeRes.status}`);
+      return null;
+    }
+    const optimizeJson = await optimizeRes.json();
+    if (optimizeJson.error) {
+      console.warn("pdf.co optimize error:", optimizeJson.message);
+      return null;
+    }
+
+    // Step 3: Download compressed result
+    const dlRes = await fetch(optimizeJson.url, { signal: AbortSignal.timeout(120000) });
+    if (!dlRes.ok) {
+      console.warn("Failed to download compressed PDF from pdf.co");
+      return null;
+    }
+    const compressedBuffer = Buffer.from(await dlRes.arrayBuffer());
+    console.log(`pdf.co: ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB → ${(compressedBuffer.length / 1024 / 1024).toFixed(1)} MB`);
+    return compressedBuffer;
+  } catch (err) {
+    console.warn("pdf.co compression error:", err.message);
+    return null;
+  }
+}
+
+// Upload PDF to Gemini File API (for files too large for inline base64)
+async function uploadToGeminiFileAPI(pdfBuffer) {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
+
+  // Step 1: Initiate resumable upload
+  const startRes = await fetch(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(pdfBuffer.length),
+        "X-Goog-Upload-Header-Content-Type": "application/pdf",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file: { displayName: `civil-plans-${Date.now()}.pdf` } }),
+    }
+  );
+  if (!startRes.ok) {
+    const errText = await startRes.text();
+    throw new Error(`Gemini File API init failed (${startRes.status}): ${errText.slice(0, 300)}`);
+  }
+
+  const uploadUrl = startRes.headers.get("x-goog-upload-url");
+  if (!uploadUrl) throw new Error("Gemini File API did not return an upload URL");
+
+  // Step 2: Upload the PDF data
+  const uploadRes = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "X-Goog-Upload-Command": "upload, finalize",
+      "X-Goog-Upload-Offset": "0",
+      "Content-Length": String(pdfBuffer.length),
+    },
+    body: pdfBuffer,
+    signal: AbortSignal.timeout(300000),
+  });
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text();
+    throw new Error(`Gemini File API upload failed (${uploadRes.status}): ${errText.slice(0, 300)}`);
+  }
+
+  const fileInfo = await uploadRes.json();
+  const fileName = fileInfo.file?.name;
+  let fileUri = fileInfo.file?.uri;
+  let state = fileInfo.file?.state;
+  console.log(`Gemini File API: uploaded ${fileName} (state: ${state})`);
+
+  // Step 3: Poll until file is ACTIVE (processed and ready)
+  let polls = 0;
+  while (state === "PROCESSING" && polls < 60) {
+    await new Promise(r => setTimeout(r, 3000));
+    const statusRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${GEMINI_API_KEY}`
+    );
+    const statusJson = await statusRes.json();
+    state = statusJson.state;
+    fileUri = statusJson.uri || fileUri;
+    polls++;
+    if (polls % 5 === 0) console.log(`Gemini file processing... (${polls * 3}s, state: ${state})`);
+  }
+
+  if (state !== "ACTIVE") {
+    throw new Error(`Gemini file processing failed (state: ${state}). The PDF may be corrupt or unsupported.`);
+  }
+  return fileUri;
 }
 
 app.use(cors());
@@ -506,24 +643,28 @@ app.post("/api/projects/delete", async (req, res) => {
 // Analyze Civil Plans with Gemini
 app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, res) => {
   const { id } = req.params;
-  req.setTimeout(180000);
-  res.setTimeout(180000);
+  req.setTimeout(600000); // 10 min for large files + compression + Gemini
+  res.setTimeout(600000);
+  const tempFiles = []; // Track multer temp files for cleanup
 
   try {
     let analysisData;
-
-    const LIMIT = 15 * 1024 * 1024;
+    const INLINE_LIMIT = 15 * 1024 * 1024; // 15 MB — max for Gemini inline base64
+    const PDFLIB_LIMIT = 50 * 1024 * 1024; // 50 MB — max for pdf-lib (avoids OOM)
     let pdfBuffer;
 
     if (req.file) {
+      // === UPLOAD PATH (up to 300 MB, disk storage) ===
+      tempFiles.push(req.file.path);
       const { projectName } = req.body;
       console.log(`Analyzing uploaded PDF: ${projectName || id} (${(req.file.size / 1024 / 1024).toFixed(1)} MB)`);
       if (!req.file.originalname.toLowerCase().endsWith(".pdf")) {
         return res.status(400).json({ error: "Only PDF files are supported." });
       }
-      pdfBuffer = req.file.buffer;
+      pdfBuffer = fs.readFileSync(req.file.path);
 
     } else {
+      // === LINK PATH (max 20 MB download) ===
       const { civilDrawingsLink, projectName } = req.body;
       if (!civilDrawingsLink) {
         return res.status(400).json({ error: "No file or civilDrawingsLink provided." });
@@ -548,46 +689,85 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       let totalSize = 0;
       for await (const chunk of pdfFetch.body) {
         totalSize += chunk.length;
-        if (totalSize > MAX_DOWNLOAD) return res.status(400).json({ error: "PDF exceeds 20 MB. Please upload a smaller file directly." });
+        if (totalSize > MAX_DOWNLOAD) return res.status(400).json({ error: "PDF exceeds 20 MB via link. Upload the file directly for larger files (up to 300 MB)." });
         chunks.push(chunk);
       }
       pdfBuffer = Buffer.concat(chunks);
       console.log(`Downloaded ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`);
     }
 
-    // Compress if over limit
-    if (pdfBuffer.length > LIMIT) {
-      console.log(`Compressing PDF (${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB)...`);
+    // Get page count (only for files small enough for pdf-lib)
+    let pdfPages = null;
+    if (pdfBuffer.length <= PDFLIB_LIMIT) {
       try {
         const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-        pdfBuffer = Buffer.from(await pdfDoc.save({ useObjectStreams: true }));
-        console.log(`Compressed to ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`);
-      } catch (err) {
-        console.warn("Compression failed:", err.message);
+        pdfPages = pdfDoc.getPageCount();
+      } catch (_) {}
+    }
+
+    // === Decide analysis approach based on file size ===
+    if (pdfBuffer.length <= INLINE_LIMIT) {
+      // FAST PATH: inline base64 (≤ 15 MB)
+      const base64Data = pdfBuffer.toString("base64");
+      console.log(`Sending ${(base64Data.length / 1024 / 1024).toFixed(1)} MB base64 (${pdfPages ?? "?"} pages) to Gemini...`);
+      analysisData = await callGemini([
+        { inline_data: { mime_type: "application/pdf", data: base64Data } },
+        { text: GEMINI_PROMPT },
+      ]);
+    } else {
+      // LARGE FILE PATH: compression → Gemini File API fallback
+      console.log(`PDF is ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — above ${(INLINE_LIMIT / 1024 / 1024).toFixed(0)} MB inline limit`);
+
+      // Step 1: Try pdf-lib compression (fast, local — only for files < 50 MB to avoid OOM)
+      if (pdfBuffer.length <= PDFLIB_LIMIT) {
+        try {
+          console.log("Trying pdf-lib compression...");
+          const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+          const compressed = Buffer.from(await pdfDoc.save({ useObjectStreams: true }));
+          if (compressed.length < pdfBuffer.length) {
+            console.log(`pdf-lib: ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB → ${(compressed.length / 1024 / 1024).toFixed(1)} MB`);
+            pdfBuffer = compressed;
+          }
+        } catch (e) {
+          console.warn("pdf-lib compression failed:", e.message);
+        }
+      }
+
+      // Step 2: Try pdf.co compression if still over limit (runs on their server)
+      if (pdfBuffer.length > INLINE_LIMIT && PDF_CO_API_KEY) {
+        console.log("Trying pdf.co compression...");
+        const pdfCoResult = await compressWithPdfCo(pdfBuffer);
+        if (pdfCoResult && pdfCoResult.length < pdfBuffer.length) {
+          pdfBuffer = pdfCoResult;
+        }
+      }
+
+      // Step 3: Choose final analysis method
+      if (pdfBuffer.length <= INLINE_LIMIT) {
+        // Compression worked — use inline base64
+        const base64Data = pdfBuffer.toString("base64");
+        console.log(`Compressed to ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — using inline_data`);
+        analysisData = await callGemini([
+          { inline_data: { mime_type: "application/pdf", data: base64Data } },
+          { text: GEMINI_PROMPT },
+        ]);
+      } else {
+        // Still large — upload via Gemini File API
+        console.log(`Still ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — uploading via Gemini File API...`);
+        const fileUri = await uploadToGeminiFileAPI(pdfBuffer);
+        pdfBuffer = null; // Free memory before the analysis call
+        analysisData = await callGemini(
+          [
+            { fileData: { fileUri, mimeType: "application/pdf" } },
+            { text: GEMINI_PROMPT },
+          ],
+          300000 // 5 min timeout for large file analysis
+        );
       }
     }
-    if (pdfBuffer.length > LIMIT) {
-      return res.status(400).json({
-        error: `PDF is ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB after compression (max 15 MB). Please split the drawings or reduce image quality.`,
-      });
-    }
 
-    // Get page count
-    let pdfPages = null;
-    try {
-      const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-      pdfPages = pdfDoc.getPageCount();
-    } catch (_) {}
-
-    // Call Gemini directly
-    const base64Data = pdfBuffer.toString("base64");
-    console.log(`Sending ${(base64Data.length / 1024 / 1024).toFixed(1)} MB base64 (${pdfPages ?? "?"} pages) to Gemini...`);
-    analysisData = await callGemini(base64Data);
     if (analysisData._usage && pdfPages !== null) {
       analysisData._usage.pdfPages = pdfPages;
-      // Refine cost estimate: Gemini charges 258 tokens/page for PDFs
-      // promptTokenCount already includes page tokens, so formula is still correct
-      // but show per-page cost as additional context
       analysisData._usage.costPerPage = pdfPages > 0
         ? analysisData._usage.estimatedCostUSD / pdfPages
         : null;
@@ -611,19 +791,24 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
   } catch (err) {
     console.error("Plan analysis error:", err);
     if (err.name === "TimeoutError") {
-      return res.status(504).json({ error: "Analysis timed out. The civil drawings may be too large." });
+      return res.status(504).json({ error: "Analysis timed out. The PDF may be too large or complex." });
     }
     if (err.message === "terminated" || err.message === "fetch failed") {
-      return res.status(502).json({ error: "PDF download was interrupted (file may be too large). Please upload the file directly instead." });
+      return res.status(502).json({ error: "Connection was interrupted. Please try again." });
     }
     res.status(500).json({ error: err.message });
+  } finally {
+    // Clean up multer temp files from disk
+    for (const f of tempFiles) {
+      try { fs.unlinkSync(f); } catch (_) {}
+    }
   }
 });
 
 // Multer error handler — returns JSON instead of Express default HTML
 app.use((err, _req, res, next) => {
   if (err?.code === "LIMIT_FILE_SIZE") {
-    return res.status(400).json({ error: "File is too large. Maximum upload size is 20 MB." });
+    return res.status(400).json({ error: "File is too large. Maximum upload size is 300 MB." });
   }
   next(err);
 });
