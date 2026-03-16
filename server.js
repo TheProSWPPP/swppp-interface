@@ -19,8 +19,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
-// Disk storage for large PDFs (up to 500MB). Temp files cleaned up after processing.
-const upload = multer({ dest: os.tmpdir(), limits: { fileSize: 500 * 1024 * 1024 } });
+// Disk storage for large PDFs (up to 1GB). Temp files cleaned up after processing.
+const upload = multer({ dest: os.tmpdir(), limits: { fileSize: 1024 * 1024 * 1024 } });
 
 
 const N8N_WEBHOOK_URL =
