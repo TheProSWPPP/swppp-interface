@@ -8,6 +8,8 @@ import pg from "pg";
 import { PDFDocument } from "pdf-lib";
 import fs from "fs";
 import os from "os";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleAIFileManager } from "@google/generative-ai/server";
 
 const { Pool } = pg;
 
@@ -207,73 +209,70 @@ async function compressWithPdfCo(pdfBuffer) {
   }
 }
 
-// Upload PDF to Gemini File API (for files too large for inline base64)
-async function uploadToGeminiFileAPI(pdfBuffer) {
+// Analyze a large PDF via Gemini File API (uses Google SDK for reliable upload)
+async function callGeminiWithFile(filePath) {
   if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
 
-  // Step 1: Initiate resumable upload
-  const startRes = await fetch(
-    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: {
-        "X-Goog-Upload-Protocol": "resumable",
-        "X-Goog-Upload-Command": "start",
-        "X-Goog-Upload-Header-Content-Length": String(pdfBuffer.length),
-        "X-Goog-Upload-Header-Content-Type": "application/pdf",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ file: { displayName: `civil-plans-${Date.now()}.pdf` } }),
-    }
-  );
-  if (!startRes.ok) {
-    const errText = await startRes.text();
-    throw new Error(`Gemini File API init failed (${startRes.status}): ${errText.slice(0, 300)}`);
-  }
-
-  const uploadUrl = startRes.headers.get("x-goog-upload-url");
-  if (!uploadUrl) throw new Error("Gemini File API did not return an upload URL");
-
-  // Step 2: Upload the PDF data
-  const uploadRes = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: {
-      "X-Goog-Upload-Command": "upload, finalize",
-      "X-Goog-Upload-Offset": "0",
-      "Content-Length": String(pdfBuffer.length),
-    },
-    body: pdfBuffer,
-    signal: AbortSignal.timeout(300000),
+  // Step 1: Upload file via SDK
+  const fileManager = new GoogleAIFileManager(GEMINI_API_KEY);
+  console.log("Uploading to Gemini File API via SDK...");
+  const uploadResult = await fileManager.uploadFile(filePath, {
+    mimeType: "application/pdf",
+    displayName: `civil-plans-${Date.now()}.pdf`,
   });
-  if (!uploadRes.ok) {
-    const errText = await uploadRes.text();
-    throw new Error(`Gemini File API upload failed (${uploadRes.status}): ${errText.slice(0, 300)}`);
-  }
 
-  const fileInfo = await uploadRes.json();
-  const fileName = fileInfo.file?.name;
-  let fileUri = fileInfo.file?.uri;
-  let state = fileInfo.file?.state;
-  console.log(`Gemini File API: uploaded ${fileName} (state: ${state})`);
+  let file = uploadResult.file;
+  console.log(`Gemini File API: uploaded ${file.name} (state: ${file.state})`);
 
-  // Step 3: Poll until file is ACTIVE (processed and ready)
-  let polls = 0;
-  while (state === "PROCESSING" && polls < 60) {
+  // Step 2: Wait for file processing
+  while (file.state === "PROCESSING") {
     await new Promise(r => setTimeout(r, 3000));
-    const statusRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${GEMINI_API_KEY}`
-    );
-    const statusJson = await statusRes.json();
-    state = statusJson.state;
-    fileUri = statusJson.uri || fileUri;
-    polls++;
-    if (polls % 5 === 0) console.log(`Gemini file processing... (${polls * 3}s, state: ${state})`);
+    file = await fileManager.getFile(file.name);
+    console.log(`Gemini file state: ${file.state}`);
+  }
+  if (file.state === "FAILED") {
+    throw new Error("Gemini file processing failed. The PDF may be corrupt or unsupported.");
   }
 
-  if (state !== "ACTIVE") {
-    throw new Error(`Gemini file processing failed (state: ${state}). The PDF may be corrupt or unsupported.`);
+  // Step 3: Generate content using the uploaded file
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_MODEL,
+    generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
+  });
+
+  console.log("Calling Gemini with file reference...");
+  const result = await model.generateContent([
+    { fileData: { mimeType: file.mimeType, fileUri: file.uri } },
+    { text: GEMINI_PROMPT },
+  ]);
+
+  const text = result.response.text();
+  if (!text) throw new Error("Gemini returned empty response — PDF may be unreadable.");
+
+  const cleaned = text.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
+  let analysisData;
+  try {
+    analysisData = JSON.parse(cleaned);
+  } catch (parseErr) {
+    console.error("Gemini JSON parse failed. Raw text:", cleaned.slice(0, 500));
+    throw new Error(`Gemini returned invalid JSON: ${parseErr.message}`);
   }
-  return fileUri;
+
+  // Extract usage metadata
+  const u = result.response.usageMetadata || {};
+  const inputTokens = u.promptTokenCount || 0;
+  const outputTokens = u.candidatesTokenCount || 0;
+  const thoughtsTokens = u.thoughtsTokenCount || 0;
+  analysisData._usage = {
+    inputTokens,
+    outputTokens,
+    thoughtsTokens,
+    totalTokens: u.totalTokenCount || 0,
+    estimatedCostUSD: (inputTokens * 1.25 + outputTokens * 10.00) / 1_000_000,
+  };
+  console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
+  return analysisData;
 }
 
 app.use(cors());
@@ -752,17 +751,13 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
           { text: GEMINI_PROMPT },
         ]);
       } else {
-        // Still large — upload via Gemini File API
-        console.log(`Still ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — uploading via Gemini File API...`);
-        const fileUri = await uploadToGeminiFileAPI(pdfBuffer);
+        // Still large — upload via Gemini File API (SDK handles protocol)
+        console.log(`Still ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — using Gemini File API...`);
+        const tempPath = path.join(os.tmpdir(), `swppp-gemini-${Date.now()}.pdf`);
+        fs.writeFileSync(tempPath, pdfBuffer);
+        tempFiles.push(tempPath);
         pdfBuffer = null; // Free memory before the analysis call
-        analysisData = await callGemini(
-          [
-            { file_data: { file_uri: fileUri, mime_type: "application/pdf" } },
-            { text: GEMINI_PROMPT },
-          ],
-          300000 // 5 min timeout for large file analysis
-        );
+        analysisData = await callGeminiWithFile(tempPath);
       }
     }
 
