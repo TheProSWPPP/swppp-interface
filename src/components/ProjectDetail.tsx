@@ -784,7 +784,7 @@ export default function ProjectDetail({
                         <label className="flex items-center gap-2 px-3 py-2 text-sm border border-dashed border-slate-300 rounded-lg cursor-pointer hover:border-violet-400 hover:text-violet-600 transition-colors">
                           <Upload className="h-4 w-4 text-slate-400" />
                           <span className="text-slate-500">
-                            {uploadedFile ? uploadedFile.name : "Upload PDF (max 300 MB)"}
+                            {uploadedFile ? uploadedFile.name : "Upload PDF (max 500 MB)"}
                           </span>
                           <input
                             type="file"

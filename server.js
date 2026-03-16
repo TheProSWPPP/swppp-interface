@@ -19,8 +19,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
-// Disk storage for large PDFs (up to 300MB). Temp files cleaned up after processing.
-const upload = multer({ dest: os.tmpdir(), limits: { fileSize: 300 * 1024 * 1024 } });
+// Disk storage for large PDFs (up to 500MB). Temp files cleaned up after processing.
+const upload = multer({ dest: os.tmpdir(), limits: { fileSize: 500 * 1024 * 1024 } });
 
 
 const N8N_WEBHOOK_URL =
@@ -886,8 +886,9 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
           inputTokens, outputTokens, thoughtsTokens,
           totalTokens: u.totalTokenCount || 0,
           estimatedCostUSD: (inputTokens * 1.25 + outputTokens * 10.00) / 1_000_000,
+          chunks: uploadedChunks.length,
         };
-        console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
+        console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens}, chunks: ${uploadedChunks.length} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
       }
     }
 
