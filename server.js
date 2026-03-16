@@ -8,6 +8,7 @@ import pg from "pg";
 import { PDFDocument } from "pdf-lib";
 import fs from "fs";
 import os from "os";
+import { execFile } from "child_process";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleAIFileManager } from "@google/generative-ai/server";
 
@@ -141,6 +142,75 @@ async function callGemini(contentParts, timeoutMs = 180000) {
   };
   console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
   return analysisData;
+}
+
+// Compress PDF using Ghostscript (lossy image compression, works on files of any size)
+function compressWithGhostscript(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    execFile("gs", [
+      "-sDEVICE=pdfwrite",
+      "-dCompatibilityLevel=1.7",
+      "-dPDFSETTINGS=/ebook",
+      "-dColorImageResolution=200",
+      "-dGrayImageResolution=200",
+      "-dMonoImageResolution=300",
+      "-dColorImageDownsampleType=/Bicubic",
+      "-dGrayImageDownsampleType=/Bicubic",
+      "-dNOPAUSE", "-dQUIET", "-dBATCH",
+      `-sOutputFile=${outputPath}`,
+      inputPath,
+    ], { timeout: 300000 }, (error) => {
+      if (error) reject(error);
+      else resolve(outputPath);
+    });
+  });
+}
+
+// Split a PDF into chunks that each fit under maxBytes using pdf-lib
+async function splitPdf(pdfBuffer, maxBytes) {
+  const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+  const totalPages = pdfDoc.getPageCount();
+
+  // Binary search for how many pages fit in one chunk
+  async function findChunkSize(startPage) {
+    const remaining = totalPages - startPage;
+    let lo = 1, hi = Math.min(remaining, 200);
+    // Quick check: do all remaining pages fit?
+    const allDoc = await PDFDocument.create();
+    const allIdx = Array.from({ length: remaining }, (_, i) => startPage + i);
+    const allCopied = await allDoc.copyPages(pdfDoc, allIdx);
+    for (const p of allCopied) allDoc.addPage(p);
+    const allBytes = await allDoc.save();
+    if (allBytes.byteLength <= maxBytes) return remaining;
+
+    // Binary search
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      const doc = await PDFDocument.create();
+      const idx = Array.from({ length: mid }, (_, i) => startPage + i);
+      const copied = await doc.copyPages(pdfDoc, idx);
+      for (const p of copied) doc.addPage(p);
+      const bytes = await doc.save();
+      if (bytes.byteLength <= maxBytes) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  }
+
+  const chunks = [];
+  let page = 0;
+  while (page < totalPages) {
+    const count = await findChunkSize(page);
+    const doc = await PDFDocument.create();
+    const idx = Array.from({ length: count }, (_, i) => page + i);
+    const copied = await doc.copyPages(pdfDoc, idx);
+    for (const p of copied) doc.addPage(p);
+    const bytes = Buffer.from(await doc.save());
+    chunks.push({ buffer: bytes, startPage: page + 1, endPage: page + count, totalPages });
+    console.log(`Chunk: pages ${page + 1}-${page + count} (${(bytes.length / 1024 / 1024).toFixed(1)} MB)`);
+    page += count;
+  }
+  return chunks;
 }
 
 // Compress PDF using pdf.co presigned URL upload (supports up to 100MB)
@@ -723,39 +793,37 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       pdfBuffer = null;
       analysisData = await callGeminiWithFile(tempPath);
     } else {
-      // LARGE PATH (> 50 MB): compress first, then File API
-      console.log(`PDF is ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — exceeds ${(FILE_API_LIMIT / 1024 / 1024).toFixed(0)} MB File API limit, compressing...`);
+      // LARGE PATH (> 50 MB): compress with Ghostscript, then File API or split
+      console.log(`PDF is ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB (${pdfPages ?? "?"} pages) — exceeds ${(FILE_API_LIMIT / 1024 / 1024).toFixed(0)} MB File API limit`);
 
-      // Try pdf.co compression (presigned URL, supports up to 100 MB upload)
-      const PDFCO_UPLOAD_LIMIT = 100 * 1024 * 1024;
-      if (PDF_CO_API_KEY && pdfBuffer.length <= PDFCO_UPLOAD_LIMIT) {
-        console.log("Trying pdf.co compression...");
-        const compressed = await compressWithPdfCo(pdfBuffer);
-        if (compressed && compressed.length < pdfBuffer.length) {
-          pdfBuffer = compressed;
+      // Write buffer to disk for Ghostscript (works on files of any size, no memory spike)
+      const gsInputPath = req.file?.path || path.join(os.tmpdir(), `swppp-gs-in-${Date.now()}.pdf`);
+      if (!req.file) { fs.writeFileSync(gsInputPath, pdfBuffer); tempFiles.push(gsInputPath); }
+      const gsOutputPath = path.join(os.tmpdir(), `swppp-gs-out-${Date.now()}.pdf`);
+      tempFiles.push(gsOutputPath);
+
+      // Step 1: Try Ghostscript compression (200 DPI, JPEG, preserves drawing detail)
+      try {
+        console.log("Compressing with Ghostscript...");
+        await compressWithGhostscript(gsInputPath, gsOutputPath);
+        const gsSize = fs.statSync(gsOutputPath).size;
+        console.log(`Ghostscript: ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB → ${(gsSize / 1024 / 1024).toFixed(1)} MB`);
+        if (gsSize < pdfBuffer.length) {
+          pdfBuffer = fs.readFileSync(gsOutputPath);
         }
-      } else if (pdfBuffer.length > PDFCO_UPLOAD_LIMIT) {
-        console.log(`Skipping pdf.co — file exceeds ${(PDFCO_UPLOAD_LIMIT / 1024 / 1024).toFixed(0)} MB upload limit`);
-      }
-
-      // Try pdf-lib compression (fast, local — only for files ≤ 100 MB)
-      if (pdfBuffer.length > FILE_API_LIMIT && pdfBuffer.length <= PDFLIB_LIMIT) {
-        try {
-          console.log("Trying pdf-lib compression...");
-          const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-          pdfPages = pdfDoc.getPageCount();
-          const compressed = Buffer.from(await pdfDoc.save({ useObjectStreams: true }));
-          if (compressed.length < pdfBuffer.length) {
-            console.log(`pdf-lib: ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB → ${(compressed.length / 1024 / 1024).toFixed(1)} MB`);
-            pdfBuffer = compressed;
-          }
-        } catch (e) {
-          console.warn("pdf-lib compression failed:", e.message);
+      } catch (e) {
+        console.warn("Ghostscript not available or failed:", e.message);
+        // Fallback: try pdf.co compression for files up to 100 MB
+        const PDFCO_UPLOAD_LIMIT = 100 * 1024 * 1024;
+        if (PDF_CO_API_KEY && pdfBuffer.length <= PDFCO_UPLOAD_LIMIT) {
+          console.log("Falling back to pdf.co compression...");
+          const compressed = await compressWithPdfCo(pdfBuffer);
+          if (compressed && compressed.length < pdfBuffer.length) pdfBuffer = compressed;
         }
       }
 
+      // Step 2: If compressed to ≤ 50 MB, send directly via File API (all pages, single file)
       if (pdfBuffer.length <= FILE_API_LIMIT) {
-        // Compression worked — use File API (all pages)
         console.log(`Compressed to ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — using File API (all pages)...`);
         const tempPath = path.join(os.tmpdir(), `swppp-gemini-${Date.now()}.pdf`);
         fs.writeFileSync(tempPath, pdfBuffer);
@@ -763,39 +831,63 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         pdfBuffer = null;
         analysisData = await callGeminiWithFile(tempPath);
       } else {
-        // Still too large — extract pages to fit under 50 MB File API limit
-        console.log(`Still ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB after compression — extracting pages to fit under File API limit...`);
-        const PAGE_EXTRACT_LIMIT = 300 * 1024 * 1024; // Support up to 300 MB uploads
-        if (pdfBuffer.length <= PAGE_EXTRACT_LIMIT) {
-          try {
-            const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-            const totalPages = pdfDoc.getPageCount();
-            pdfPages = totalPages;
-            let pagesToExtract = Math.min(totalPages, 60);
-            while (pagesToExtract >= 5) {
-              const newDoc = await PDFDocument.create();
-              const indices = Array.from({ length: pagesToExtract }, (_, i) => i);
-              const copiedPages = await newDoc.copyPages(pdfDoc, indices);
-              for (const page of copiedPages) newDoc.addPage(page);
-              const extracted = Buffer.from(await newDoc.save());
-              if (extracted.length <= FILE_API_LIMIT) {
-                console.log(`Extracted ${pagesToExtract}/${totalPages} pages: ${(extracted.length / 1024 / 1024).toFixed(1)} MB — using File API`);
-                const tempPath = path.join(os.tmpdir(), `swppp-gemini-${Date.now()}.pdf`);
-                fs.writeFileSync(tempPath, extracted);
-                tempFiles.push(tempPath);
-                pdfBuffer = null;
-                analysisData = await callGeminiWithFile(tempPath);
-                break;
-              }
-              pagesToExtract = Math.floor(pagesToExtract * 0.7);
-            }
-          } catch (e) {
-            console.warn("Page extraction failed:", e.message);
+        // Step 3: Still > 50 MB — split into chunks and send all via File API (all pages)
+        console.log(`Still ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — splitting into chunks for multi-file analysis...`);
+        const chunks = await splitPdf(pdfBuffer, FILE_API_LIMIT);
+        pdfPages = chunks[0]?.totalPages || null;
+        pdfBuffer = null; // Free memory
+
+        // Upload all chunks to Gemini File API
+        const fileManager = new GoogleAIFileManager(GEMINI_API_KEY);
+        const uploadedChunks = [];
+        for (const chunk of chunks) {
+          const chunkPath = path.join(os.tmpdir(), `swppp-chunk-${Date.now()}-${chunk.startPage}.pdf`);
+          fs.writeFileSync(chunkPath, chunk.buffer);
+          tempFiles.push(chunkPath);
+          console.log(`Uploading chunk pages ${chunk.startPage}-${chunk.endPage} (${(chunk.buffer.length / 1024 / 1024).toFixed(1)} MB)...`);
+          const result = await fileManager.uploadFile(chunkPath, {
+            mimeType: "application/pdf",
+            displayName: `plans-p${chunk.startPage}-${chunk.endPage}.pdf`,
+          });
+          let file = result.file;
+          while (file.state === "PROCESSING") {
+            await new Promise(r => setTimeout(r, 3000));
+            file = await fileManager.getFile(file.name);
           }
+          if (file.state === "FAILED") throw new Error(`Chunk upload failed for pages ${chunk.startPage}-${chunk.endPage}`);
+          uploadedChunks.push({ ...chunk, uri: file.uri, mimeType: file.mimeType });
         }
-        if (!analysisData) {
-          throw new Error(`PDF is too large for analysis (${(pdfBuffer.length / 1024 / 1024).toFixed(0)} MB). Try a smaller file.`);
+
+        // Build multi-file generateContent request
+        console.log(`Analyzing ${uploadedChunks.length} chunks (${pdfPages} total pages) with Gemini...`);
+        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({
+          model: GEMINI_MODEL,
+          generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
+        });
+        const parts = [];
+        for (const chunk of uploadedChunks) {
+          parts.push({ text: `Civil Plans pages ${chunk.startPage}-${chunk.endPage} of ${chunk.totalPages}:` });
+          parts.push({ fileData: { mimeType: chunk.mimeType, fileUri: chunk.uri } });
         }
+        parts.push({ text: GEMINI_PROMPT });
+
+        const result = await model.generateContent(parts);
+        const text = result.response.text();
+        if (!text) throw new Error("Gemini returned empty response.");
+        const cleaned = text.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
+        analysisData = JSON.parse(cleaned);
+
+        const u = result.response.usageMetadata || {};
+        const inputTokens = u.promptTokenCount || 0;
+        const outputTokens = u.candidatesTokenCount || 0;
+        const thoughtsTokens = u.thoughtsTokenCount || 0;
+        analysisData._usage = {
+          inputTokens, outputTokens, thoughtsTokens,
+          totalTokens: u.totalTokenCount || 0,
+          estimatedCostUSD: (inputTokens * 1.25 + outputTokens * 10.00) / 1_000_000,
+        };
+        console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
       }
     }
 
