@@ -726,13 +726,16 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       // LARGE PATH (> 50 MB): compress first, then File API
       console.log(`PDF is ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB — exceeds ${(FILE_API_LIMIT / 1024 / 1024).toFixed(0)} MB File API limit, compressing...`);
 
-      // Try pdf.co compression (presigned URL upload, supports up to 100 MB)
-      if (PDF_CO_API_KEY) {
+      // Try pdf.co compression (presigned URL, supports up to 100 MB upload)
+      const PDFCO_UPLOAD_LIMIT = 100 * 1024 * 1024;
+      if (PDF_CO_API_KEY && pdfBuffer.length <= PDFCO_UPLOAD_LIMIT) {
         console.log("Trying pdf.co compression...");
         const compressed = await compressWithPdfCo(pdfBuffer);
         if (compressed && compressed.length < pdfBuffer.length) {
           pdfBuffer = compressed;
         }
+      } else if (pdfBuffer.length > PDFCO_UPLOAD_LIMIT) {
+        console.log(`Skipping pdf.co — file exceeds ${(PDFCO_UPLOAD_LIMIT / 1024 / 1024).toFixed(0)} MB upload limit`);
       }
 
       // Try pdf-lib compression (fast, local — only for files ≤ 100 MB)
@@ -760,9 +763,9 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         pdfBuffer = null;
         analysisData = await callGeminiWithFile(tempPath);
       } else {
-        // Still too large — extract pages as last resort
-        console.log(`Still ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB after compression — extracting pages...`);
-        const PAGE_EXTRACT_LIMIT = 150 * 1024 * 1024;
+        // Still too large — extract pages to fit under 50 MB File API limit
+        console.log(`Still ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB after compression — extracting pages to fit under File API limit...`);
+        const PAGE_EXTRACT_LIMIT = 300 * 1024 * 1024; // Support up to 300 MB uploads
         if (pdfBuffer.length <= PAGE_EXTRACT_LIMIT) {
           try {
             const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
