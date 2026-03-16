@@ -758,7 +758,7 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         pdfBuffer = null; // Free memory before the analysis call
         analysisData = await callGemini(
           [
-            { fileData: { fileUri, mimeType: "application/pdf" } },
+            { file_data: { file_uri: fileUri, mime_type: "application/pdf" } },
             { text: GEMINI_PROMPT },
           ],
           300000 // 5 min timeout for large file analysis
