@@ -1482,12 +1482,12 @@ export default function ProjectDetail({
                     {isRetriggering ? (
                       <>
                         <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
-                        Regenerating Data...
+                        Re-running Data Lookup...
                       </>
                     ) : (
                       <>
                         <Loader2 className="-ml-1 mr-2 h-4 w-4" />
-                        Re-trigger with Corrected Data
+                        Re-run Data Lookup (Soil, Waterbodies, Endangered, MS4)
                       </>
                     )}
                   </button>
