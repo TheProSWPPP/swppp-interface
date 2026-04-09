@@ -8,7 +8,6 @@ import {
   FileEdit,
   CheckCircle2,
   AlertTriangle,
-  Sparkles,
 } from "lucide-react";
 
 interface Stats {
@@ -222,7 +221,6 @@ export default function AIContent() {
           pillars={pillars}
           onSelect={setSelectedItem}
           onCreate={handleCreate}
-          onDelete={handleDelete}
           onBulkDelete={handleBulkDelete}
           onGenerate={handleGenerate}
           onBulkGenerate={handleBulkGenerate}

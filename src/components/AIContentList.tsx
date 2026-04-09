@@ -33,7 +33,6 @@ interface AIContentListProps {
   pillars: AIContentItem[];
   onSelect: (item: AIContentItem) => void;
   onCreate: (data: { type: string; keyword: string; state?: string; pillarId?: string }) => void;
-  onDelete: (id: string) => void;
   onBulkDelete: (ids: string[]) => void;
   onGenerate: (id: string) => void;
   onBulkGenerate: (ids: string[]) => void;
@@ -44,7 +43,6 @@ export default function AIContentList({
   pillars,
   onSelect,
   onCreate,
-  onDelete,
   onBulkDelete,
   onGenerate,
   onBulkGenerate,
