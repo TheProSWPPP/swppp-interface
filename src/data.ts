@@ -61,6 +61,43 @@ export interface Project {
   aiFilledFields?: string[];
 }
 
+// AI Content types
+export type ContentType = "spoke" | "pillar" | "comparison";
+export type ContentStatus = "queued" | "generating" | "draft" | "published" | "failed";
+
+export interface AIContentItem {
+  id: string;
+  type: ContentType;
+  status: ContentStatus;
+  keyword: string;
+  state?: string;
+  title?: string;
+  wordCount?: number;
+  pillarId?: string;
+  wordpressPostId?: number;
+  wordpressUrl?: string;
+  n8nExecutionId?: string;
+  errorMessage?: string;
+  metadata?: Record<string, any>;
+  createdAt: string;
+  updatedAt: string;
+  generatedAt?: string;
+  publishedAt?: string;
+}
+
+export const US_STATES = [
+  "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+  "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
+  "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
+  "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
+  "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada",
+  "New Hampshire", "New Jersey", "New Mexico", "New York",
+  "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon",
+  "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
+  "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
+  "West Virginia", "Wisconsin", "Wyoming",
+] as const;
+
 export const projects: Project[] = [
   {
     id: "1",

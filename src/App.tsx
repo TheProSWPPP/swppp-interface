@@ -4,11 +4,13 @@ import Dashboard from "./components/Dashboard";
 import ArchiveList from "./components/ArchiveList";
 import Methodology from "./components/Methodology";
 import SettingsView from "./components/Settings";
+import AIContent from "./components/AIContent";
 import {
   LayoutDashboard,
   Archive,
   BookOpen,
   Settings as SettingsIcon,
+  Newspaper,
 } from "lucide-react";
 import { cn } from "./utils";
 
@@ -16,7 +18,7 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [view, setView] = useState<
-    "dashboard" | "archive" | "methodology" | "settings"
+    "dashboard" | "archive" | "ai-content" | "methodology" | "settings"
   >("dashboard");
 
   const fetchProjects = () => {
@@ -123,6 +125,18 @@ function App() {
                   Archive
                 </button>
                 <button
+                  onClick={() => setView("ai-content")}
+                  className={cn(
+                    "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
+                    view === "ai-content"
+                      ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50",
+                  )}
+                >
+                  <Newspaper className="h-4 w-4" />
+                  AI Content
+                </button>
+                <button
                   onClick={() => setView("methodology")}
                   className={cn(
                     "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
@@ -172,6 +186,7 @@ function App() {
           />
         )}
         {view === "archive" && <ArchiveList onRestore={fetchProjects} />}
+        {view === "ai-content" && <AIContent />}
         {view === "methodology" && <Methodology />}
         {view === "settings" && <SettingsView />}
       </main>

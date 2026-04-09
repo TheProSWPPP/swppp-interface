@@ -26,6 +26,14 @@ const upload = multer({ dest: os.tmpdir(), limits: { fileSize: 1024 * 1024 * 102
 const N8N_WEBHOOK_URL =
   "https://proswppp.app.n8n.cloud/webhook/state-document-generator";
 
+const N8N_CONTENT_WEBHOOK_URL =
+  process.env.N8N_CONTENT_WEBHOOK_URL ||
+  "https://proswppp.app.n8n.cloud/webhook/ai-content-generate";
+
+const RAILWAY_PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+  ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+  : `http://localhost:${process.env.PORT || 3000}`;
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = "gemini-3.1-pro-preview";
 const GEMINI_PROMPT = `You are an expert civil engineering plan reader specializing in stormwater pollution prevention plans (SWPPP). Analyze these construction/civil drawings thoroughly and extract the following information.
@@ -366,7 +374,8 @@ app.use((req, res, next) => {
   // Skip auth for health check and external webhook endpoints
   if (
     req.path === "/health" ||
-    (req.path === "/api/projects" && req.method === "POST")
+    (req.path === "/api/projects" && req.method === "POST") ||
+    (req.path === "/api/ai-content/callback" && req.method === "POST")
   ) {
     return next();
   }
@@ -420,6 +429,29 @@ async function initDB() {
       )
     `);
     console.log("Table 'projects' verified/created.");
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_content (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK (type IN ('spoke', 'pillar', 'comparison')),
+        status TEXT NOT NULL DEFAULT 'queued',
+        keyword TEXT NOT NULL,
+        state TEXT,
+        title TEXT,
+        word_count INTEGER,
+        pillar_id TEXT REFERENCES ai_content(id) ON DELETE SET NULL,
+        wordpress_post_id INTEGER,
+        wordpress_url TEXT,
+        n8n_execution_id TEXT,
+        error_message TEXT,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        generated_at TIMESTAMP,
+        published_at TIMESTAMP
+      )
+    `);
+    console.log("Table 'ai_content' verified/created.");
   } catch (err) {
     console.error("CRITICAL: Error initializing database:", err);
   }
@@ -430,6 +462,7 @@ initDB();
 // Fallback in-memory store if no DB is connected (for local dev)
 let memoryProjects = [];
 let memoryArchive = [];
+let memoryContent = [];
 
 // API Routes
 app.get("/health", (req, res) => {
@@ -703,6 +736,327 @@ app.post("/api/projects/delete", async (req, res) => {
       [now, ids]
     );
     res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==================== AI Content Routes ====================
+
+app.get("/api/ai-content/stats", async (req, res) => {
+  if (!process.env.DATABASE_URL) {
+    const stats = { queued: 0, generating: 0, draft: 0, published: 0, failed: 0, spoke: 0, pillar: 0, comparison: 0 };
+    memoryContent.forEach((c) => {
+      if (stats[c.status] !== undefined) stats[c.status]++;
+      if (stats[c.type] !== undefined) stats[c.type]++;
+    });
+    return res.json(stats);
+  }
+  try {
+    const statusResult = await pool.query(
+      "SELECT status, COUNT(*)::int as count FROM ai_content GROUP BY status"
+    );
+    const typeResult = await pool.query(
+      "SELECT type, COUNT(*)::int as count FROM ai_content GROUP BY type"
+    );
+    const stats = { queued: 0, generating: 0, draft: 0, published: 0, failed: 0, spoke: 0, pillar: 0, comparison: 0 };
+    statusResult.rows.forEach((r) => { stats[r.status] = r.count; });
+    typeResult.rows.forEach((r) => { stats[r.type] = r.count; });
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/ai-content", async (req, res) => {
+  const { type, status, state } = req.query;
+
+  if (!process.env.DATABASE_URL) {
+    let filtered = memoryContent;
+    if (type) filtered = filtered.filter((c) => c.type === type);
+    if (status) filtered = filtered.filter((c) => c.status === status);
+    if (state) filtered = filtered.filter((c) => c.state === state);
+    return res.json(filtered);
+  }
+
+  try {
+    let query = "SELECT * FROM ai_content WHERE 1=1";
+    const params = [];
+    if (type) { params.push(type); query += ` AND type = $${params.length}`; }
+    if (status) { params.push(status); query += ` AND status = $${params.length}`; }
+    if (state) { params.push(state); query += ` AND state = $${params.length}`; }
+    query += " ORDER BY created_at DESC";
+
+    const result = await pool.query(query, params);
+    res.json(result.rows.map((r) => ({
+      id: r.id,
+      type: r.type,
+      status: r.status,
+      keyword: r.keyword,
+      state: r.state,
+      title: r.title,
+      wordCount: r.word_count,
+      pillarId: r.pillar_id,
+      wordpressPostId: r.wordpress_post_id,
+      wordpressUrl: r.wordpress_url,
+      n8nExecutionId: r.n8n_execution_id,
+      errorMessage: r.error_message,
+      metadata: r.metadata,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      generatedAt: r.generated_at,
+      publishedAt: r.published_at,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/ai-content", async (req, res) => {
+  const { type, keyword, state, pillarId } = req.body;
+  if (!type || !keyword) return res.status(400).json({ error: "type and keyword required" });
+
+  const id = `content_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const item = {
+    id, type, status: "queued", keyword,
+    state: state || null,
+    pillarId: pillarId || null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (!process.env.DATABASE_URL) {
+    memoryContent.push(item);
+    return res.status(201).json(item);
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO ai_content (id, type, status, keyword, state, pillar_id)
+       VALUES ($1, $2, 'queued', $3, $4, $5)`,
+      [id, type, keyword, state || null, pillarId || null]
+    );
+    const result = await pool.query("SELECT * FROM ai_content WHERE id = $1", [id]);
+    const r = result.rows[0];
+    res.status(201).json({
+      id: r.id, type: r.type, status: r.status, keyword: r.keyword,
+      state: r.state, pillarId: r.pillar_id,
+      createdAt: r.created_at, updatedAt: r.updated_at,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/ai-content/:id", async (req, res) => {
+  const { id } = req.params;
+  const { keyword, state, type, pillarId, status } = req.body;
+
+  if (!process.env.DATABASE_URL) {
+    const item = memoryContent.find((c) => c.id === id);
+    if (!item) return res.status(404).json({ error: "Not found" });
+    if (keyword) item.keyword = keyword;
+    if (state !== undefined) item.state = state;
+    if (type) item.type = type;
+    if (pillarId !== undefined) item.pillarId = pillarId;
+    if (status) item.status = status;
+    item.updatedAt = new Date().toISOString();
+    return res.json(item);
+  }
+
+  try {
+    const fields = [];
+    const params = [];
+    if (keyword) { params.push(keyword); fields.push(`keyword = $${params.length}`); }
+    if (state !== undefined) { params.push(state); fields.push(`state = $${params.length}`); }
+    if (type) { params.push(type); fields.push(`type = $${params.length}`); }
+    if (pillarId !== undefined) { params.push(pillarId); fields.push(`pillar_id = $${params.length}`); }
+    if (status) { params.push(status); fields.push(`status = $${params.length}`); }
+    if (fields.length === 0) return res.status(400).json({ error: "No fields to update" });
+
+    fields.push("updated_at = NOW()");
+    params.push(id);
+    await pool.query(`UPDATE ai_content SET ${fields.join(", ")} WHERE id = $${params.length}`, params);
+
+    const result = await pool.query("SELECT * FROM ai_content WHERE id = $1", [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: "Not found" });
+    const r = result.rows[0];
+    res.json({
+      id: r.id, type: r.type, status: r.status, keyword: r.keyword,
+      state: r.state, title: r.title, wordCount: r.word_count,
+      pillarId: r.pillar_id, wordpressPostId: r.wordpress_post_id,
+      wordpressUrl: r.wordpress_url, n8nExecutionId: r.n8n_execution_id,
+      errorMessage: r.error_message, metadata: r.metadata,
+      createdAt: r.created_at, updatedAt: r.updated_at,
+      generatedAt: r.generated_at, publishedAt: r.published_at,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/ai-content/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!process.env.DATABASE_URL) {
+    const index = memoryContent.findIndex((c) => c.id === id);
+    if (index === -1) return res.status(404).json({ error: "Not found" });
+    memoryContent.splice(index, 1);
+    return res.status(204).send();
+  }
+
+  try {
+    const result = await pool.query("DELETE FROM ai_content WHERE id = $1", [id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/ai-content/delete-bulk", async (req, res) => {
+  const { ids } = req.body;
+  if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: "ids array required" });
+
+  if (!process.env.DATABASE_URL) {
+    ids.forEach((id) => {
+      const index = memoryContent.findIndex((c) => c.id === id);
+      if (index !== -1) memoryContent.splice(index, 1);
+    });
+    return res.status(204).send();
+  }
+
+  try {
+    await pool.query("DELETE FROM ai_content WHERE id = ANY($1)", [ids]);
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/ai-content/:id/generate", async (req, res) => {
+  const { id } = req.params;
+
+  if (!process.env.DATABASE_URL) {
+    const item = memoryContent.find((c) => c.id === id);
+    if (!item) return res.status(404).json({ error: "Not found" });
+    item.status = "generating";
+    item.updatedAt = new Date().toISOString();
+    // Fire webhook (no-op in dev without n8n)
+    return res.json(item);
+  }
+
+  try {
+    const current = await pool.query("SELECT * FROM ai_content WHERE id = $1", [id]);
+    if (current.rows.length === 0) return res.status(404).json({ error: "Not found" });
+    const row = current.rows[0];
+
+    await pool.query(
+      "UPDATE ai_content SET status = 'generating', error_message = NULL, updated_at = NOW() WHERE id = $1",
+      [id]
+    );
+
+    // Build pillar context if this is a spoke with a pillar
+    let pillarContext = null;
+    if (row.type === "spoke" && row.pillar_id) {
+      const pillar = await pool.query("SELECT keyword, wordpress_url FROM ai_content WHERE id = $1", [row.pillar_id]);
+      if (pillar.rows.length > 0) {
+        pillarContext = {
+          pillarKeyword: pillar.rows[0].keyword,
+          pillarWordpressUrl: pillar.rows[0].wordpress_url,
+        };
+      }
+    }
+
+    const webhookPayload = {
+      content_id: row.id,
+      type: row.type,
+      keyword: row.keyword,
+      state: row.state,
+      callback_url: `${RAILWAY_PUBLIC_URL}/api/ai-content/callback`,
+      pillar_context: pillarContext,
+    };
+
+    console.log(`Triggering n8n content generation for: ${row.keyword} (${row.type})`);
+    fetch(N8N_CONTENT_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(webhookPayload),
+    })
+      .then((response) => console.log(`n8n content webhook response: ${response.status}`))
+      .catch((err) => {
+        console.error("Failed to trigger n8n content webhook:", err);
+        pool.query(
+          "UPDATE ai_content SET status = 'failed', error_message = $1, updated_at = NOW() WHERE id = $2",
+          [`Webhook failed: ${err.message}`, id]
+        );
+      });
+
+    res.json({ ...row, status: "generating" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/ai-content/generate-bulk", async (req, res) => {
+  const { ids } = req.body;
+  if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: "ids array required" });
+
+  const results = [];
+  for (const id of ids) {
+    try {
+      const response = await fetch(`${RAILWAY_PUBLIC_URL}/api/ai-content/${id}/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: req.headers.authorization,
+        },
+      });
+      results.push({ id, status: response.ok ? "triggered" : "failed" });
+    } catch (err) {
+      results.push({ id, status: "failed", error: err.message });
+    }
+  }
+  res.json({ results });
+});
+
+// n8n callback — no auth (added to skip list above)
+app.post("/api/ai-content/callback", async (req, res) => {
+  const { content_id, status, wordpress_post_id, wordpress_url, title, word_count, n8n_execution_id, error_message } = req.body;
+  if (!content_id) return res.status(400).json({ error: "content_id required" });
+
+  console.log(`AI content callback: ${content_id} → ${status}`);
+
+  if (!process.env.DATABASE_URL) {
+    const item = memoryContent.find((c) => c.id === content_id);
+    if (!item) return res.status(404).json({ error: "Not found" });
+    if (status) item.status = status;
+    if (title) item.title = title;
+    if (word_count) item.wordCount = word_count;
+    if (wordpress_post_id) item.wordpressPostId = wordpress_post_id;
+    if (wordpress_url) item.wordpressUrl = wordpress_url;
+    if (n8n_execution_id) item.n8nExecutionId = n8n_execution_id;
+    if (error_message) item.errorMessage = error_message;
+    item.updatedAt = new Date().toISOString();
+    if (status === "draft") item.generatedAt = new Date().toISOString();
+    return res.json({ ok: true });
+  }
+
+  try {
+    const fields = ["updated_at = NOW()"];
+    const params = [];
+    if (status) { params.push(status); fields.push(`status = $${params.length}`); }
+    if (title) { params.push(title); fields.push(`title = $${params.length}`); }
+    if (word_count) { params.push(word_count); fields.push(`word_count = $${params.length}`); }
+    if (wordpress_post_id) { params.push(wordpress_post_id); fields.push(`wordpress_post_id = $${params.length}`); }
+    if (wordpress_url) { params.push(wordpress_url); fields.push(`wordpress_url = $${params.length}`); }
+    if (n8n_execution_id) { params.push(n8n_execution_id); fields.push(`n8n_execution_id = $${params.length}`); }
+    if (error_message) { params.push(error_message); fields.push(`error_message = $${params.length}`); }
+    if (status === "draft") fields.push("generated_at = NOW()");
+
+    params.push(content_id);
+    await pool.query(`UPDATE ai_content SET ${fields.join(", ")} WHERE id = $${params.length}`, params);
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
