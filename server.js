@@ -746,11 +746,17 @@ app.post("/api/projects/delete", async (req, res) => {
 app.get("/api/ai-content/stats", async (req, res) => {
   if (!process.env.DATABASE_URL) {
     const stats = { queued: 0, generating: 0, draft: 0, published: 0, failed: 0, spoke: 0, pillar: 0, comparison: 0 };
+    const stateMap = {};
     memoryContent.forEach((c) => {
       if (stats[c.status] !== undefined) stats[c.status]++;
       if (stats[c.type] !== undefined) stats[c.type]++;
+      if (c.state) {
+        if (!stateMap[c.state]) stateMap[c.state] = { pillar: 0, spoke: 0, comparison: 0, total: 0 };
+        stateMap[c.state][c.type]++;
+        stateMap[c.state].total++;
+      }
     });
-    return res.json(stats);
+    return res.json({ ...stats, states: stateMap });
   }
   try {
     const statusResult = await pool.query(
@@ -759,10 +765,120 @@ app.get("/api/ai-content/stats", async (req, res) => {
     const typeResult = await pool.query(
       "SELECT type, COUNT(*)::int as count FROM ai_content GROUP BY type"
     );
+    const stateResult = await pool.query(
+      "SELECT state, type, COUNT(*)::int as count FROM ai_content WHERE state IS NOT NULL GROUP BY state, type"
+    );
     const stats = { queued: 0, generating: 0, draft: 0, published: 0, failed: 0, spoke: 0, pillar: 0, comparison: 0 };
     statusResult.rows.forEach((r) => { stats[r.status] = r.count; });
     typeResult.rows.forEach((r) => { stats[r.type] = r.count; });
-    res.json(stats);
+    const stateMap = {};
+    stateResult.rows.forEach((r) => {
+      if (!stateMap[r.state]) stateMap[r.state] = { pillar: 0, spoke: 0, comparison: 0, total: 0 };
+      stateMap[r.state][r.type] = r.count;
+      stateMap[r.state].total += r.count;
+    });
+    res.json({ ...stats, states: stateMap });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Import existing WP articles into ai_content table
+app.post("/api/ai-content/import-wp", async (req, res) => {
+  try {
+    // Fetch published posts from WP
+    const wpPosts = [];
+    let page = 1;
+    while (true) {
+      const wpRes = await fetch(
+        `https://proswppp.com/wp-json/wp/v2/posts?per_page=100&page=${page}&_fields=id,title,slug,date,link,categories,content`,
+      );
+      if (!wpRes.ok) break;
+      const posts = await wpRes.json();
+      if (!posts.length) break;
+      wpPosts.push(...posts);
+      page++;
+    }
+
+    const US_STATES = [
+      "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware",
+      "Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky",
+      "Louisiana","Maine","Maryland","Massachusetts","Michigan","Minnesota","Mississippi",
+      "Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey","New Mexico",
+      "New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania",
+      "Rhode Island","South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont",
+      "Virginia","Washington","West Virginia","Wisconsin","Wyoming",
+    ];
+
+    // Detect state from title
+    const detectState = (title) => {
+      const lower = title.toLowerCase();
+      // Check longest names first to avoid "Virginia" matching "West Virginia"
+      const sorted = [...US_STATES].sort((a, b) => b.length - a.length);
+      for (const state of sorted) {
+        if (lower.includes(state.toLowerCase())) return state;
+      }
+      return null;
+    };
+
+    // Detect article type from title + content
+    const detectType = (title, content) => {
+      const lower = title.toLowerCase();
+      if (lower.includes("comparison") || lower.includes("best swppp services") || lower.includes("vs")) return "comparison";
+      // If it's a comprehensive state guide (2000+ words), it's a pillar candidate
+      const wordCount = content.replace(/<[^>]+>/g, " ").split(/\s+/).length;
+      if (wordCount > 2500 && (lower.includes("requirements") || lower.includes("compliance guide") || lower.includes("complete guide"))) return "pillar";
+      return "spoke";
+    };
+
+    let imported = 0;
+    let skipped = 0;
+    const results = [];
+
+    for (const post of wpPosts) {
+      const title = post.title.rendered.replace(/&#038;/g, "&").replace(/&#8211;/g, "–");
+      const content = post.content?.rendered || "";
+      const state = detectState(title);
+      const type = detectType(title, content);
+      const wordCount = content.replace(/<[^>]+>/g, " ").split(/\s+/).length;
+      const id = `wp_import_${post.id}`;
+
+      // Check if already imported
+      if (process.env.DATABASE_URL) {
+        const exists = await pool.query("SELECT id FROM ai_content WHERE id = $1 OR wordpress_post_id = $2", [id, post.id]);
+        if (exists.rows.length > 0) { skipped++; continue; }
+      } else {
+        if (memoryContent.find((c) => c.id === id)) { skipped++; continue; }
+      }
+
+      const item = {
+        id,
+        type,
+        status: "published",
+        keyword: title,
+        state,
+        title,
+        wordCount,
+        wordpressPostId: post.id,
+        wordpressUrl: `https://proswppp.com/wp-admin/post.php?post=${post.id}&action=edit`,
+        publishedAt: post.date,
+      };
+
+      if (process.env.DATABASE_URL) {
+        await pool.query(
+          `INSERT INTO ai_content (id, type, status, keyword, state, title, word_count, wordpress_post_id, wordpress_url, published_at, created_at, updated_at)
+           VALUES ($1, $2, 'published', $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())`,
+          [id, type, title, state, title, wordCount, post.id, item.wordpressUrl, post.date]
+        );
+      } else {
+        memoryContent.push(item);
+      }
+
+      results.push({ id, type, state, title: title.slice(0, 60), wordCount });
+      imported++;
+    }
+
+    res.json({ imported, skipped, total: wpPosts.length, results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -813,8 +929,34 @@ app.get("/api/ai-content", async (req, res) => {
 });
 
 app.post("/api/ai-content", async (req, res) => {
-  const { type, keyword, state, pillarId } = req.body;
+  let { type, keyword, state, pillarId } = req.body;
+
+  // Pillar auto-generates keyword from state
+  if (type === "pillar") {
+    if (!state) return res.status(400).json({ error: "state required for pillar articles" });
+    keyword = `Construction & Industrial SWPPP Requirements in ${state}`;
+    // Enforce one pillar per state
+    if (process.env.DATABASE_URL) {
+      const existing = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1", [state]);
+      if (existing.rows.length > 0) return res.status(409).json({ error: `Pillar already exists for ${state}`, existingId: existing.rows[0].id });
+    } else {
+      const existing = memoryContent.find((c) => c.type === "pillar" && c.state === state);
+      if (existing) return res.status(409).json({ error: `Pillar already exists for ${state}`, existingId: existing.id });
+    }
+  }
+
   if (!type || !keyword) return res.status(400).json({ error: "type and keyword required" });
+
+  // Auto-link spoke to state pillar if not specified
+  if (type === "spoke" && state && !pillarId) {
+    if (process.env.DATABASE_URL) {
+      const pillar = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1 LIMIT 1", [state]);
+      if (pillar.rows.length > 0) pillarId = pillar.rows[0].id;
+    } else {
+      const pillar = memoryContent.find((c) => c.type === "pillar" && c.state === state);
+      if (pillar) pillarId = pillar.id;
+    }
+  }
 
   const id = `content_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const item = {
@@ -850,7 +992,7 @@ app.post("/api/ai-content", async (req, res) => {
 
 app.put("/api/ai-content/:id", async (req, res) => {
   const { id } = req.params;
-  const { keyword, state, type, pillarId, status } = req.body;
+  const { keyword, state, type, pillarId, status, wordpressUrl, title } = req.body;
 
   if (!process.env.DATABASE_URL) {
     const item = memoryContent.find((c) => c.id === id);
@@ -859,7 +1001,12 @@ app.put("/api/ai-content/:id", async (req, res) => {
     if (state !== undefined) item.state = state;
     if (type) item.type = type;
     if (pillarId !== undefined) item.pillarId = pillarId;
-    if (status) item.status = status;
+    if (status) {
+      item.status = status;
+      if (status === "published") item.publishedAt = new Date().toISOString();
+    }
+    if (wordpressUrl !== undefined) item.wordpressUrl = wordpressUrl;
+    if (title !== undefined) item.title = title;
     item.updatedAt = new Date().toISOString();
     return res.json(item);
   }
@@ -871,7 +1018,12 @@ app.put("/api/ai-content/:id", async (req, res) => {
     if (state !== undefined) { params.push(state); fields.push(`state = $${params.length}`); }
     if (type) { params.push(type); fields.push(`type = $${params.length}`); }
     if (pillarId !== undefined) { params.push(pillarId); fields.push(`pillar_id = $${params.length}`); }
-    if (status) { params.push(status); fields.push(`status = $${params.length}`); }
+    if (status) {
+      params.push(status); fields.push(`status = $${params.length}`);
+      if (status === "published") fields.push("published_at = NOW()");
+    }
+    if (wordpressUrl !== undefined) { params.push(wordpressUrl); fields.push(`wordpress_url = $${params.length}`); }
+    if (title !== undefined) { params.push(title); fields.push(`title = $${params.length}`); }
     if (fields.length === 0) return res.status(400).json({ error: "No fields to update" });
 
     fields.push("updated_at = NOW()");

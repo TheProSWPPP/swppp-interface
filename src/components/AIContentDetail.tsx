@@ -12,6 +12,9 @@ import {
   AlertTriangle,
   Clock,
   Sparkles,
+  CheckCircle2,
+  RefreshCw,
+  FileEdit,
 } from "lucide-react";
 
 const statusColors: Record<string, string> = {
@@ -51,15 +54,8 @@ export default function AIContentDetail({
 
   const isEditable = item.status === "queued" || item.status === "failed";
 
-  // Find pillar for this spoke
-  const pillar = item.pillarId
-    ? allItems.find((i) => i.id === item.pillarId)
-    : null;
-
-  // Find spokes for this pillar
-  const spokes = item.type === "pillar"
-    ? allItems.filter((i) => i.pillarId === item.id)
-    : [];
+  const pillar = item.pillarId ? allItems.find((i) => i.id === item.pillarId) : null;
+  const spokes = item.type === "pillar" ? allItems.filter((i) => i.pillarId === item.id) : [];
 
   const handleSave = () => {
     const updates: Partial<AIContentItem> = {};
@@ -71,212 +67,162 @@ export default function AIContentDetail({
     }
   };
 
+  const handleMarkPublished = () => {
+    onUpdate(item.id, { status: "published" } as any);
+  };
+
+  const handleRegenerate = () => {
+    onGenerate(item.id);
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900 transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to list
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-900 transition-colors">
+          <ArrowLeft className="h-4 w-4" /> Back
         </button>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {item.status === "draft" && (
+            <>
+              <button onClick={handleRegenerate}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors">
+                <RefreshCw className="h-3.5 w-3.5" /> Regenerate
+              </button>
+              <button onClick={handleMarkPublished}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Mark Published
+              </button>
+            </>
+          )}
           {(item.status === "queued" || item.status === "failed") && (
-            <button
-              onClick={() => onGenerate(item.id)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-sm"
-            >
-              <Zap className="h-4 w-4" />
-              {item.status === "failed" ? "Retry Generation" : "Generate Article"}
+            <button onClick={() => onGenerate(item.id)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
+              <Zap className="h-3.5 w-3.5" /> {item.status === "failed" ? "Retry" : "Generate"}
             </button>
           )}
-          <button
-            onClick={() => {
-              onDelete(item.id);
-              onBack();
-            }}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete
+          {item.wordpressUrl && (
+            <a href={item.wordpressUrl} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors">
+              <ExternalLink className="h-3.5 w-3.5" /> Open in WP
+            </a>
+          )}
+          <button onClick={() => { onDelete(item.id); onBack(); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-colors">
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Main Card */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-8 space-y-8">
-          {/* Title + Badges */}
-          <div>
-            <div className="flex items-center gap-3 mb-3">
-              <span className={cn(
-                "inline-flex items-center rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider border",
-                typeColors[item.type]
-              )}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Left: Info Panel */}
+        <div className="space-y-4">
+          {/* Main info card */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border", typeColors[item.type])}>
                 {item.type}
               </span>
-              <span className={cn(
-                "inline-flex items-center rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider border",
-                statusColors[item.status]
-              )}>
-                {item.status === "generating" && (
-                  <span className="inline-block h-2 w-2 rounded-full bg-indigo-500 animate-pulse mr-1.5" />
-                )}
+              <span className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border", statusColors[item.status])}>
+                {item.status === "generating" && <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse mr-1" />}
                 {item.status}
               </span>
             </div>
-            <h1 className="text-2xl font-bold text-slate-900">
-              {item.title || item.keyword}
-            </h1>
-            {item.title && (
-              <p className="text-slate-500 mt-1">Keyword: {item.keyword}</p>
+
+            <h2 className="text-lg font-bold text-slate-900">{item.title || item.keyword}</h2>
+            {item.title && <p className="text-sm text-slate-500">{item.keyword}</p>}
+
+            {/* Editable fields */}
+            {isEditable ? (
+              <div className="space-y-3 pt-2 border-t border-slate-100">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Keyword</label>
+                  <input type="text" value={editKeyword} onChange={(e) => { setEditKeyword(e.target.value); setHasChanges(true); }}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">State</label>
+                  <select value={editState} onChange={(e) => { setEditState(e.target.value); setHasChanges(true); }}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm bg-white">
+                    <option value="">Select...</option>
+                    {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                {hasChanges && (
+                  <button onClick={handleSave} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 w-full justify-center">
+                    <Save className="h-3.5 w-3.5" /> Save
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                {item.state && (
+                  <div>
+                    <p className="text-xs text-slate-500">State</p>
+                    <p className="text-sm font-medium text-slate-900">{item.state}</p>
+                  </div>
+                )}
+                {item.wordCount && (
+                  <div>
+                    <p className="text-xs text-slate-500">Words</p>
+                    <p className="text-sm font-medium text-slate-900">{item.wordCount.toLocaleString()}</p>
+                  </div>
+                )}
+                {item.wordpressPostId && (
+                  <div>
+                    <p className="text-xs text-slate-500">WP ID</p>
+                    <p className="text-sm font-medium text-slate-900">#{item.wordpressPostId}</p>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
-          {/* Editable Fields */}
-          {isEditable ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Keyword</label>
-                <input
-                  type="text"
-                  value={editKeyword}
-                  onChange={(e) => { setEditKeyword(e.target.value); setHasChanges(true); }}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
-                <select
-                  value={editState}
-                  onChange={(e) => { setEditState(e.target.value); setHasChanges(true); }}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
-                >
-                  <option value="">Select state...</option>
-                  {US_STATES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
-              {hasChanges && (
-                <div className="sm:col-span-2 flex justify-end">
-                  <button
-                    onClick={handleSave}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors"
-                  >
-                    <Save className="h-4 w-4" />
-                    Save Changes
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-              {item.state && (
-                <div>
-                  <p className="text-sm font-medium text-slate-500">State</p>
-                  <p className="text-sm font-semibold text-slate-900 mt-0.5">{item.state}</p>
-                </div>
-              )}
-              {item.wordCount && (
-                <div>
-                  <p className="text-sm font-medium text-slate-500">Word Count</p>
-                  <p className="text-sm font-semibold text-slate-900 mt-0.5">{item.wordCount.toLocaleString()}</p>
-                </div>
-              )}
-              {item.wordpressPostId && (
-                <div>
-                  <p className="text-sm font-medium text-slate-500">WordPress Post ID</p>
-                  <p className="text-sm font-semibold text-slate-900 mt-0.5">#{item.wordpressPostId}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* WordPress Link */}
-          {item.wordpressUrl && (
-            <div className="flex items-center gap-3 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
-              <ExternalLink className="h-5 w-5 text-indigo-600 flex-shrink-0" />
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-indigo-900">WordPress Draft</p>
-                <a
-                  href={item.wordpressUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-indigo-600 hover:text-indigo-800 underline truncate block"
-                >
-                  {item.wordpressUrl}
-                </a>
-              </div>
-            </div>
-          )}
-
-          {/* Error Message */}
+          {/* Error */}
           {item.errorMessage && (
-            <div className="flex items-start gap-3 p-4 bg-red-50 rounded-xl border border-red-100">
-              <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex items-start gap-2 p-3 bg-red-50 rounded-xl border border-red-100">
+              <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-red-900">Generation Failed</p>
-                <p className="text-sm text-red-700 mt-0.5">{item.errorMessage}</p>
+                <p className="text-xs font-semibold text-red-900">Failed</p>
+                <p className="text-xs text-red-700">{item.errorMessage}</p>
               </div>
             </div>
           )}
 
-          {/* Generating spinner */}
+          {/* Generating */}
           {item.status === "generating" && (
-            <div className="flex items-center gap-3 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
-              <div className="h-5 w-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-              <div>
-                <p className="text-sm font-semibold text-indigo-900">Generating Article</p>
-                <p className="text-sm text-indigo-700 mt-0.5">
-                  Perplexity research + Claude writing + Gemini images + WordPress upload. This takes 2-5 minutes.
-                </p>
-              </div>
+            <div className="flex items-center gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+              <div className="h-4 w-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <p className="text-xs text-indigo-700">Generating... 2-5 min</p>
             </div>
           )}
 
-          {/* Pillar Relationship */}
+          {/* Pillar link */}
           {pillar && (
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-              <div className="flex items-center gap-2 mb-2">
-                <Link2 className="h-4 w-4 text-indigo-600" />
-                <p className="text-sm font-semibold text-slate-900">Linked to Pillar</p>
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Link2 className="h-3.5 w-3.5 text-indigo-600" />
+                <p className="text-xs font-semibold text-slate-900">Linked Pillar</p>
               </div>
-              <p className="text-sm text-slate-700">{pillar.keyword}</p>
+              <p className="text-xs text-slate-700">{pillar.keyword}</p>
               {pillar.wordpressUrl && (
-                <a
-                  href={pillar.wordpressUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-indigo-600 hover:underline mt-1 inline-block"
-                >
-                  View pillar on WordPress
-                </a>
+                <a href={pillar.wordpressUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-indigo-600 hover:underline">View in WP</a>
               )}
             </div>
           )}
 
-          {/* Spoke Children (for pillars) */}
+          {/* Spokes */}
           {spokes.length > 0 && (
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-              <div className="flex items-center gap-2 mb-3">
-                <Sparkles className="h-4 w-4 text-indigo-600" />
-                <p className="text-sm font-semibold text-slate-900">
-                  Linked Spoke Articles ({spokes.length})
-                </p>
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+                <p className="text-xs font-semibold text-slate-900">Spokes ({spokes.length})</p>
               </div>
-              <div className="space-y-2">
-                {spokes.map((spoke) => (
-                  <div key={spoke.id} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-700">{spoke.keyword}</span>
-                    <span className={cn(
-                      "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border",
-                      statusColors[spoke.status]
-                    )}>
-                      {spoke.status}
-                    </span>
+              <div className="space-y-1">
+                {spokes.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between">
+                    <span className="text-xs text-slate-700 truncate">{s.keyword}</span>
+                    <span className={cn("rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase border", statusColors[s.status])}>{s.status}</span>
                   </div>
                 ))}
               </div>
@@ -284,31 +230,44 @@ export default function AIContentDetail({
           )}
 
           {/* Timestamps */}
-          <div className="border-t border-slate-100 pt-6 flex flex-wrap gap-6">
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <Clock className="h-3.5 w-3.5" />
-              Created {new Date(item.createdAt).toLocaleString()}
-            </div>
-            {item.generatedAt && (
-              <div className="flex items-center gap-2 text-xs text-slate-400">
-                <Sparkles className="h-3.5 w-3.5" />
-                Generated {new Date(item.generatedAt).toLocaleString()}
-              </div>
-            )}
-            {item.publishedAt && (
-              <div className="flex items-center gap-2 text-xs text-slate-400">
-                <ExternalLink className="h-3.5 w-3.5" />
-                Published {new Date(item.publishedAt).toLocaleString()}
-              </div>
-            )}
-            {item.n8nExecutionId && (
-              <div className="text-xs text-slate-400">
-                n8n: {item.n8nExecutionId}
-              </div>
-            )}
+          <div className="space-y-1 text-[10px] text-slate-400">
+            <div className="flex items-center gap-1"><Clock className="h-3 w-3" /> Created {new Date(item.createdAt).toLocaleString()}</div>
+            {item.generatedAt && <div className="flex items-center gap-1"><Sparkles className="h-3 w-3" /> Generated {new Date(item.generatedAt).toLocaleString()}</div>}
+            {item.publishedAt && <div className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Published {new Date(item.publishedAt).toLocaleString()}</div>}
+            {item.n8nExecutionId && <div>n8n: {item.n8nExecutionId}</div>}
           </div>
+        </div>
+
+        {/* Right: Content Preview (2/3 width) */}
+        <div className="lg:col-span-2">
+          {item.wordpressUrl && item.wordpressPostId ? (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-full">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100 bg-slate-50">
+                <p className="text-xs font-semibold text-slate-600">Content Preview</p>
+                <a href={item.wordpressUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[10px] text-indigo-600 hover:underline">
+                  <ExternalLink className="h-3 w-3" /> Edit in WordPress
+                </a>
+              </div>
+              <iframe
+                src={`https://proswppp.com/?p=${item.wordpressPostId}&preview=true`}
+                className="w-full border-0"
+                style={{ height: "calc(100vh - 280px)", minHeight: 500 }}
+                title="Content Preview"
+              />
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-center h-64 lg:h-full">
+              <div className="text-center text-slate-400">
+                <FileEdit className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                <p className="text-sm">No content yet</p>
+                <p className="text-xs mt-1">Generate the article to see a preview</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
+

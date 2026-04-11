@@ -6,12 +6,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
   Plus,
-  Sparkles,
   Trash2,
   ExternalLink,
   X,
-  ChevronRight,
   Zap,
+  ArrowUpDown,
+  ChevronDown,
 } from "lucide-react";
 
 const statusColors: Record<string, string> = {
@@ -30,17 +30,26 @@ const typeColors: Record<string, string> = {
 
 interface AIContentListProps {
   items: AIContentItem[];
+  allItems: AIContentItem[];
   pillars: AIContentItem[];
+  statesWithPillar: Set<string | undefined>;
+  statusFilter: string;
   onSelect: (item: AIContentItem) => void;
-  onCreate: (data: { type: string; keyword: string; state?: string; pillarId?: string }) => void;
+  onCreate: (data: { type: string; keyword?: string; state?: string; pillarId?: string }) => void;
   onBulkDelete: (ids: string[]) => void;
   onGenerate: (id: string) => void;
   onBulkGenerate: (ids: string[]) => void;
 }
 
+type SortKey = "keyword" | "type" | "state" | "status" | "wordCount" | "createdAt";
+type SortDir = "asc" | "desc";
+
 export default function AIContentList({
   items,
+  allItems,
   pillars,
+  statesWithPillar,
+  statusFilter,
   onSelect,
   onCreate,
   onBulkDelete,
@@ -50,18 +59,21 @@ export default function AIContentList({
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
-  const [filterState, setFilterState] = useState<string>("");
+  const [filterState, setFilterState] = useState<string>(
+    statusFilter.startsWith("state:") ? statusFilter.slice(6) : ""
+  );
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>("createdAt");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  // Add form state
+  // Add form
   const [newType, setNewType] = useState<ContentType>("spoke");
   const [newKeyword, setNewKeyword] = useState("");
   const [newState, setNewState] = useState("");
-  const [newPillarId, setNewPillarId] = useState("");
 
   const filtered = useMemo(() => {
-    return items.filter((item) => {
+    let result = items.filter((item) => {
       if (search) {
         const q = search.toLowerCase();
         const matches =
@@ -75,85 +87,105 @@ export default function AIContentList({
       if (filterState && item.state !== filterState) return false;
       return true;
     });
-  }, [items, search, filterType, filterStatus, filterState]);
+
+    // Sort
+    result.sort((a, b) => {
+      let aVal: any, bVal: any;
+      switch (sortKey) {
+        case "keyword": aVal = (a.title || a.keyword).toLowerCase(); bVal = (b.title || b.keyword).toLowerCase(); break;
+        case "type": aVal = a.type; bVal = b.type; break;
+        case "state": aVal = a.state || ""; bVal = b.state || ""; break;
+        case "status": aVal = a.status; bVal = b.status; break;
+        case "wordCount": aVal = a.wordCount || 0; bVal = b.wordCount || 0; break;
+        case "createdAt": aVal = a.createdAt; bVal = b.createdAt; break;
+      }
+      if (aVal < bVal) return sortDir === "asc" ? -1 : 1;
+      if (aVal > bVal) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    return result;
+  }, [items, search, filterType, filterStatus, filterState, sortKey, sortDir]);
 
   const uniqueStates = useMemo(() => {
-    const states = new Set(items.map((i) => i.state).filter(Boolean));
+    const states = new Set(allItems.map((i) => i.state).filter(Boolean));
     return Array.from(states).sort();
-  }, [items]);
+  }, [allItems]);
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
 
   const toggleSelect = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every((i) => selectedIds.includes(i.id));
+  const toggleAll = () => {
+    const ids = filtered.map((i) => i.id);
+    setSelectedIds(allFilteredSelected ? selectedIds.filter((id) => !ids.includes(id)) : [...new Set([...selectedIds, ...ids])]);
   };
 
   const handleAdd = () => {
-    if (!newKeyword.trim()) return;
-    onCreate({
-      type: newType,
-      keyword: newKeyword.trim(),
-      state: newState || undefined,
-      pillarId: newPillarId || undefined,
-    });
+    if (newType === "pillar") {
+      if (!newState) return;
+      onCreate({ type: "pillar", state: newState });
+    } else {
+      if (!newKeyword.trim()) return;
+      onCreate({ type: newType, keyword: newKeyword.trim(), state: newState || undefined });
+    }
     setNewKeyword("");
     setNewState("");
-    setNewPillarId("");
     setShowAddForm(false);
   };
 
   const queuedSelected = selectedIds.filter((id) => {
-    const item = items.find((i) => i.id === id);
+    const item = allItems.find((i) => i.id === id);
     return item && (item.status === "queued" || item.status === "failed");
   });
 
+  const SortHeader = ({ label, field }: { label: string; field: SortKey }) => (
+    <button onClick={() => toggleSort(field)} className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700 uppercase tracking-wider">
+      {label}
+      {sortKey === field && <ArrowUpDown className="h-3 w-3 text-indigo-500" />}
+    </button>
+  );
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-            AI Content
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {items.length} article{items.length !== 1 ? "s" : ""} total
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+        <p className="text-sm text-slate-500">
+          {filtered.length} article{filtered.length !== 1 ? "s" : ""}
+          {filterState && ` in ${filterState}`}
+          {statusFilter && !statusFilter.startsWith("state:") && ` — ${statusFilter}`}
+        </p>
+        <div className="flex items-center gap-2">
           {queuedSelected.length > 0 && (
-            <motion.button
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              onClick={() => {
-                onBulkGenerate(queuedSelected);
-                setSelectedIds([]);
-              }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-sm"
+            <button
+              onClick={() => { onBulkGenerate(queuedSelected); setSelectedIds([]); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors"
             >
-              <Zap className="h-4 w-4" />
-              Generate {queuedSelected.length} Selected
-            </motion.button>
+              <Zap className="h-3.5 w-3.5" />
+              Generate {queuedSelected.length}
+            </button>
           )}
           {selectedIds.length > 0 && (
-            <motion.button
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              onClick={() => {
-                onBulkDelete(selectedIds);
-                setSelectedIds([]);
-              }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+            <button
+              onClick={() => { onBulkDelete(selectedIds); setSelectedIds([]); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 className="h-3.5 w-3.5" />
               Delete {selectedIds.length}
-            </motion.button>
+            </button>
           )}
           <button
             onClick={() => setShowAddForm(!showAddForm)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors"
           >
-            <Plus className="h-4 w-4" />
-            Add Keyword
+            <Plus className="h-3.5 w-3.5" />
+            Add
           </button>
         </div>
       </div>
@@ -161,139 +193,72 @@ export default function AIContentList({
       {/* Add Form */}
       <AnimatePresence>
         {showAddForm && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-900">Add New Keyword</h3>
-                <button onClick={() => setShowAddForm(false)} className="text-slate-400 hover:text-slate-600">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Keyword *</label>
-                  <input
-                    type="text"
-                    value={newKeyword}
-                    onChange={(e) => setNewKeyword(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-                    placeholder="SWPPP requirements Texas"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Type *</label>
-                  <select
-                    value={newType}
-                    onChange={(e) => setNewType(e.target.value as ContentType)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
-                  >
-                    <option value="spoke">Spoke (1,000-1,500 words)</option>
-                    <option value="pillar">Pillar (~3,500 words)</option>
-                    <option value="comparison">Comparison (1,500-2,000 words)</option>
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <div className="flex items-end gap-3">
+                <div className="w-36">
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Type</label>
+                  <select value={newType} onChange={(e) => setNewType(e.target.value as ContentType)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm bg-white">
+                    <option value="spoke">Spoke</option>
+                    <option value="pillar">Pillar</option>
+                    <option value="comparison">Comparison</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    State {newType === "pillar" ? "*" : ""}
+                {newType !== "pillar" && (
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Keyword</label>
+                    <input
+                      type="text" value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+                      placeholder={newType === "comparison" ? "Best SWPPP Services in Texas 2026" : "SWPPP requirements for..."}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm"
+                    />
+                  </div>
+                )}
+                <div className="w-40">
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    State{newType === "pillar" ? " *" : ""}
                   </label>
-                  <select
-                    value={newState}
-                    onChange={(e) => setNewState(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
-                  >
-                    <option value="">Select state...</option>
+                  <select value={newState} onChange={(e) => setNewState(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm bg-white">
+                    <option value="">Select...</option>
                     {US_STATES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s} value={s} disabled={newType === "pillar" && statesWithPillar.has(s)}>
+                        {s}{newType === "pillar" && statesWithPillar.has(s) ? " (has pillar)" : ""}
+                      </option>
                     ))}
                   </select>
                 </div>
-                {newType === "spoke" && (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Pillar Article</label>
-                    <select
-                      value={newPillarId}
-                      onChange={(e) => setNewPillarId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
-                    >
-                      <option value="">No pillar (standalone)</option>
-                      {pillars.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.state ? `${p.state} — ` : ""}{p.keyword}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-end">
-                <button
-                  onClick={handleAdd}
-                  disabled={!newKeyword.trim() || (newType === "pillar" && !newState)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add to Queue
+                <button onClick={handleAdd} disabled={newType === "pillar" ? !newState : !newKeyword.trim()} className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 transition-colors">
+                  Add
+                </button>
+                <button onClick={() => setShowAddForm(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                  <X className="h-4 w-4" />
                 </button>
               </div>
+              {newType === "pillar" && newState && (
+                <p className="text-xs text-slate-400 mt-2">Will create: "Construction & Industrial SWPPP Requirements in {newState}"</p>
+              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        {filtered.length > 0 && (
-          <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={filtered.length > 0 && filtered.every((i) => selectedIds.includes(i.id))}
-              onChange={() => {
-                const allFilteredIds = filtered.map((i) => i.id);
-                const allSelected = allFilteredIds.every((id) => selectedIds.includes(id));
-                setSelectedIds(allSelected ? selectedIds.filter((id) => !allFilteredIds.includes(id)) : [...new Set([...selectedIds, ...allFilteredIds])]);
-              }}
-              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-            />
-            All
-          </label>
-        )}
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search keywords, titles..."
-            className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          />
-          {search && (
-            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-              <X className="h-4 w-4" />
-            </button>
-          )}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..."
+            className="w-full pl-8 pr-7 py-1.5 rounded-lg border border-slate-200 text-sm" />
+          {search && <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400"><X className="h-3.5 w-3.5" /></button>}
         </div>
-        <select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          className="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        >
+        <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white">
           <option value="">All Types</option>
           <option value="spoke">Spoke</option>
           <option value="pillar">Pillar</option>
           <option value="comparison">Comparison</option>
         </select>
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        >
-          <option value="">All Statuses</option>
+        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white">
+          <option value="">All Status</option>
           <option value="queued">Queued</option>
           <option value="generating">Generating</option>
           <option value="draft">Draft</option>
@@ -301,160 +266,94 @@ export default function AIContentList({
           <option value="failed">Failed</option>
         </select>
         {uniqueStates.length > 0 && (
-          <select
-            value={filterState}
-            onChange={(e) => setFilterState(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
+          <select value={filterState} onChange={(e) => setFilterState(e.target.value)} className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white">
             <option value="">All States</option>
-            {uniqueStates.map((s) => (
-              <option key={s} value={s!}>{s}</option>
-            ))}
+            {uniqueStates.map((s) => <option key={s} value={s!}>{s}</option>)}
           </select>
         )}
       </div>
 
-      {/* List */}
-      <div className="grid grid-cols-1 gap-4">
-        <AnimatePresence mode="popLayout">
-          {filtered.map((item) => (
-            <motion.div
-              layout
-              key={item.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
-              className={cn(
-                "group relative bg-white rounded-3xl border transition-all duration-300 cursor-pointer overflow-hidden p-1",
-                selectedIds.includes(item.id)
-                  ? "border-indigo-500 shadow-indigo-100 shadow-lg ring-1 ring-indigo-500"
-                  : "border-slate-200 shadow-sm hover:shadow-xl hover:shadow-indigo-500/5 hover:-translate-y-0.5"
-              )}
-            >
-              {/* Selection checkbox */}
-              <div
-                className={cn(
-                  "absolute top-4 left-4 z-10 transition-opacity duration-200",
-                  selectedIds.includes(item.id) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                )}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(item.id)}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    toggleSelect(item.id);
-                  }}
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div
-                className="bg-white rounded-[1.4rem] p-6"
-                onClick={() => onSelect(item)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-4 pl-6">
-                    <div className={cn(
-                      "h-10 w-10 rounded-xl flex items-center justify-center flex-shrink-0",
-                      item.type === "pillar" ? "bg-indigo-100 text-indigo-600" :
-                      item.type === "comparison" ? "bg-emerald-100 text-emerald-600" :
-                      "bg-slate-100 text-slate-600"
-                    )}>
-                      <Sparkles className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-base font-bold text-slate-900 truncate">
-                        {item.title || item.keyword}
-                      </h3>
-                      {item.title && (
-                        <p className="text-sm text-slate-500 mt-0.5 truncate">{item.keyword}</p>
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100">
+              <th className="w-10 p-3">
+                <input type="checkbox" checked={allFilteredSelected && filtered.length > 0} onChange={toggleAll}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600" />
+              </th>
+              <th className="text-left p-3"><SortHeader label="Title / Keyword" field="keyword" /></th>
+              <th className="text-left p-3 w-24"><SortHeader label="Type" field="type" /></th>
+              <th className="text-left p-3 w-32"><SortHeader label="State" field="state" /></th>
+              <th className="text-left p-3 w-28"><SortHeader label="Status" field="status" /></th>
+              <th className="text-right p-3 w-20"><SortHeader label="Words" field="wordCount" /></th>
+              <th className="text-right p-3 w-32">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <AnimatePresence mode="popLayout">
+              {filtered.map((item) => (
+                <motion.tr
+                  key={item.id}
+                  layout
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => onSelect(item)}
+                  className={cn(
+                    "border-b border-slate-50 cursor-pointer transition-colors",
+                    selectedIds.includes(item.id) ? "bg-indigo-50/50" : "hover:bg-slate-50"
+                  )}
+                >
+                  <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleSelect(item.id)}
+                      className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600" />
+                  </td>
+                  <td className="p-3">
+                    <p className="font-medium text-slate-900 truncate max-w-md">{item.title || item.keyword}</p>
+                    {item.title && <p className="text-xs text-slate-400 truncate max-w-md">{item.keyword}</p>}
+                  </td>
+                  <td className="p-3">
+                    <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border", typeColors[item.type])}>
+                      {item.type}
+                    </span>
+                  </td>
+                  <td className="p-3 text-slate-600">{item.state || "—"}</td>
+                  <td className="p-3">
+                    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border", statusColors[item.status])}>
+                      {item.status === "generating" && <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse mr-1" />}
+                      {item.status}
+                    </span>
+                  </td>
+                  <td className="p-3 text-right text-slate-500 tabular-nums">
+                    {item.wordCount ? item.wordCount.toLocaleString() : "—"}
+                  </td>
+                  <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-1.5">
+                      {(item.status === "queued" || item.status === "failed") && (
+                        <button onClick={() => onGenerate(item.id)}
+                          className={cn("px-2 py-1 rounded text-[10px] font-bold text-white transition-colors",
+                            item.status === "failed" ? "bg-red-500 hover:bg-red-600" : "bg-indigo-600 hover:bg-indigo-700")}>
+                          <Zap className="h-3 w-3" />
+                        </button>
                       )}
-                      <div className="flex items-center gap-2 mt-2">
-                        <span className={cn(
-                          "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border",
-                          typeColors[item.type]
-                        )}>
-                          {item.type}
-                        </span>
-                        <span className={cn(
-                          "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border",
-                          statusColors[item.status]
-                        )}>
-                          {item.status === "generating" && (
-                            <span className="inline-block h-2 w-2 rounded-full bg-indigo-500 animate-pulse mr-1.5" />
-                          )}
-                          {item.status}
-                        </span>
-                        {item.state && (
-                          <span className="text-xs text-slate-500">{item.state}</span>
-                        )}
-                        {item.wordCount && (
-                          <span className="text-xs text-slate-400">{item.wordCount.toLocaleString()} words</span>
-                        )}
-                      </div>
+                      {item.wordpressUrl && (
+                        <a href={item.wordpressUrl} target="_blank" rel="noopener noreferrer"
+                          className="px-2 py-1 rounded text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors">
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {item.status === "queued" && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onGenerate(item.id); }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors opacity-0 group-hover:opacity-100"
-                      >
-                        <Zap className="h-3 w-3" />
-                        Generate
-                      </button>
-                    )}
-                    {item.status === "failed" && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onGenerate(item.id); }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors"
-                      >
-                        <Zap className="h-3 w-3" />
-                        Retry
-                      </button>
-                    )}
-                    {item.wordpressUrl && (
-                      <a
-                        href={item.wordpressUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        WP Draft
-                      </a>
-                    )}
-                    <ChevronRight className="h-5 w-5 text-slate-300 group-hover:text-slate-500 transition-colors" />
-                  </div>
-                </div>
-
-                <div className="mt-6 pt-4 border-t border-slate-50 flex items-center justify-between text-sm">
-                  <span className="text-slate-400 text-xs">
-                    Added {new Date(item.createdAt).toLocaleDateString()}
-                  </span>
-                  {item.generatedAt && (
-                    <span className="text-slate-400 text-xs">
-                      Generated {new Date(item.generatedAt).toLocaleDateString()}
-                    </span>
-                  )}
-                  {item.errorMessage && (
-                    <span className="text-red-500 text-xs truncate max-w-[300px]">
-                      {item.errorMessage}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
+                  </td>
+                </motion.tr>
+              ))}
+            </AnimatePresence>
+          </tbody>
+        </table>
 
         {filtered.length === 0 && (
-          <div className="text-center py-16 text-slate-400">
-            <Sparkles className="h-10 w-10 mx-auto mb-3 opacity-50" />
-            <p className="text-lg font-medium">No content items yet</p>
-            <p className="text-sm mt-1">Click "Add Keyword" to queue your first article</p>
+          <div className="text-center py-12 text-slate-400">
+            <p className="text-sm">No articles found</p>
           </div>
         )}
       </div>
