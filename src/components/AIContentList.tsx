@@ -11,7 +11,6 @@ import {
   X,
   Zap,
   ArrowUpDown,
-  ChevronDown,
 } from "lucide-react";
 
 const statusColors: Record<string, string> = {
@@ -31,7 +30,6 @@ const typeColors: Record<string, string> = {
 interface AIContentListProps {
   items: AIContentItem[];
   allItems: AIContentItem[];
-  pillars: AIContentItem[];
   statesWithPillar: Set<string | undefined>;
   statusFilter: string;
   onSelect: (item: AIContentItem) => void;
@@ -47,7 +45,6 @@ type SortDir = "asc" | "desc";
 export default function AIContentList({
   items,
   allItems,
-  pillars,
   statesWithPillar,
   statusFilter,
   onSelect,

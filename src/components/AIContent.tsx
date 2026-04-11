@@ -198,11 +198,11 @@ export default function AIContent() {
   }
 
   const statCards = [
-    { key: "queued", label: "Queued", icon: ListOrdered, color: "blue", count: stats.queued },
+    { key: "queued", label: "Queued", icon: ListOrdered, color: "blue", count: stats.queued, spin: false },
     { key: "generating", label: "Generating", icon: Loader2, color: "indigo", count: stats.generating, spin: true },
-    { key: "draft", label: "Drafts", icon: FileEdit, color: "amber", count: stats.draft },
-    { key: "published", label: "Published", icon: CheckCircle2, color: "green", count: stats.published },
-    { key: "failed", label: "Failed", icon: AlertTriangle, color: "red", count: stats.failed },
+    { key: "draft", label: "Drafts", icon: FileEdit, color: "amber", count: stats.draft, spin: false },
+    { key: "published", label: "Published", icon: CheckCircle2, color: "green", count: stats.published, spin: false },
+    { key: "failed", label: "Failed", icon: AlertTriangle, color: "red", count: stats.failed, spin: false },
   ] as const;
 
   const colorMap: Record<string, { bg: string; text: string }> = {
@@ -312,7 +312,6 @@ export default function AIContent() {
         <AIContentList
           items={filteredItems}
           allItems={items}
-          pillars={pillars}
           statesWithPillar={statesWithPillar}
           statusFilter={statusFilter}
           onSelect={setSelectedItem}
@@ -330,12 +329,8 @@ export default function AIContent() {
 // State Dashboard Grid
 // ============================================================
 function StatesDashboard({
-  stats,
   items,
-  statesWithPillar,
   onSelectState,
-  onCreate,
-  onGenerate,
 }: {
   stats: Stats;
   items: AIContentItem[];
