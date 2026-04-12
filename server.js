@@ -860,7 +860,7 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
         title,
         wordCount,
         wordpressPostId: post.id,
-        wordpressUrl: `https://proswppp.com/wp-admin/post.php?post=${post.id}&action=edit`,
+        wordpressUrl: post.link || `https://proswppp.com/?p=${post.id}`,
         publishedAt: post.date,
       };
 
