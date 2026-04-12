@@ -843,12 +843,30 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
       const wordCount = content.replace(/<[^>]+>/g, " ").split(/\s+/).length;
       const id = `wp_import_${post.id}`;
 
-      // Check if already imported
+      // Check if already imported — if so, sync URL and status
       if (process.env.DATABASE_URL) {
-        const exists = await pool.query("SELECT id FROM ai_content WHERE id = $1 OR wordpress_post_id = $2", [id, post.id]);
-        if (exists.rows.length > 0) { skipped++; continue; }
+        const exists = await pool.query("SELECT id, status, wordpress_url FROM ai_content WHERE id = $1 OR wordpress_post_id = $2", [id, post.id]);
+        if (exists.rows.length > 0) {
+          const existing = exists.rows[0];
+          const wpUrl = post.link || `https://proswppp.com/?p=${post.id}`;
+          // Update if status changed (draft→published) or URL changed
+          if (existing.status !== "published" || existing.wordpress_url !== wpUrl) {
+            await pool.query(
+              "UPDATE ai_content SET status = 'published', wordpress_url = $1, published_at = $2, updated_at = NOW() WHERE id = $3",
+              [wpUrl, post.date, existing.id]
+            );
+          }
+          skipped++;
+          continue;
+        }
       } else {
-        if (memoryContent.find((c) => c.id === id)) { skipped++; continue; }
+        const existing = memoryContent.find((c) => c.id === id || c.wordpressPostId === post.id);
+        if (existing) {
+          existing.status = "published";
+          existing.wordpressUrl = post.link || `https://proswppp.com/?p=${post.id}`;
+          skipped++;
+          continue;
+        }
       }
 
       const item = {

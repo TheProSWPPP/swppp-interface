@@ -12,7 +12,6 @@ import {
   AlertTriangle,
   Clock,
   Sparkles,
-  CheckCircle2,
   RefreshCw,
   FileEdit,
 } from "lucide-react";
@@ -67,10 +66,6 @@ export default function AIContentDetail({
     }
   };
 
-  const handleMarkPublished = () => {
-    onUpdate(item.id, { status: "published" } as any);
-  };
-
   const handleRegenerate = () => {
     onGenerate(item.id);
   };
@@ -84,16 +79,10 @@ export default function AIContentDetail({
         </button>
         <div className="flex items-center gap-2">
           {item.status === "draft" && (
-            <>
-              <button onClick={handleRegenerate}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors">
-                <RefreshCw className="h-3.5 w-3.5" /> Regenerate
-              </button>
-              <button onClick={handleMarkPublished}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Mark Published
-              </button>
-            </>
+            <button onClick={handleRegenerate}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors">
+              <RefreshCw className="h-3.5 w-3.5" /> Regenerate
+            </button>
           )}
           {(item.status === "queued" || item.status === "failed") && (
             <button onClick={() => onGenerate(item.id)}
@@ -233,7 +222,7 @@ export default function AIContentDetail({
           <div className="space-y-1 text-[10px] text-slate-400">
             <div className="flex items-center gap-1"><Clock className="h-3 w-3" /> Created {new Date(item.createdAt).toLocaleString()}</div>
             {item.generatedAt && <div className="flex items-center gap-1"><Sparkles className="h-3 w-3" /> Generated {new Date(item.generatedAt).toLocaleString()}</div>}
-            {item.publishedAt && <div className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Published {new Date(item.publishedAt).toLocaleString()}</div>}
+            {item.publishedAt && <div className="flex items-center gap-1"><Sparkles className="h-3 w-3" /> Published {new Date(item.publishedAt).toLocaleString()}</div>}
             {item.n8nExecutionId && <div>n8n: {item.n8nExecutionId}</div>}
           </div>
         </div>

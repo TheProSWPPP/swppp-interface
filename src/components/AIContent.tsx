@@ -37,7 +37,6 @@ export default function AIContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [statusFilter, setStatusFilter] = useState<string>("");
-  const [importing, setImporting] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -62,14 +61,8 @@ export default function AIContent() {
 
   useEffect(() => {
     fetchData().then(() => {
-      // Auto-sync from WP on first load if no published items exist
-      fetch("/api/ai-content/stats", { credentials: "include" })
-        .then((r) => r.json())
-        .then((s) => {
-          if (s.published === 0 && !importing) {
-            handleImportWP();
-          }
-        });
+      // Sync from WP on every load — catches new publishes and status changes
+      handleImportWP();
     });
   }, []);
 
@@ -81,16 +74,11 @@ export default function AIContent() {
   }, [items, fetchData]);
 
   const handleImportWP = async () => {
-    setImporting(true);
     try {
-      const res = await fetch("/api/ai-content/import-wp", { method: "POST", credentials: "include" });
-      const data = await res.json();
-      alert(`Imported ${data.imported} articles (${data.skipped} already existed)`);
+      await fetch("/api/ai-content/import-wp", { method: "POST", credentials: "include" });
       await fetchData();
     } catch (err) {
-      console.error("Import failed:", err);
-    } finally {
-      setImporting(false);
+      console.error("WP sync failed:", err);
     }
   };
 
