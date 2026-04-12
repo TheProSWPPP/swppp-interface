@@ -896,7 +896,22 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
       imported++;
     }
 
-    res.json({ imported, skipped, total: wpPosts.length, results });
+    // Detect trashed posts — remove entries whose WP post no longer exists
+    let trashed = 0;
+    if (process.env.DATABASE_URL) {
+      const liveWpIds = new Set(wpPosts.map((p) => p.id));
+      const dbEntries = await pool.query(
+        "SELECT id, wordpress_post_id FROM ai_content WHERE wordpress_post_id IS NOT NULL AND status = 'published'"
+      );
+      for (const row of dbEntries.rows) {
+        if (!liveWpIds.has(row.wordpress_post_id)) {
+          await pool.query("DELETE FROM ai_content WHERE id = $1", [row.id]);
+          trashed++;
+        }
+      }
+    }
+
+    res.json({ imported, skipped, trashed, total: wpPosts.length, results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
