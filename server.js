@@ -822,25 +822,35 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
     };
 
     // Detect article type from title + content
-    const detectType = (title, content) => {
+    // Pillar = state-level SWPPP requirements guide (one per state)
+    // Pattern: "[State] SWPPP Requirements..." or "SWPPP Requirements [State]..."
+    const detectType = (title, state) => {
       const lower = title.toLowerCase();
       if (lower.includes("comparison") || lower.includes("best swppp services") || lower.includes("vs")) return "comparison";
-      // If it's a comprehensive state guide (2000+ words), it's a pillar candidate
-      const wordCount = content.replace(/<[^>]+>/g, " ").split(/\s+/).length;
-      if (wordCount > 2500 && (lower.includes("requirements") || lower.includes("compliance guide") || lower.includes("complete guide"))) return "pillar";
+      if (state && (lower.includes("swppp requirements") || lower.includes("swppp compliance") || lower.includes("stormwater permit compliance"))) return "pillar";
       return "spoke";
     };
 
     let imported = 0;
     let skipped = 0;
     const results = [];
+    const pillarStates = new Set(); // Track which states already have a pillar in this import
 
     for (const post of wpPosts) {
       const title = post.title.rendered.replace(/&#038;/g, "&").replace(/&#8211;/g, "–");
       const content = post.content?.rendered || "";
       const state = detectState(title);
-      const type = detectType(title, content);
+      let type = detectType(title, state);
       const wordCount = content.replace(/<[^>]+>/g, " ").split(/\s+/).length;
+
+      // One pillar per state — if we already assigned a pillar for this state, demote to spoke
+      if (type === "pillar" && state) {
+        if (pillarStates.has(state)) {
+          type = "spoke";
+        } else {
+          pillarStates.add(state);
+        }
+      }
       const id = `wp_import_${post.id}`;
 
       // Check if already imported — if so, sync URL and status
