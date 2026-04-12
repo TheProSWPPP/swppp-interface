@@ -284,7 +284,8 @@ export default function AIContentList({
               <th className="text-left p-3 w-32"><SortHeader label="State" field="state" /></th>
               <th className="text-left p-3 w-28"><SortHeader label="Status" field="status" /></th>
               <th className="text-right p-3 w-20"><SortHeader label="Words" field="wordCount" /></th>
-              <th className="text-right p-3 w-32">Actions</th>
+              <th className="text-left p-3 w-28"><SortHeader label="Created" field="createdAt" /></th>
+              <th className="text-right p-3 w-28">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -324,6 +325,9 @@ export default function AIContentList({
                   </td>
                   <td className="p-3 text-right text-slate-500 tabular-nums">
                     {item.wordCount ? item.wordCount.toLocaleString() : "—"}
+                  </td>
+                  <td className="p-3 text-xs text-slate-400 tabular-nums">
+                    {new Date(item.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}
                   </td>
                   <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1.5">
