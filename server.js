@@ -867,7 +867,7 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
       if (process.env.DATABASE_URL) {
         await pool.query(
           `INSERT INTO ai_content (id, type, status, keyword, state, title, word_count, wordpress_post_id, wordpress_url, published_at, created_at, updated_at)
-           VALUES ($1, $2, 'published', $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())`,
+           VALUES ($1, $2, 'published', $3, $4, $5, $6, $7, $8, $9, $9, NOW())`,
           [id, type, title, state, title, wordCount, post.id, item.wordpressUrl, post.date]
         );
       } else {

@@ -35,7 +35,7 @@ export default function AIContent() {
   });
   const [selectedItem, setSelectedItem] = useState<AIContentItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<ViewMode>("states");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [importing, setImporting] = useState(false);
 
