@@ -10,8 +10,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   Map,
-  Download,
-  RefreshCw,
 } from "lucide-react";
 import { cn } from "../utils";
 
@@ -62,7 +60,18 @@ export default function AIContent() {
     }
   }, [selectedItem]);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData().then(() => {
+      // Auto-sync from WP on first load if no published items exist
+      fetch("/api/ai-content/stats", { credentials: "include" })
+        .then((r) => r.json())
+        .then((s) => {
+          if (s.published === 0 && !importing) {
+            handleImportWP();
+          }
+        });
+    });
+  }, []);
 
   useEffect(() => {
     const hasGenerating = items.some((i) => i.status === "generating");
@@ -177,9 +186,11 @@ export default function AIContent() {
   const pillars = items.filter((i) => i.type === "pillar");
   const statesWithPillar = new Set(pillars.map((p) => p.state).filter(Boolean));
 
-  // Filter items by status when stat card clicked
+  // Filter items by status or state
   const filteredItems = statusFilter
-    ? items.filter((i) => i.status === statusFilter)
+    ? statusFilter.startsWith("state:")
+      ? items.filter((i) => i.state === statusFilter.slice(6))
+      : items.filter((i) => i.status === statusFilter)
     : items;
 
   if (selectedItem) {
@@ -280,14 +291,6 @@ export default function AIContent() {
               Clear filter
             </button>
           )}
-          <button
-            onClick={handleImportWP}
-            disabled={importing}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50"
-          >
-            {importing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            {importing ? "Importing..." : "Sync from WordPress"}
-          </button>
         </div>
       </div>
 
