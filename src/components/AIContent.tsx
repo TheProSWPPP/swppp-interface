@@ -61,9 +61,12 @@ export default function AIContent() {
 
   useEffect(() => {
     fetchData().then(() => {
-      // Sync from WP on every load — catches new publishes and status changes
+      // Sync from WP on load — catches new publishes, status changes, trashed posts
       handleImportWP();
     });
+    // Re-sync every 5 minutes to catch WP changes
+    const syncInterval = setInterval(handleImportWP, 5 * 60 * 1000);
+    return () => clearInterval(syncInterval);
   }, []);
 
   useEffect(() => {

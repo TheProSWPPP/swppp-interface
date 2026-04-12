@@ -1488,7 +1488,7 @@ app.use((err, _req, res, next) => {
   next(err);
 });
 
-// Cleanup Task
+// Cleanup Task — archived projects
 setInterval(async () => {
   if (!process.env.DATABASE_URL) return;
   try {
@@ -1502,6 +1502,21 @@ setInterval(async () => {
     console.error("Cleanup error:", err);
   }
 }, 24 * 60 * 60 * 1000);
+
+// AI Content — timeout stuck "generating" items after 10 minutes
+setInterval(async () => {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    const result = await pool.query(
+      "UPDATE ai_content SET status = 'failed', error_message = 'Generation timed out after 10 minutes', updated_at = NOW() WHERE status = 'generating' AND updated_at < NOW() - INTERVAL '10 minutes'"
+    );
+    if (result.rowCount > 0) {
+      console.log(`Timed out ${result.rowCount} stuck generating articles.`);
+    }
+  } catch (err) {
+    console.error("AI content timeout error:", err);
+  }
+}, 60 * 1000); // Check every minute
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, "dist")));
