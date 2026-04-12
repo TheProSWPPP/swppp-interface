@@ -230,20 +230,26 @@ export default function AIContentDetail({
         {/* Right: Content Preview (2/3 width) */}
         <div className="lg:col-span-2">
           {item.wordpressUrl && item.wordpressPostId ? (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-full">
-              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100 bg-slate-50">
-                <p className="text-xs font-semibold text-slate-600">Content Preview</p>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-full flex flex-col items-center justify-center p-8">
+              <ExternalLink className="h-10 w-10 text-indigo-300 mb-4" />
+              <p className="text-sm font-semibold text-slate-700 mb-1">Article ready in WordPress</p>
+              <p className="text-xs text-slate-400 mb-5 text-center max-w-xs">
+                {item.status === "draft" ? "This draft needs to be previewed in WordPress where you're logged in." : "View the published article on the live site."}
+              </p>
+              <div className="flex items-center gap-3">
                 <a href={item.wordpressUrl} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-[10px] text-indigo-600 hover:underline">
-                  <ExternalLink className="h-3 w-3" /> Edit in WordPress
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
+                  <ExternalLink className="h-4 w-4" />
+                  {item.status === "draft" ? "Preview in WordPress" : "View Article"}
                 </a>
+                {item.wordpressPostId && (
+                  <a href={`https://proswppp.com/wp-admin/post.php?post=${item.wordpressPostId}&action=edit`} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">
+                    <FileEdit className="h-4 w-4" />
+                    Edit in WP
+                  </a>
+                )}
               </div>
-              <iframe
-                src={`https://proswppp.com/?p=${item.wordpressPostId}&preview=true`}
-                className="w-full border-0"
-                style={{ height: "calc(100vh - 280px)", minHeight: 500 }}
-                title="Content Preview"
-              />
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-center h-64 lg:h-full">
