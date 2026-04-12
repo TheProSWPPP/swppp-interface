@@ -425,13 +425,15 @@ function StatesDashboard({
                 {state}
               </p>
               {hasContent ? (
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  {hasPillar && <span className="h-2 w-2 rounded-full bg-green-500" title="Has pillar" />}
+                <div className="mt-1.5 space-y-0.5">
+                  {hasPillar && (
+                    <p className="text-[10px] font-semibold text-green-600">Pillar</p>
+                  )}
                   {data.spokes > 0 && (
-                    <span className="text-[10px] font-semibold text-slate-500">{data.spokes}s</span>
+                    <p className="text-[10px] text-slate-500">{data.spokes} article{data.spokes !== 1 ? "s" : ""}</p>
                   )}
                   {data.comparisons > 0 && (
-                    <span className="text-[10px] font-semibold text-emerald-600">{data.comparisons}c</span>
+                    <p className="text-[10px] text-emerald-600">{data.comparisons} comparison{data.comparisons !== 1 ? "s" : ""}</p>
                   )}
                 </div>
               ) : (
@@ -445,10 +447,8 @@ function StatesDashboard({
       {/* Legend */}
       <div className="flex items-center gap-4 text-xs text-slate-500">
         <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-green-100 border border-green-300" /> Has Pillar</span>
-        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-amber-100 border border-amber-300" /> Content, No Pillar</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-amber-100 border border-amber-300" /> Articles, No Pillar</span>
         <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-white border border-slate-300" /> No Content</span>
-        <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-500" /> Pillar</span>
-        <span className="text-slate-400">Xs = spokes, Xc = comparisons</span>
       </div>
     </div>
   );
