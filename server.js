@@ -388,6 +388,14 @@ app.use((req, res, next) => {
   ) {
     return next();
   }
+  // n8n callbacks fetching rows need auth bypass via callback_secret query param
+  if (
+    /^\/api\/leads\/upload\/[^/]+\/rows(\/[^/]+)?$/.test(req.path) &&
+    (req.method === "GET" || req.method === "PATCH") &&
+    req.query.callback_secret === N8N_CALLBACK_SECRET
+  ) {
+    return next();
+  }
 
   const authHeader = req.headers.authorization || "";
   if (authHeader.startsWith("Basic ")) {
@@ -1648,7 +1656,8 @@ app.post("/api/leads/upload/:job_id/approve", async (req, res) => {
         job_id: jobId,
         callback_url: `${RAILWAY_PUBLIC_URL}/api/leads/upload/callback`,
         callback_secret: N8N_CALLBACK_SECRET,
-        rows_endpoint: `${RAILWAY_PUBLIC_URL}/api/leads/upload/${jobId}/rows`,
+        rows_endpoint: `${RAILWAY_PUBLIC_URL}/api/leads/upload/${jobId}/rows?callback_secret=${encodeURIComponent(N8N_CALLBACK_SECRET)}`,
+        rows_patch_url_template: `${RAILWAY_PUBLIC_URL}/api/leads/upload/${jobId}/rows/{row_id}?callback_secret=${encodeURIComponent(N8N_CALLBACK_SECRET)}`,
       }),
     }).catch((err) => {
       console.error("[lead-import] approve webhook fire failed:", err.message);
