@@ -11,6 +11,7 @@ import os from "os";
 import { execFile } from "child_process";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleAIFileManager } from "@google/generative-ai/server";
+import crypto from "crypto";
 
 const { Pool } = pg;
 
@@ -29,6 +30,11 @@ const N8N_WEBHOOK_URL =
 const N8N_CONTENT_WEBHOOK_URL =
   process.env.N8N_CONTENT_WEBHOOK_URL ||
   "https://proswppp.app.n8n.cloud/webhook/ai-content-generate";
+
+const N8N_LEAD_IMPORT_WEBHOOK_URL =
+  "https://proswppp.app.n8n.cloud/webhook/lead-import-unified";
+
+const N8N_CALLBACK_SECRET = "swppp-lead-import-2026-r9k4hz3qwm8nbv";
 
 const RAILWAY_PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
@@ -375,7 +381,10 @@ app.use((req, res, next) => {
   if (
     req.path === "/health" ||
     (req.path === "/api/projects" && req.method === "POST") ||
-    (req.path === "/api/ai-content/callback" && req.method === "POST")
+    (req.path === "/api/ai-content/callback" && req.method === "POST") ||
+    (req.path === "/api/leads/upload/callback" && req.method === "POST") ||
+    (req.path === "/api/leads/upload/rows/persist" && req.method === "POST") ||
+    (req.path === "/api/abbreviation-cache" && (req.method === "GET" || req.method === "POST"))
   ) {
     return next();
   }
@@ -452,6 +461,54 @@ async function initDB() {
       )
     `);
     console.log("Table 'ai_content' verified/created.");
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lead_import_jobs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        filename TEXT NOT NULL,
+        uploaded_by TEXT,
+        total_rows INT,
+        cleaned_rows INT DEFAULT 0,
+        uploaded_rows INT DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'uploaded'
+          CHECK (status IN ('uploaded','cleaning','ready','uploading','done','error')),
+        error_message TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_lead_import_jobs_status ON lead_import_jobs(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_lead_import_jobs_created_at ON lead_import_jobs(created_at DESC)`);
+    console.log("Table 'lead_import_jobs' verified/created.");
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lead_import_rows (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        job_id UUID NOT NULL REFERENCES lead_import_jobs(id) ON DELETE CASCADE,
+        row_index INT NOT NULL,
+        raw_data JSONB NOT NULL,
+        cleaned_data JSONB,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending','cleaned','approved','rejected','uploaded','error')),
+        pipedrive_lead_id TEXT,
+        error_message TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_lead_import_rows_job_index ON lead_import_rows(job_id, row_index)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_lead_import_rows_status ON lead_import_rows(status)`);
+    console.log("Table 'lead_import_rows' verified/created.");
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS abbreviation_cache (
+        raw TEXT PRIMARY KEY,
+        clean TEXT NOT NULL,
+        fallback BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    console.log("Table 'abbreviation_cache' verified/created.");
   } catch (err) {
     console.error("CRITICAL: Error initializing database:", err);
   }
@@ -972,19 +1029,21 @@ app.get("/api/ai-content", async (req, res) => {
 });
 
 app.post("/api/ai-content", async (req, res) => {
-  let { type, keyword, state, pillarId } = req.body;
+  let { type, keyword, state, pillarId, force } = req.body;
 
   // Pillar auto-generates keyword from state
   if (type === "pillar") {
     if (!state) return res.status(400).json({ error: "state required for pillar articles" });
     keyword = `Construction & Industrial SWPPP Requirements in ${state}`;
-    // Enforce one pillar per state
-    if (process.env.DATABASE_URL) {
-      const existing = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1", [state]);
-      if (existing.rows.length > 0) return res.status(409).json({ error: `Pillar already exists for ${state}`, existingId: existing.rows[0].id });
-    } else {
-      const existing = memoryContent.find((c) => c.type === "pillar" && c.state === state);
-      if (existing) return res.status(409).json({ error: `Pillar already exists for ${state}`, existingId: existing.id });
+    // Enforce one pillar per state unless explicitly forced
+    if (!force) {
+      if (process.env.DATABASE_URL) {
+        const existing = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1", [state]);
+        if (existing.rows.length > 0) return res.status(409).json({ error: `Pillar already exists for ${state}`, existingId: existing.rows[0].id });
+      } else {
+        const existing = memoryContent.find((c) => c.type === "pillar" && c.state === state);
+        if (existing) return res.status(409).json({ error: `Pillar already exists for ${state}`, existingId: existing.id });
+      }
     }
   }
 
@@ -1251,6 +1310,269 @@ app.post("/api/ai-content/callback", async (req, res) => {
 
     params.push(content_id);
     await pool.query(`UPDATE ai_content SET ${fields.join(", ")} WHERE id = $${params.length}`, params);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Lead Import — replaces Dropbox folder rotation
+// React drops CSV → /api/leads/upload → n8n unified workflow → callbacks
+// ============================================================================
+
+app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  if (!req.file.originalname.toLowerCase().endsWith(".csv")) {
+    fs.unlinkSync(req.file.path);
+    return res.status(400).json({ error: "Only CSV files accepted" });
+  }
+  if (!process.env.DATABASE_URL) {
+    fs.unlinkSync(req.file.path);
+    return res.status(503).json({ error: "Database required for lead imports" });
+  }
+
+  let jobId;
+  try {
+    const result = await pool.query(
+      `INSERT INTO lead_import_jobs (filename, uploaded_by, status) VALUES ($1, $2, 'uploaded') RETURNING id`,
+      [req.file.originalname, req.body.uploaded_by || null]
+    );
+    jobId = result.rows[0].id;
+  } catch (err) {
+    fs.unlinkSync(req.file.path);
+    return res.status(500).json({ error: `Job creation failed: ${err.message}` });
+  }
+
+  let csvBase64;
+  try {
+    const fileBuffer = fs.readFileSync(req.file.path);
+    csvBase64 = fileBuffer.toString("base64");
+  } finally {
+    try { fs.unlinkSync(req.file.path); } catch {}
+  }
+
+  // Fire n8n webhook async — n8n parses, batches, runs AI abbreviations + Pipedrive create,
+  // posts callbacks at each stage. Don't await; status polling handles UI updates.
+  fetch(N8N_LEAD_IMPORT_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      job_id: jobId,
+      filename: req.file.originalname,
+      csv_base64: csvBase64,
+      callback_url: `${RAILWAY_PUBLIC_URL}/api/leads/upload/callback`,
+      callback_secret: N8N_CALLBACK_SECRET,
+    }),
+  }).catch((err) => {
+    console.error("[lead-import] n8n webhook fire failed:", err.message);
+    pool.query(
+      `UPDATE lead_import_jobs SET status='error', error_message=$1, updated_at=NOW() WHERE id=$2`,
+      [`n8n webhook unreachable: ${err.message}`, jobId]
+    ).catch(() => {});
+  });
+
+  res.json({ job_id: jobId, status: "uploaded" });
+});
+
+app.get("/api/leads/upload/:job_id/status", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
+  try {
+    const result = await pool.query(
+      `SELECT id, filename, status, total_rows, cleaned_rows, uploaded_rows, error_message, created_at, updated_at
+       FROM lead_import_jobs WHERE id = $1`,
+      [req.params.job_id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: "Job not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/leads/upload", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
+  try {
+    const result = await pool.query(
+      `SELECT id, filename, status, total_rows, cleaned_rows, uploaded_rows, error_message, created_at, updated_at
+       FROM lead_import_jobs ORDER BY created_at DESC LIMIT 25`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/leads/upload/callback", express.json({ limit: "1mb" }), async (req, res) => {
+  if (N8N_CALLBACK_SECRET) {
+    const sig = req.headers["x-callback-signature"];
+    const computed = crypto
+      .createHmac("sha256", N8N_CALLBACK_SECRET)
+      .update(JSON.stringify(req.body))
+      .digest("hex");
+    if (sig !== computed) return res.status(401).json({ error: "Invalid signature" });
+  }
+
+  const { job_id, status, total_rows, cleaned_rows_delta, uploaded_rows_delta, error_message } = req.body;
+  if (!job_id) return res.status(400).json({ error: "job_id required" });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
+
+  try {
+    const fields = ["updated_at = NOW()"];
+    const params = [];
+    if (status) { params.push(status); fields.push(`status = $${params.length}`); }
+    if (typeof total_rows === "number") { params.push(total_rows); fields.push(`total_rows = $${params.length}`); }
+    if (typeof cleaned_rows_delta === "number") { params.push(cleaned_rows_delta); fields.push(`cleaned_rows = COALESCE(cleaned_rows,0) + $${params.length}`); }
+    if (typeof uploaded_rows_delta === "number") { params.push(uploaded_rows_delta); fields.push(`uploaded_rows = COALESCE(uploaded_rows,0) + $${params.length}`); }
+    if (error_message) { params.push(error_message); fields.push(`error_message = $${params.length}`); }
+    params.push(job_id);
+    await pool.query(
+      `UPDATE lead_import_jobs SET ${fields.join(", ")} WHERE id = $${params.length}`,
+      params
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// n8n persists parsed + cleaned rows here. Called per-row or in batches.
+// Body: { job_id, rows: [{ row_index, raw_data, cleaned_data?, status? }, ...], callback_secret }
+app.post("/api/leads/upload/rows/persist", express.json({ limit: "10mb" }), async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
+  const { job_id, rows, callback_secret } = req.body || {};
+  if (callback_secret !== N8N_CALLBACK_SECRET) return res.status(401).json({ error: "Invalid secret" });
+  if (!job_id || !Array.isArray(rows)) return res.status(400).json({ error: "job_id and rows[] required" });
+
+  try {
+    for (const row of rows) {
+      const { row_index, raw_data, cleaned_data, status } = row;
+      if (typeof row_index !== "number" || !raw_data) continue;
+      // Upsert by (job_id, row_index)
+      await pool.query(
+        `INSERT INTO lead_import_rows (job_id, row_index, raw_data, cleaned_data, status, updated_at)
+         VALUES ($1, $2, $3, $4, COALESCE($5, 'pending'), NOW())
+         ON CONFLICT (job_id, row_index) DO UPDATE
+           SET raw_data = EXCLUDED.raw_data,
+               cleaned_data = COALESCE(EXCLUDED.cleaned_data, lead_import_rows.cleaned_data),
+               status = COALESCE($5, lead_import_rows.status),
+               updated_at = NOW()`,
+        [job_id, row_index, raw_data, cleaned_data || null, status || null]
+      );
+    }
+    res.json({ ok: true, persisted: rows.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add unique index for upsert (job_id, row_index)
+app.get("/api/leads/upload/:job_id/rows", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
+  try {
+    const result = await pool.query(
+      `SELECT id, row_index, raw_data, cleaned_data, status, pipedrive_lead_id, error_message, updated_at
+       FROM lead_import_rows WHERE job_id = $1 ORDER BY row_index ASC`,
+      [req.params.job_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/api/leads/upload/:job_id/rows/:row_id", express.json({ limit: "100kb" }), async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
+  const { cleaned_data, status } = req.body || {};
+  try {
+    const fields = ["updated_at = NOW()"];
+    const params = [];
+    if (cleaned_data) { params.push(cleaned_data); fields.push(`cleaned_data = $${params.length}`); }
+    if (status) { params.push(status); fields.push(`status = $${params.length}`); }
+    params.push(req.params.row_id, req.params.job_id);
+    const result = await pool.query(
+      `UPDATE lead_import_rows SET ${fields.join(", ")}
+       WHERE id = $${params.length - 1} AND job_id = $${params.length} RETURNING *`,
+      params
+    );
+    if (!result.rows.length) return res.status(404).json({ error: "Row not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Approve: triggers n8n to push approved rows to Pipedrive.
+// Marks all 'cleaned' rows as 'approved' (unless explicitly rejected) and fires the upload webhook.
+app.post("/api/leads/upload/:job_id/approve", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
+  const jobId = req.params.job_id;
+  try {
+    // Mark cleaned rows as approved
+    await pool.query(
+      `UPDATE lead_import_rows SET status = 'approved', updated_at = NOW()
+       WHERE job_id = $1 AND status = 'cleaned'`,
+      [jobId]
+    );
+    await pool.query(
+      `UPDATE lead_import_jobs SET status = 'uploading', updated_at = NOW() WHERE id = $1`,
+      [jobId]
+    );
+
+    // Fire n8n upload webhook
+    const uploadWebhookUrl = "https://proswppp.app.n8n.cloud/webhook/lead-import-pipedrive-push";
+    fetch(uploadWebhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id: jobId,
+        callback_url: `${RAILWAY_PUBLIC_URL}/api/leads/upload/callback`,
+        callback_secret: N8N_CALLBACK_SECRET,
+        rows_endpoint: `${RAILWAY_PUBLIC_URL}/api/leads/upload/${jobId}/rows`,
+      }),
+    }).catch((err) => {
+      console.error("[lead-import] approve webhook fire failed:", err.message);
+      pool.query(
+        `UPDATE lead_import_jobs SET status='error', error_message=$1, updated_at=NOW() WHERE id=$2`,
+        [`approve webhook failed: ${err.message}`, jobId]
+      ).catch(() => {});
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Abbreviation cache — idempotency layer for AI title cleaning
+// Same raw input → same cleaned output, prevents Pipedrive dedup breakage.
+// ============================================================================
+
+app.get("/api/abbreviation-cache", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.json({ data: null });
+  const raw = (req.query.raw || "").toString();
+  if (!raw) return res.status(400).json({ error: "raw query param required" });
+  try {
+    const result = await pool.query(
+      `SELECT clean, fallback FROM abbreviation_cache WHERE raw = $1`,
+      [raw]
+    );
+    res.json({ data: result.rows[0] || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/abbreviation-cache", express.json({ limit: "100kb" }), async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.json({ ok: true });
+  const { raw, clean, fallback } = req.body;
+  if (!raw || !clean) return res.status(400).json({ error: "raw and clean required" });
+  try {
+    await pool.query(
+      `INSERT INTO abbreviation_cache (raw, clean, fallback) VALUES ($1, $2, $3) ON CONFLICT (raw) DO NOTHING`,
+      [raw, clean, !!fallback]
+    );
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
