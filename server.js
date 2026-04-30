@@ -1516,13 +1516,68 @@ app.post("/api/leads/upload/rows/persist", express.json({ limit: "10mb" }), asyn
 // Add unique index for upsert (job_id, row_index)
 app.get("/api/leads/upload/:job_id/rows", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
+  const page = Math.max(0, parseInt(req.query.page) || 0);
+  const pageSize = Math.min(200, Math.max(10, parseInt(req.query.page_size) || 50));
+  const filter = (req.query.filter || "all").toString();
+  const search = (req.query.search || "").toString().trim();
+
   try {
-    const result = await pool.query(
-      `SELECT id, row_index, raw_data, cleaned_data, status, pipedrive_lead_id, error_message, updated_at
-       FROM lead_import_rows WHERE job_id = $1 ORDER BY row_index ASC`,
+    const where = ["job_id = $1"];
+    const params = [req.params.job_id];
+
+    if (filter === "review") {
+      where.push(`(cleaned_data->>'abbreviation_fallback')::boolean = true`);
+    } else if (filter === "rejected") {
+      where.push(`status = 'rejected'`);
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      where.push(
+        `(coalesce(cleaned_data->>'Project Title','') ILIKE $${params.length}
+         OR coalesce(raw_data->>'Project Title','') ILIKE $${params.length}
+         OR coalesce(raw_data->>'City','') ILIKE $${params.length}
+         OR coalesce(raw_data->>'State','') ILIKE $${params.length})`
+      );
+    }
+
+    const whereClause = `WHERE ${where.join(" AND ")}`;
+
+    // Total count + summary counts (so UI can show 1.5k of 1.5k, X review, Y rejected)
+    const summary = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE status IN ('cleaned','approved'))::int AS approved,
+         COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected,
+         COUNT(*) FILTER (WHERE (cleaned_data->>'abbreviation_fallback')::boolean = true)::int AS review
+       FROM lead_import_rows WHERE job_id = $1`,
       [req.params.job_id]
     );
-    res.json(result.rows);
+
+    // Filtered count
+    const filtered = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM lead_import_rows ${whereClause}`,
+      params
+    );
+
+    // Sort: review-flagged first, then by row_index
+    params.push(pageSize);
+    params.push(page * pageSize);
+    const result = await pool.query(
+      `SELECT id, row_index, raw_data, cleaned_data, status, pipedrive_lead_id, error_message, updated_at
+       FROM lead_import_rows ${whereClause}
+       ORDER BY (cleaned_data->>'abbreviation_fallback')::boolean DESC NULLS LAST, row_index ASC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json({
+      rows: result.rows,
+      page,
+      page_size: pageSize,
+      filtered_count: filtered.rows[0].count,
+      summary: summary.rows[0],
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

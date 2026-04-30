@@ -64,8 +64,30 @@ export interface LeadImportRow {
   updated_at: string;
 }
 
-export async function getJobRows(jobId: string): Promise<LeadImportRow[]> {
-  const res = await fetch(`/api/leads/upload/${jobId}/rows`, { credentials: "include" });
+export interface JobRowsResponse {
+  rows: LeadImportRow[];
+  page: number;
+  page_size: number;
+  filtered_count: number;
+  summary: {
+    total: number;
+    approved: number;
+    rejected: number;
+    review: number;
+  };
+}
+
+export async function getJobRows(
+  jobId: string,
+  opts: { page?: number; page_size?: number; filter?: "all" | "review" | "rejected"; search?: string } = {},
+): Promise<JobRowsResponse> {
+  const params = new URLSearchParams();
+  if (opts.page != null) params.set("page", String(opts.page));
+  if (opts.page_size != null) params.set("page_size", String(opts.page_size));
+  if (opts.filter) params.set("filter", opts.filter);
+  if (opts.search) params.set("search", opts.search);
+  const qs = params.toString();
+  const res = await fetch(`/api/leads/upload/${jobId}/rows${qs ? "?" + qs : ""}`, { credentials: "include" });
   if (!res.ok) throw new Error(`Rows fetch failed: ${res.status}`);
   return res.json();
 }

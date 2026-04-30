@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { CheckCircle2, XCircle, Edit3, Save, X, AlertTriangle, Send, Search } from "lucide-react";
 import {
   getJobRows,
@@ -22,25 +22,38 @@ function getDisplay(row: LeadImportRow, col: string): string {
 const PAGE_SIZE = 50;
 
 export default function LeadImportPreview({ job, onApproved }: Props) {
-  const [rows, setRows] = useState<LeadImportRow[]>([]);
+  const [pageRows, setPageRows] = useState<LeadImportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "review" | "rejected">("all");
   const [page, setPage] = useState(0);
+  const [filteredCount, setFilteredCount] = useState(0);
+  const [summary, setSummary] = useState({ total: 0, approved: 0, rejected: 0, review: 0 });
+
+  // Debounce search input
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const loadRows = useCallback(async () => {
+    setLoading(true);
     try {
-      setRows(await getJobRows(job.id));
+      const resp = await getJobRows(job.id, { page, page_size: PAGE_SIZE, filter, search: debouncedSearch });
+      setPageRows(resp.rows);
+      setFilteredCount(resp.filtered_count);
+      setSummary(resp.summary);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [job.id]);
+  }, [job.id, page, filter, debouncedSearch]);
 
   useEffect(() => {
     loadRows();
@@ -92,43 +105,18 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
     }
   };
 
-  const approvedCount = rows.filter((r) => r.status === "cleaned" || r.status === "approved").length;
-  const rejectedCount = rows.filter((r) => r.status === "rejected").length;
-  const fallbackCount = rows.filter((r) => {
-    const c = r.cleaned_data as Record<string, unknown> | null;
-    return c?.abbreviation_fallback === true;
-  }).length;
+  const approvedCount = summary.approved;
+  const rejectedCount = summary.rejected;
+  const fallbackCount = summary.review;
 
-  // Sort: review-flagged first, then by row_index
-  // Filter: search + status filter
-  const visible = useMemo(() => {
-    let list = [...rows];
-    list.sort((a, b) => {
-      const aFb = a.cleaned_data?.abbreviation_fallback === true ? 0 : 1;
-      const bFb = b.cleaned_data?.abbreviation_fallback === true ? 0 : 1;
-      if (aFb !== bFb) return aFb - bFb;
-      return a.row_index - b.row_index;
-    });
-    if (filter === "review") list = list.filter((r) => r.cleaned_data?.abbreviation_fallback === true);
-    if (filter === "rejected") list = list.filter((r) => r.status === "rejected");
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((r) => {
-        const cleaned = String(r.cleaned_data?.["Project Title"] || "").toLowerCase();
-        const raw = String(r.raw_data["Project Title"] || "").toLowerCase();
-        const city = String(r.raw_data["City"] || r.raw_data["city"] || "").toLowerCase();
-        const state = String(r.raw_data["State"] || r.raw_data["state"] || "").toLowerCase();
-        return cleaned.includes(q) || raw.includes(q) || city.includes(q) || state.includes(q);
-      });
-    }
-    return list;
-  }, [rows, search, filter]);
+  const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
 
-  const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
-  const pageRows = visible.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-
-  if (loading) return <div className="p-6 text-sm text-slate-500">Loading rows...</div>;
-  if (!rows.length) return <div className="p-6 text-sm text-slate-500">No rows yet — wait for cleaning to complete.</div>;
+  if (loading && pageRows.length === 0 && summary.total === 0) {
+    return <div className="p-6 text-sm text-slate-500">Loading rows...</div>;
+  }
+  if (summary.total === 0) {
+    return <div className="p-6 text-sm text-slate-500">No rows yet — wait for cleaning to complete.</div>;
+  }
 
   return (
     <div>
@@ -188,7 +176,7 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
           ))}
         </div>
         <div className="text-xs text-slate-500 ml-auto">
-          {visible.length} of {rows.length}
+          {filteredCount} of {summary.total}
         </div>
       </div>
 
