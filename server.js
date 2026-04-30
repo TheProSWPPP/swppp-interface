@@ -1375,9 +1375,30 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
   res.json({ job_id: jobId, status: "uploaded" });
 });
 
+// Auto-mark stuck jobs as error if no progress for STUCK_MINUTES (cheap inline watchdog
+// triggered by status polling — multi-replica safe, no separate scheduler needed)
+const STUCK_MINUTES = 15;
+async function reapStuckJobs() {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    await pool.query(
+      `UPDATE lead_import_jobs
+         SET status = 'error',
+             error_message = COALESCE(error_message, 'Auto-failed: no progress for ' || $1 || ' min'),
+             updated_at = NOW()
+       WHERE status IN ('uploaded','cleaning','uploading')
+         AND updated_at < NOW() - ($1::int * INTERVAL '1 minute')`,
+      [STUCK_MINUTES]
+    );
+  } catch (err) {
+    console.error("[lead-import] reap stuck jobs failed:", err.message);
+  }
+}
+
 app.get("/api/leads/upload/:job_id/status", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
   try {
+    await reapStuckJobs();
     const result = await pool.query(
       `SELECT id, filename, status, total_rows, cleaned_rows, uploaded_rows, error_message, created_at, updated_at
        FROM lead_import_jobs WHERE id = $1`,
@@ -1407,6 +1428,7 @@ app.delete("/api/leads/upload/:job_id", async (req, res) => {
 app.get("/api/leads/upload", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
   try {
+    await reapStuckJobs();
     const result = await pool.query(
       `SELECT id, filename, status, total_rows, cleaned_rows, uploaded_rows, error_message, created_at, updated_at
        FROM lead_import_jobs ORDER BY created_at DESC LIMIT 25`
