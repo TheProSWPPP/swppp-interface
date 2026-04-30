@@ -355,12 +355,12 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
                     <tr className="bg-slate-50/50 border-b border-slate-100 last:border-b-0">
                       <td></td>
                       <td colSpan={8} className="px-4 py-3">
-                        {row.cleaned_data?.abbreviation_review_reason && (
+                        {row.cleaned_data?.abbreviation_review_reason ? (
                           <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800 flex items-start gap-2">
                             <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                             <div><span className="font-semibold">Flagged for review:</span> {String(row.cleaned_data.abbreviation_review_reason)}</div>
                           </div>
-                        )}
+                        ) : null}
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 text-xs">
                           <Field label="Original Title" value={pick(row.raw_data, ["Project Title"])} />
                           <Field label="City + State" value={cityState} />
