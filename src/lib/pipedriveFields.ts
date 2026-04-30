@@ -1,5 +1,4 @@
 export const PIPEDRIVE_FIELD_KEYS = {
-  rawProjectName: '66e261bd78760173759a680e3fcdcfe35ee8fa14',
   lastScrapedAt: '8f04861ac43f93cbb31f02478df92dd4cde3960a',
   scheduledEnrollment: 'aa97f61af684b32442cee6ec7842c18fdabc8045',
   shortGeo: '6ab83c83a757ae6dc43d95d73fca19e76272494f',
