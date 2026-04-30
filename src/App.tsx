@@ -16,12 +16,41 @@ import {
 } from "lucide-react";
 import { cn } from "./utils";
 
+type View = "dashboard" | "archive" | "ai-content" | "leads" | "methodology" | "settings";
+const ALL_VIEWS: View[] = ["dashboard", "archive", "ai-content", "leads", "methodology", "settings"];
+
+function readViewFromHash(): View {
+  const h = window.location.hash.replace(/^#\/?/, "").split("?")[0];
+  return ALL_VIEWS.includes(h as View) ? (h as View) : "dashboard";
+}
+
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [view, setView] = useState<
-    "dashboard" | "archive" | "ai-content" | "leads" | "methodology" | "settings"
-  >("dashboard");
+  const [view, setViewState] = useState<View>(() => readViewFromHash());
+
+  // Keep URL hash in sync with view; allow back/forward to navigate
+  const setView = (v: View) => {
+    setViewState(v);
+    if (window.location.hash !== `#/${v}`) {
+      window.history.pushState(null, "", `#/${v}`);
+    }
+  };
+
+  useEffect(() => {
+    const onPop = () => setViewState(readViewFromHash());
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("hashchange", onPop);
+    // Ensure hash reflects initial state
+    if (!window.location.hash || readViewFromHash() !== view) {
+      window.history.replaceState(null, "", `#/${view}`);
+    }
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("hashchange", onPop);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchProjects = () => {
     setIsLoading(true);

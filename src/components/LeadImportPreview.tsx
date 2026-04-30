@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { CheckCircle2, XCircle, Edit3, Save, X, AlertTriangle, Send, Search } from "lucide-react";
+import { CheckCircle2, XCircle, Edit3, Save, X, AlertTriangle, Send, Search, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import {
   getJobRows,
   patchJobRow,
@@ -19,6 +19,30 @@ function getDisplay(row: LeadImportRow, col: string): string {
   return val == null ? "" : String(val);
 }
 
+// Flexible field lookup — handles common CSV column variations
+function pick(obj: Record<string, unknown> | null | undefined, candidates: string[]): string {
+  if (!obj) return "";
+  const keys = Object.keys(obj);
+  for (const c of candidates) {
+    if (obj[c] != null && obj[c] !== "") return String(obj[c]);
+    const ki = keys.find((k) => k.toLowerCase() === c.toLowerCase());
+    if (ki && obj[ki] != null && obj[ki] !== "") return String(obj[ki]);
+    const ks = keys.find(
+      (k) => k.toLowerCase().replace(/[\s_-]/g, "") === c.toLowerCase().replace(/[\s_-]/g, "")
+    );
+    if (ks && obj[ks] != null && obj[ks] !== "") return String(obj[ks]);
+  }
+  return "";
+}
+
+const STAGE_COLOR: Record<string, string> = {
+  AGC: "bg-emerald-50 text-emerald-700",
+  LBA: "bg-blue-50 text-blue-700",
+  CM: "bg-purple-50 text-purple-700",
+  PB: "bg-amber-50 text-amber-700",
+  OB: "bg-amber-50 text-amber-700",
+};
+
 const PAGE_SIZE = 50;
 
 export default function LeadImportPreview({ job, onApproved }: Props) {
@@ -34,6 +58,7 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
   const [page, setPage] = useState(0);
   const [filteredCount, setFilteredCount] = useState(0);
   const [summary, setSummary] = useState({ total: 0, approved: 0, rejected: 0, review: 0 });
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
   // Debounce search input
   useEffect(() => {
@@ -181,106 +206,184 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
       </div>
 
       <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm table-fixed">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="text-left px-3 py-2 font-semibold text-slate-700 w-12">#</th>
-              <th className="text-left px-3 py-2 font-semibold text-slate-700">Cleaned Title</th>
-              <th className="text-left px-3 py-2 font-semibold text-slate-700">Original</th>
-              <th className="text-left px-3 py-2 font-semibold text-slate-700">City, State</th>
-              <th className="text-left px-3 py-2 font-semibold text-slate-700 w-32">Status</th>
-              <th className="text-right px-3 py-2 font-semibold text-slate-700 w-32">Actions</th>
+              <th className="text-left px-2 py-2 font-semibold text-slate-700 w-8"></th>
+              <th className="text-left px-2 py-2 font-semibold text-slate-700 w-10">#</th>
+              <th className="text-left px-2 py-2 font-semibold text-slate-700">Cleaned Title</th>
+              <th className="text-left px-2 py-2 font-semibold text-slate-700 w-16">Stage</th>
+              <th className="text-left px-2 py-2 font-semibold text-slate-700 w-44">Contact</th>
+              <th className="text-left px-2 py-2 font-semibold text-slate-700 w-24">Bid Date</th>
+              <th className="text-left px-2 py-2 font-semibold text-slate-700 w-40">Winning Bidder</th>
+              <th className="text-left px-2 py-2 font-semibold text-slate-700 w-24">Status</th>
+              <th className="text-right px-2 py-2 font-semibold text-slate-700 w-20">Actions</th>
             </tr>
           </thead>
           <tbody>
             {pageRows.map((row) => {
               const cleanedTitle = getDisplay(row, "Project Title");
-              const rawTitle = String(row.raw_data["Project Title"] || row.cleaned_data?.["Raw Project Title"] || "");
-              const city = String(row.raw_data["City"] || "");
-              const state = String(row.raw_data["State"] || "");
+              const stage = pick(row.raw_data, ["Stage", "Project Stage"]);
+              const contactName = pick(row.raw_data, ["Name", "Contact Name", "Contact"]);
+              const contactEmail = pick(row.raw_data, ["Email", "Contact Email"]);
+              const contactPhone = pick(row.raw_data, ["Phone", "Contact Phone"]);
+              const bidDate = pick(row.raw_data, ["Bid Date", "BidDate", "bid_date"]);
+              const startDate = pick(row.raw_data, ["Start", "Start Date"]);
+              const winner = pick(row.raw_data, ["Winning Bidder", "Awarded Contractor", "Org", "Organization"]);
+              const cityState = pick(row.raw_data, ["City + State", "CityState"]) || [pick(row.raw_data, ["City"]), pick(row.raw_data, ["State"])].filter(Boolean).join(", ");
+              const quickLink = pick(row.raw_data, ["Quick Link", "URL", "Link"]);
+              const notes = pick(row.raw_data, ["Notes", "Note"]);
               const isFallback = row.cleaned_data?.abbreviation_fallback === true;
               const isRejected = row.status === "rejected";
               const isUploaded = row.status === "uploaded";
               const isError = row.status === "error";
+              const isExpanded = expandedRowId === row.id;
 
               return (
-                <tr
-                  key={row.id}
-                  className={cn(
-                    "border-b border-slate-100 last:border-b-0",
-                    isRejected && "opacity-50 bg-slate-50",
-                    isUploaded && "bg-emerald-50/40",
-                    isError && "bg-red-50/40",
+                <FragmentRow key={row.id}>
+                  <tr
+                    className={cn(
+                      "border-b border-slate-100",
+                      !isExpanded && "last:border-b-0",
+                      isRejected && "opacity-50 bg-slate-50",
+                      isUploaded && "bg-emerald-50/40",
+                      isError && "bg-red-50/40",
+                    )}
+                  >
+                    <td className="px-2 py-2">
+                      <button
+                        onClick={() => setExpandedRowId(isExpanded ? null : row.id)}
+                        className="text-slate-400 hover:text-slate-700 p-1"
+                        title={isExpanded ? "Collapse" : "Expand details"}
+                      >
+                        {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      </button>
+                    </td>
+                    <td className="px-2 py-2 text-slate-500">{row.row_index + 1}</td>
+                    <td className="px-2 py-2 truncate">
+                      {editingId === row.id ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            autoFocus
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveEdit(row);
+                              if (e.key === "Escape") setEditingId(null);
+                            }}
+                            className="w-full px-2 py-1 border border-indigo-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                          />
+                          <button onClick={() => saveEdit(row)} className="text-indigo-600 hover:text-indigo-800 p-1">
+                            <Save className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => setEditingId(null)} className="text-slate-400 hover:text-slate-600 p-1">
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 min-w-0" title={cleanedTitle}>
+                          <span className={cn("font-medium truncate", isFallback && "text-amber-700")}>{cleanedTitle}</span>
+                          {isFallback && (
+                            <span title="AI fell back to raw — review manually" className="shrink-0">
+                              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-2 py-2">
+                      {stage && (
+                        <span className={cn("text-xs font-semibold px-2 py-0.5 rounded uppercase", STAGE_COLOR[stage.toUpperCase()] || "bg-slate-100 text-slate-700")}>
+                          {stage}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 truncate" title={`${contactName}\n${contactEmail}`}>
+                      {contactName ? (
+                        <div className="leading-tight">
+                          <div className="text-slate-800 truncate">{contactName}</div>
+                          <div className="text-xs text-slate-500 truncate">{contactEmail || "—"}</div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">no contact</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 text-xs text-slate-600 truncate" title={bidDate}>
+                      {bidDate || "—"}
+                    </td>
+                    <td className="px-2 py-2 text-xs text-slate-700 truncate" title={winner}>
+                      {winner || "—"}
+                    </td>
+                    <td className="px-2 py-2">
+                      <StatusPill status={row.status} />
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      {!isUploaded && editingId !== row.id && (
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            onClick={() => startEdit(row)}
+                            className="text-slate-400 hover:text-indigo-600 p-1"
+                            title="Edit title"
+                          >
+                            <Edit3 className="h-4 w-4" />
+                          </button>
+                          {isRejected ? (
+                            <button
+                              onClick={() => restore(row)}
+                              className="text-slate-400 hover:text-emerald-600 p-1"
+                              title="Restore"
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => reject(row)}
+                              className="text-slate-400 hover:text-red-600 p-1"
+                              title="Reject"
+                            >
+                              <XCircle className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr className="bg-slate-50/50 border-b border-slate-100 last:border-b-0">
+                      <td></td>
+                      <td colSpan={8} className="px-4 py-3">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 text-xs">
+                          <Field label="Original Title" value={pick(row.raw_data, ["Project Title"])} />
+                          <Field label="City + State" value={cityState} />
+                          <Field label="Phone" value={contactPhone} />
+                          <Field label="Start Date" value={startDate} />
+                          <Field label="Bid Date" value={bidDate} />
+                          <Field label="Stage" value={stage} />
+                          <Field label="Notes" value={notes} />
+                          {quickLink && (
+                            <div>
+                              <div className="font-semibold text-slate-500 mb-0.5">Quick Link</div>
+                              <a
+                                href={quickLink}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-indigo-600 hover:underline truncate"
+                              >
+                                CMD <ExternalLink className="h-3 w-3" />
+                              </a>
+                            </div>
+                          )}
+                          {/* Any extra raw_data keys not covered above */}
+                          {Object.entries(row.raw_data)
+                            .filter(([k]) => k && !["Project Title", "City", "State", "City + State", "Stage", "Name", "Email", "Phone", "Bid Date", "Start", "Notes", "Quick Link", "Winning Bidder"].includes(k))
+                            .map(([k, v]) => (
+                              <Field key={k} label={k} value={String(v ?? "")} />
+                            ))}
+                        </div>
+                      </td>
+                    </tr>
                   )}
-                >
-                  <td className="px-3 py-2 text-slate-500">{row.row_index + 1}</td>
-                  <td className="px-3 py-2">
-                    {editingId === row.id ? (
-                      <div className="flex items-center gap-1">
-                        <input
-                          autoFocus
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") saveEdit(row);
-                            if (e.key === "Escape") setEditingId(null);
-                          }}
-                          className="w-full px-2 py-1 border border-indigo-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
-                        />
-                        <button onClick={() => saveEdit(row)} className="text-indigo-600 hover:text-indigo-800 p-1">
-                          <Save className="h-4 w-4" />
-                        </button>
-                        <button onClick={() => setEditingId(null)} className="text-slate-400 hover:text-slate-600 p-1">
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className={cn("font-medium", isFallback && "text-amber-700")}>{cleanedTitle}</span>
-                        {isFallback && (
-                          <span title="AI fell back to raw — review manually">
-                            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-slate-500 text-xs">{rawTitle}</td>
-                  <td className="px-3 py-2 text-slate-600 text-xs">{[city, state].filter(Boolean).join(", ")}</td>
-                  <td className="px-3 py-2">
-                    <StatusPill status={row.status} />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {!isUploaded && editingId !== row.id && (
-                      <div className="inline-flex items-center gap-1">
-                        <button
-                          onClick={() => startEdit(row)}
-                          className="text-slate-400 hover:text-indigo-600 p-1"
-                          title="Edit"
-                        >
-                          <Edit3 className="h-4 w-4" />
-                        </button>
-                        {isRejected ? (
-                          <button
-                            onClick={() => restore(row)}
-                            className="text-slate-400 hover:text-emerald-600 p-1"
-                            title="Restore"
-                          >
-                            <CheckCircle2 className="h-4 w-4" />
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => reject(row)}
-                            className="text-slate-400 hover:text-red-600 p-1"
-                            title="Reject"
-                          >
-                            <XCircle className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                </tr>
+                </FragmentRow>
               );
             })}
           </tbody>
@@ -310,6 +413,21 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Fragment that holds two <tr> elements (main row + expand row) under a single key
+function FragmentRow({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  if (!value) return null;
+  return (
+    <div className="min-w-0">
+      <div className="font-semibold text-slate-500 mb-0.5">{label}</div>
+      <div className="text-slate-800 break-words">{value}</div>
     </div>
   );
 }
