@@ -1516,6 +1516,24 @@ app.post("/api/leads/upload/rows/persist", express.json({ limit: "10mb" }), asyn
 // Add unique index for upsert (job_id, row_index)
 app.get("/api/leads/upload/:job_id/rows", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
+
+  // Backward-compat: if no `page` query param, return a plain array (old client shape).
+  // New paginated client passes ?page=0&page_size=50&filter=...&search=...
+  const isLegacyClient = req.query.page === undefined && req.query.page_size === undefined;
+  if (isLegacyClient) {
+    try {
+      const result = await pool.query(
+        `SELECT id, row_index, raw_data, cleaned_data, status, pipedrive_lead_id, error_message, updated_at
+         FROM lead_import_rows WHERE job_id = $1
+         ORDER BY (cleaned_data->>'abbreviation_fallback')::boolean DESC NULLS LAST, row_index ASC`,
+        [req.params.job_id]
+      );
+      return res.json(result.rows);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   const page = Math.max(0, parseInt(req.query.page) || 0);
   const pageSize = Math.min(200, Math.max(10, parseInt(req.query.page_size) || 50));
   const filter = (req.query.filter || "all").toString();
