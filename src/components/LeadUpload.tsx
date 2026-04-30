@@ -33,11 +33,17 @@ function isTerminal(s: LeadImportStatus) {
   return s === "done" || s === "error";
 }
 
-function ProgressRow({ job, onDelete }: { job: LeadImportJob; onDelete?: () => void }) {
+function ProgressRow({ job, onDelete, onOpen }: { job: LeadImportJob; onDelete?: () => void; onOpen?: () => void }) {
   const pctCleaned = job.total_rows ? Math.round((job.cleaned_rows / job.total_rows) * 100) : 0;
   const pctUploaded = job.total_rows ? Math.round((job.uploaded_rows / job.total_rows) * 100) : 0;
   return (
-    <div className="border border-slate-200 rounded-xl p-4 bg-white">
+    <div
+      className={cn(
+        "border border-slate-200 rounded-xl p-4 bg-white",
+        onOpen && "cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition"
+      )}
+      onClick={onOpen}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
           <FileText className="h-5 w-5 text-slate-400 mt-0.5 shrink-0" />
@@ -62,7 +68,7 @@ function ProgressRow({ job, onDelete }: { job: LeadImportJob; onDelete?: () => v
           </span>
           {onDelete && (
             <button
-              onClick={onDelete}
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
               className="p-1 text-slate-400 hover:text-red-600 transition"
               title="Delete this job"
             >
@@ -259,7 +265,12 @@ export default function LeadUpload() {
           <h2 className="text-sm font-semibold text-slate-700 mb-2">Recent imports</h2>
           <div className="space-y-2">
             {recent.filter((j) => !activeJob || j.id !== activeJob.id).slice(0, 10).map((job) => (
-              <ProgressRow key={job.id} job={job} onDelete={() => handleDelete(job.id)} />
+              <ProgressRow
+                key={job.id}
+                job={job}
+                onDelete={() => handleDelete(job.id)}
+                onOpen={() => setActiveJob(job)}
+              />
             ))}
           </div>
         </div>
