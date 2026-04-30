@@ -359,7 +359,7 @@ async function callGeminiWithFile(filePath) {
 }
 
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: "50mb" }));
 
 // Basic Authentication Security Wall
 const ADMIN_USER = process.env.ADMIN_USERNAME || "admin";
