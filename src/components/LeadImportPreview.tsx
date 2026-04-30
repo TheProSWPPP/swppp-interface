@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { CheckCircle2, XCircle, Edit3, Save, X, AlertTriangle, Send } from "lucide-react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { CheckCircle2, XCircle, Edit3, Save, X, AlertTriangle, Send, Search } from "lucide-react";
 import {
   getJobRows,
   patchJobRow,
@@ -19,6 +19,8 @@ function getDisplay(row: LeadImportRow, col: string): string {
   return val == null ? "" : String(val);
 }
 
+const PAGE_SIZE = 50;
+
 export default function LeadImportPreview({ job, onApproved }: Props) {
   const [rows, setRows] = useState<LeadImportRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +28,9 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
   const [editValue, setEditValue] = useState("");
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "review" | "rejected">("all");
+  const [page, setPage] = useState(0);
 
   const loadRows = useCallback(async () => {
     try {
@@ -87,15 +92,43 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
     }
   };
 
-  if (loading) return <div className="p-6 text-sm text-slate-500">Loading rows...</div>;
-  if (!rows.length) return <div className="p-6 text-sm text-slate-500">No rows yet — wait for cleaning to complete.</div>;
-
   const approvedCount = rows.filter((r) => r.status === "cleaned" || r.status === "approved").length;
   const rejectedCount = rows.filter((r) => r.status === "rejected").length;
   const fallbackCount = rows.filter((r) => {
     const c = r.cleaned_data as Record<string, unknown> | null;
     return c?.abbreviation_fallback === true;
   }).length;
+
+  // Sort: review-flagged first, then by row_index
+  // Filter: search + status filter
+  const visible = useMemo(() => {
+    let list = [...rows];
+    list.sort((a, b) => {
+      const aFb = a.cleaned_data?.abbreviation_fallback === true ? 0 : 1;
+      const bFb = b.cleaned_data?.abbreviation_fallback === true ? 0 : 1;
+      if (aFb !== bFb) return aFb - bFb;
+      return a.row_index - b.row_index;
+    });
+    if (filter === "review") list = list.filter((r) => r.cleaned_data?.abbreviation_fallback === true);
+    if (filter === "rejected") list = list.filter((r) => r.status === "rejected");
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((r) => {
+        const cleaned = String(r.cleaned_data?.["Project Title"] || "").toLowerCase();
+        const raw = String(r.raw_data["Project Title"] || "").toLowerCase();
+        const city = String(r.raw_data["City"] || r.raw_data["city"] || "").toLowerCase();
+        const state = String(r.raw_data["State"] || r.raw_data["state"] || "").toLowerCase();
+        return cleaned.includes(q) || raw.includes(q) || city.includes(q) || state.includes(q);
+      });
+    }
+    return list;
+  }, [rows, search, filter]);
+
+  const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const pageRows = visible.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  if (loading) return <div className="p-6 text-sm text-slate-500">Loading rows...</div>;
+  if (!rows.length) return <div className="p-6 text-sm text-slate-500">No rows yet — wait for cleaning to complete.</div>;
 
   return (
     <div>
@@ -130,6 +163,35 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
         </div>
       )}
 
+      <div className="flex items-center gap-2 mb-3">
+        <div className="relative flex-1 max-w-md">
+          <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+            placeholder="Search title, city, state..."
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none bg-white"
+          />
+        </div>
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+          {(["all", "review", "rejected"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => { setFilter(f); setPage(0); }}
+              className={cn(
+                "text-xs font-semibold px-3 py-1.5 rounded transition capitalize",
+                filter === f ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              {f === "review" && fallbackCount > 0 ? `Review (${fallbackCount})` : f}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-slate-500 ml-auto">
+          {visible.length} of {rows.length}
+        </div>
+      </div>
+
       <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200">
@@ -143,7 +205,7 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => {
+            {pageRows.map((row) => {
               const cleanedTitle = getDisplay(row, "Project Title");
               const rawTitle = String(row.raw_data["Project Title"] || row.cleaned_data?.["Raw Project Title"] || "");
               const city = String(row.raw_data["City"] || "");
@@ -236,6 +298,30 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-3 text-sm">
+          <span className="text-slate-500">
+            Page {page + 1} of {totalPages}
+          </span>
+          <div className="flex gap-1">
+            <button
+              onClick={() => setPage(Math.max(0, page - 1))}
+              disabled={page === 0}
+              className="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
+            >
+              Prev
+            </button>
+            <button
+              onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+              disabled={page >= totalPages - 1}
+              className="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

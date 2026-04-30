@@ -102,6 +102,8 @@ function ProgressRow({ job, onDelete }: { job: LeadImportJob; onDelete?: () => v
   );
 }
 
+const ACTIVE_JOB_KEY = "lead_import_active_job_id";
+
 export default function LeadUpload() {
   const [activeJob, setActiveJob] = useState<LeadImportJob | null>(null);
   const [recent, setRecent] = useState<LeadImportJob[]>([]);
@@ -109,6 +111,22 @@ export default function LeadUpload() {
   const [dragOver, setDragOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Restore active job from localStorage on mount (survive tab navigation)
+  useEffect(() => {
+    const saved = localStorage.getItem(ACTIVE_JOB_KEY);
+    if (saved) {
+      getLeadImportStatus(saved)
+        .then((job) => setActiveJob(job))
+        .catch(() => localStorage.removeItem(ACTIVE_JOB_KEY));
+    }
+  }, []);
+
+  // Persist active job id whenever it changes
+  useEffect(() => {
+    if (activeJob) localStorage.setItem(ACTIVE_JOB_KEY, activeJob.id);
+    else localStorage.removeItem(ACTIVE_JOB_KEY);
+  }, [activeJob]);
 
   const refreshRecent = useCallback(async () => {
     try {

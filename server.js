@@ -1375,24 +1375,35 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
   res.json({ job_id: jobId, status: "uploaded" });
 });
 
-// Auto-mark stuck jobs as error if no progress for STUCK_MINUTES (cheap inline watchdog
-// triggered by status polling — multi-replica safe, no separate scheduler needed)
+// Auto-mark stuck jobs as error if no progress for STUCK_MINUTES.
+// Runs both inline (on status polling) AND on a 5-min interval so jobs get
+// reaped even when no one is actively viewing the UI.
 const STUCK_MINUTES = 15;
 async function reapStuckJobs() {
   if (!process.env.DATABASE_URL) return;
   try {
-    await pool.query(
+    const result = await pool.query(
       `UPDATE lead_import_jobs
          SET status = 'error',
              error_message = COALESCE(error_message, 'Auto-failed: no progress for ' || $1 || ' min'),
              updated_at = NOW()
        WHERE status IN ('uploaded','cleaning','uploading')
-         AND updated_at < NOW() - ($1::int * INTERVAL '1 minute')`,
+         AND updated_at < NOW() - ($1::int * INTERVAL '1 minute')
+       RETURNING id`,
       [STUCK_MINUTES]
     );
+    if (result.rowCount > 0) {
+      console.log(`[lead-import] reaped ${result.rowCount} stuck job(s)`);
+    }
   } catch (err) {
     console.error("[lead-import] reap stuck jobs failed:", err.message);
   }
+}
+
+// Background reaper — runs every 5 min so jobs are auto-failed even
+// when no one is polling the UI (covers full n8n instance crash case)
+if (process.env.DATABASE_URL) {
+  setInterval(() => { reapStuckJobs().catch(() => {}); }, 5 * 60 * 1000);
 }
 
 app.get("/api/leads/upload/:job_id/status", async (req, res) => {
