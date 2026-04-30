@@ -1,5 +1,8 @@
 export const PIPEDRIVE_FIELD_KEYS = {
-  lastScrapedAt: '8f04861ac43f93cbb31f02478df92dd4cde3960a',
+  lastRefresh: '8f04861ac43f93cbb31f02478df92dd4cde3960a',
+  startDate: '4255e2f6f4fcd7097f292e9f3ad01c2b6e00c96c',
+  bidDate: '2fdb3cb21d7c6fddf7c504854af51cbbc6781fb9',
+  quickLink: '3fea11727cd0340a9eb1c3d18e0d4d15151fad38',
   scheduledEnrollment: 'aa97f61af684b32442cee6ec7842c18fdabc8045',
   shortGeo: '6ab83c83a757ae6dc43d95d73fca19e76272494f',
   longGeo: 'f39ffc033299b339f7e5dc5c8177b99bbec4b490',
