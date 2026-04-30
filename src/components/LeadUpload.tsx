@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Upload, CheckCircle2, AlertCircle, Loader2, FileText } from "lucide-react";
+import { Upload, CheckCircle2, AlertCircle, Loader2, FileText, Trash2 } from "lucide-react";
 import {
   uploadLeadsCsv,
   getLeadImportStatus,
   listRecentLeadImports,
+  deleteJob,
   type LeadImportJob,
   type LeadImportStatus,
 } from "../lib/leadUploadApi";
@@ -32,7 +33,7 @@ function isTerminal(s: LeadImportStatus) {
   return s === "done" || s === "error";
 }
 
-function ProgressRow({ job }: { job: LeadImportJob }) {
+function ProgressRow({ job, onDelete }: { job: LeadImportJob; onDelete?: () => void }) {
   const pctCleaned = job.total_rows ? Math.round((job.cleaned_rows / job.total_rows) * 100) : 0;
   const pctUploaded = job.total_rows ? Math.round((job.uploaded_rows / job.total_rows) * 100) : 0;
   return (
@@ -47,17 +48,28 @@ function ProgressRow({ job }: { job: LeadImportJob }) {
             </div>
           </div>
         </div>
-        <span
-          className={cn(
-            "text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap flex items-center gap-1.5",
-            STATUS_COLOR[job.status],
+        <div className="flex items-center gap-2">
+          <span
+            className={cn(
+              "text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap flex items-center gap-1.5",
+              STATUS_COLOR[job.status],
+            )}
+          >
+            {!isTerminal(job.status) && <Loader2 className="h-3 w-3 animate-spin" />}
+            {job.status === "done" && <CheckCircle2 className="h-3 w-3" />}
+            {job.status === "error" && <AlertCircle className="h-3 w-3" />}
+            {STATUS_LABEL[job.status]}
+          </span>
+          {onDelete && (
+            <button
+              onClick={onDelete}
+              className="p-1 text-slate-400 hover:text-red-600 transition"
+              title="Delete this job"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           )}
-        >
-          {!isTerminal(job.status) && <Loader2 className="h-3 w-3 animate-spin" />}
-          {job.status === "done" && <CheckCircle2 className="h-3 w-3" />}
-          {job.status === "error" && <AlertCircle className="h-3 w-3" />}
-          {STATUS_LABEL[job.status]}
-        </span>
+        </div>
       </div>
       {job.total_rows !== null && (
         <div className="mt-3 space-y-2">
@@ -153,6 +165,17 @@ export default function LeadUpload() {
     if (file) startUpload(file);
   };
 
+  const handleDelete = useCallback(async (jobId: string) => {
+    if (!confirm("Delete this import job? Cannot be undone.")) return;
+    try {
+      await deleteJob(jobId);
+      if (activeJob?.id === jobId) setActiveJob(null);
+      refreshRecent();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [activeJob, refreshRecent]);
+
   return (
     <div>
       <div className="mb-6">
@@ -198,7 +221,7 @@ export default function LeadUpload() {
       {activeJob && (
         <div className="mt-6">
           <h2 className="text-sm font-semibold text-slate-700 mb-2">Current import</h2>
-          <ProgressRow job={activeJob} />
+          <ProgressRow job={activeJob} onDelete={() => handleDelete(activeJob.id)} />
         </div>
       )}
 
@@ -218,7 +241,7 @@ export default function LeadUpload() {
           <h2 className="text-sm font-semibold text-slate-700 mb-2">Recent imports</h2>
           <div className="space-y-2">
             {recent.filter((j) => !activeJob || j.id !== activeJob.id).slice(0, 10).map((job) => (
-              <ProgressRow key={job.id} job={job} />
+              <ProgressRow key={job.id} job={job} onDelete={() => handleDelete(job.id)} />
             ))}
           </div>
         </div>

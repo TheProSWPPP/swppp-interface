@@ -93,3 +93,12 @@ export async function approveJob(jobId: string): Promise<{ ok: boolean }> {
   if (!res.ok) throw new Error(`Approve failed: ${res.status}`);
   return res.json();
 }
+
+export async function deleteJob(jobId: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/leads/upload/${jobId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+  return res.json();
+}

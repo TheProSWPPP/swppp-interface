@@ -1390,6 +1390,20 @@ app.get("/api/leads/upload/:job_id/status", async (req, res) => {
   }
 });
 
+app.delete("/api/leads/upload/:job_id", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
+  try {
+    const result = await pool.query(
+      `DELETE FROM lead_import_jobs WHERE id = $1 RETURNING id`,
+      [req.params.job_id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: "Job not found" });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/leads/upload", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
   try {
