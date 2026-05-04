@@ -219,7 +219,7 @@ export default function AIContentList({
                   <select value={newState} onChange={(e) => setNewState(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm bg-white">
                     <option value="">Select...</option>
                     {US_STATES.map((s) => (
-                      <option key={s} value={s} disabled={newType === "pillar" && statesWithPillar.has(s)}>
+                      <option key={s} value={s}>
                         {s}{newType === "pillar" && statesWithPillar.has(s) ? " (has pillar)" : ""}
                       </option>
                     ))}

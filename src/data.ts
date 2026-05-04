@@ -79,10 +79,26 @@ export interface AIContentItem {
   n8nExecutionId?: string;
   errorMessage?: string;
   metadata?: Record<string, any>;
+  version?: number;
+  basePillarId?: string;
+  legacyWordpressUrl?: string;
+  isCurrent?: boolean;
   createdAt: string;
   updatedAt: string;
   generatedAt?: string;
   publishedAt?: string;
+}
+
+export interface PillarVersion {
+  id: string;
+  version: number;
+  status: ContentStatus;
+  title?: string;
+  wordpressUrl?: string;
+  generatedAt?: string;
+  publishedAt?: string;
+  isCurrent: boolean;
+  basePillarId?: string;
 }
 
 export const US_STATES = [

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { AIContentItem } from "../data";
+import { useState, useEffect } from "react";
+import type { AIContentItem, PillarVersion } from "../data";
 import { US_STATES } from "../data";
 import { cn } from "../utils";
 import {
@@ -14,6 +14,8 @@ import {
   Sparkles,
   RefreshCw,
   FileEdit,
+  GitBranch,
+  Check,
 } from "lucide-react";
 
 const statusColors: Record<string, string> = {
@@ -50,11 +52,26 @@ export default function AIContentDetail({
   const [editKeyword, setEditKeyword] = useState(item.keyword);
   const [editState, setEditState] = useState(item.state || "");
   const [hasChanges, setHasChanges] = useState(false);
+  const [versions, setVersions] = useState<PillarVersion[]>([]);
+  const [versionLoading, setVersionLoading] = useState(false);
+  const [versionAction, setVersionAction] = useState<string | null>(null);
 
   const isEditable = item.status === "queued" || item.status === "failed";
+  const isPillar = item.type === "pillar";
 
   const pillar = item.pillarId ? allItems.find((i) => i.id === item.pillarId) : null;
   const spokes = item.type === "pillar" ? allItems.filter((i) => i.pillarId === item.id) : [];
+
+  // Load versions when this is a pillar
+  useEffect(() => {
+    if (!isPillar || !item.state) { setVersions([]); return; }
+    setVersionLoading(true);
+    fetch(`/api/ai-content/pillar/${encodeURIComponent(item.state)}/versions`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: PillarVersion[]) => setVersions(Array.isArray(data) ? data : []))
+      .catch(() => setVersions([]))
+      .finally(() => setVersionLoading(false));
+  }, [isPillar, item.state, item.id, item.status]);
 
   const handleSave = () => {
     const updates: Partial<AIContentItem> = {};
@@ -70,6 +87,37 @@ export default function AIContentDetail({
     onGenerate(item.id);
   };
 
+  const handleNewVersion = async () => {
+    if (!confirm(`Generate a new version of this pillar?\n\nThe existing v${item.version || 1} stays current until the new version is promoted.`)) return;
+    setVersionAction("creating");
+    try {
+      const res = await fetch(`/api/ai-content/${item.id}/regenerate-as-new-version`, { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error(await res.text());
+      // refresh versions list
+      const refresh = await fetch(`/api/ai-content/pillar/${encodeURIComponent(item.state || "")}/versions`, { credentials: "include" });
+      if (refresh.ok) setVersions(await refresh.json());
+    } catch (err) {
+      alert("Failed to start new version: " + (err as Error).message);
+    } finally {
+      setVersionAction(null);
+    }
+  };
+
+  const handleSetCurrent = async (versionId: string) => {
+    if (!confirm("Promote this version to current? Spokes will start linking to this version's URL on next generation.")) return;
+    setVersionAction(versionId);
+    try {
+      const res = await fetch(`/api/ai-content/${versionId}/set-current`, { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error(await res.text());
+      const refresh = await fetch(`/api/ai-content/pillar/${encodeURIComponent(item.state || "")}/versions`, { credentials: "include" });
+      if (refresh.ok) setVersions(await refresh.json());
+    } catch (err) {
+      alert("Failed to promote: " + (err as Error).message);
+    } finally {
+      setVersionAction(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -78,10 +126,16 @@ export default function AIContentDetail({
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
         <div className="flex items-center gap-2">
-          {item.status === "draft" && (
+          {item.status === "draft" && !isPillar && (
             <button onClick={handleRegenerate}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors">
               <RefreshCw className="h-3.5 w-3.5" /> Regenerate
+            </button>
+          )}
+          {isPillar && (item.status === "draft" || item.status === "published") && (
+            <button onClick={handleNewVersion} disabled={versionAction === "creating"}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors disabled:opacity-50">
+              <GitBranch className="h-3.5 w-3.5" /> {versionAction === "creating" ? "Starting..." : "New Version"}
             </button>
           )}
           {(item.status === "queued" || item.status === "failed") && (
@@ -197,6 +251,40 @@ export default function AIContentDetail({
               {pillar.wordpressUrl && (
                 <a href={pillar.wordpressUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-indigo-600 hover:underline">View in WP</a>
               )}
+            </div>
+          )}
+
+          {/* Versions (pillars only) */}
+          {isPillar && versions.length > 0 && (
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-1.5 mb-2">
+                <GitBranch className="h-3.5 w-3.5 text-indigo-600" />
+                <p className="text-xs font-semibold text-slate-900">Versions ({versions.length})</p>
+              </div>
+              <div className="space-y-1.5">
+                {versions.map((v) => (
+                  <div key={v.id} className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <span className={cn(
+                        "rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase border flex-shrink-0",
+                        v.isCurrent ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-100 text-slate-600 border-slate-200"
+                      )}>v{v.version}{v.isCurrent ? " · current" : ""}</span>
+                      <span className={cn("rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase border flex-shrink-0", statusColors[v.status])}>{v.status}</span>
+                      {v.generatedAt && <span className="text-[10px] text-slate-400 truncate">{new Date(v.generatedAt).toLocaleDateString()}</span>}
+                    </div>
+                    {!v.isCurrent && (v.status === "draft" || v.status === "published") && (
+                      <button
+                        onClick={() => handleSetCurrent(v.id)}
+                        disabled={versionAction === v.id}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 flex-shrink-0"
+                        title="Promote this version to current">
+                        <Check className="h-3 w-3" /> {versionAction === v.id ? "..." : "Set current"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {versionLoading && <p className="text-[10px] text-slate-400 mt-1">Loading…</p>}
             </div>
           )}
 

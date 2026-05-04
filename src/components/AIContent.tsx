@@ -95,7 +95,19 @@ export default function AIContent() {
       });
       if (res.status === 409) {
         const err = await res.json();
-        alert(err.error);
+        const existing = items.find((i) => i.id === err.existingId);
+        const existingLabel = existing ? `"${existing.title || existing.keyword}" (${existing.status})` : "an existing pillar";
+        const confirmed = window.confirm(
+          `${data.state} already has a pillar: ${existingLabel}.\n\nCreate another pillar anyway? You can clean up the old one later.`
+        );
+        if (!confirmed) return;
+        const retry = await fetch("/api/ai-content", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ ...data, force: true }),
+        });
+        if (retry.ok) await fetchData();
         return;
       }
       if (res.ok) await fetchData();

@@ -15,6 +15,8 @@ export const PIPEDRIVE_FIELD_KEYS = {
   triggerLba: '310a6cfbcf364587467a42835b369cd4bf1766fa',
   triggerCm: '5fd5cb8c79f7be331ae9af9b03285d9fe1756699',
   triggerPb: '61435d2e87311ced7c75007334828fa2de9e9628',
+  skipCmdUpdates: '8a293f03dcd31ea1d235da7a7444e4d66fcaa5a8',
+  lastApolloRun: 'de4ccd2bd8ef814b20851334023c37da454067b4',
 } as const;
 
 export const PIPEDRIVE_TRIGGER_OPTION_IDS = {

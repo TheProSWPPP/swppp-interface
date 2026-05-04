@@ -468,7 +468,17 @@ async function initDB() {
         published_at TIMESTAMP
       )
     `);
-    console.log("Table 'ai_content' verified/created.");
+    // Versioning columns (idempotent migrations)
+    await pool.query(`ALTER TABLE ai_content ADD COLUMN IF NOT EXISTS version INT DEFAULT 1`);
+    await pool.query(`ALTER TABLE ai_content ADD COLUMN IF NOT EXISTS base_pillar_id TEXT`);
+    await pool.query(`ALTER TABLE ai_content ADD COLUMN IF NOT EXISTS legacy_wordpress_url TEXT`);
+    await pool.query(`ALTER TABLE ai_content ADD COLUMN IF NOT EXISTS is_current BOOLEAN DEFAULT TRUE`);
+    // Backfill base_pillar_id = id for existing pillars (each is its own base)
+    await pool.query(`UPDATE ai_content SET base_pillar_id = id WHERE type = 'pillar' AND base_pillar_id IS NULL`);
+    // Index for fast version lookups within a pillar lineage
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_content_base_pillar ON ai_content(base_pillar_id, version DESC) WHERE type = 'pillar'`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_content_pillar_state_current ON ai_content(state, is_current) WHERE type = 'pillar'`);
+    console.log("Table 'ai_content' verified/created (with versioning columns).");
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS lead_import_jobs (
@@ -1026,6 +1036,10 @@ app.get("/api/ai-content", async (req, res) => {
       n8nExecutionId: r.n8n_execution_id,
       errorMessage: r.error_message,
       metadata: r.metadata,
+      version: r.version || 1,
+      basePillarId: r.base_pillar_id,
+      legacyWordpressUrl: r.legacy_wordpress_url,
+      isCurrent: r.is_current !== false,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
       generatedAt: r.generated_at,
@@ -1043,13 +1057,13 @@ app.post("/api/ai-content", async (req, res) => {
   if (type === "pillar") {
     if (!state) return res.status(400).json({ error: "state required for pillar articles" });
     keyword = `Construction & Industrial SWPPP Requirements in ${state}`;
-    // Enforce one pillar per state unless explicitly forced
+    // Enforce one CURRENT pillar per state unless explicitly forced (versioning is handled via separate route)
     if (!force) {
       if (process.env.DATABASE_URL) {
-        const existing = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1", [state]);
+        const existing = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1 AND is_current = TRUE", [state]);
         if (existing.rows.length > 0) return res.status(409).json({ error: `Pillar already exists for ${state}`, existingId: existing.rows[0].id });
       } else {
-        const existing = memoryContent.find((c) => c.type === "pillar" && c.state === state);
+        const existing = memoryContent.find((c) => c.type === "pillar" && c.state === state && c.isCurrent !== false);
         if (existing) return res.status(409).json({ error: `Pillar already exists for ${state}`, existingId: existing.id });
       }
     }
@@ -1057,13 +1071,13 @@ app.post("/api/ai-content", async (req, res) => {
 
   if (!type || !keyword) return res.status(400).json({ error: "type and keyword required" });
 
-  // Auto-link spoke to state pillar if not specified
+  // Auto-link spoke to state pillar if not specified — pick the CURRENT version
   if (type === "spoke" && state && !pillarId) {
     if (process.env.DATABASE_URL) {
-      const pillar = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1 LIMIT 1", [state]);
+      const pillar = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1 AND is_current = TRUE ORDER BY version DESC LIMIT 1", [state]);
       if (pillar.rows.length > 0) pillarId = pillar.rows[0].id;
     } else {
-      const pillar = memoryContent.find((c) => c.type === "pillar" && c.state === state);
+      const pillar = memoryContent.find((c) => c.type === "pillar" && c.state === state && c.isCurrent !== false);
       if (pillar) pillarId = pillar.id;
     }
   }
@@ -1083,16 +1097,19 @@ app.post("/api/ai-content", async (req, res) => {
   }
 
   try {
+    // For pillars: base_pillar_id = self (each pillar starts its own lineage at v1, is_current=true)
+    const basePillarId = type === "pillar" ? id : null;
     await pool.query(
-      `INSERT INTO ai_content (id, type, status, keyword, state, pillar_id)
-       VALUES ($1, $2, 'queued', $3, $4, $5)`,
-      [id, type, keyword, state || null, pillarId || null]
+      `INSERT INTO ai_content (id, type, status, keyword, state, pillar_id, base_pillar_id, version, is_current)
+       VALUES ($1, $2, 'queued', $3, $4, $5, $6, 1, TRUE)`,
+      [id, type, keyword, state || null, pillarId || null, basePillarId]
     );
     const result = await pool.query("SELECT * FROM ai_content WHERE id = $1", [id]);
     const r = result.rows[0];
     res.status(201).json({
       id: r.id, type: r.type, status: r.status, keyword: r.keyword,
       state: r.state, pillarId: r.pillar_id,
+      version: r.version, basePillarId: r.base_pillar_id, isCurrent: r.is_current,
       createdAt: r.created_at, updatedAt: r.updated_at,
     });
   } catch (err) {
@@ -1218,14 +1235,21 @@ app.post("/api/ai-content/:id/generate", async (req, res) => {
       [id]
     );
 
-    // Build pillar context if this is a spoke with a pillar
+    // Build pillar context if this is a spoke with a pillar.
+    // Walk to the CURRENT version of the pillar lineage so spokes always link to the live URL.
     let pillarContext = null;
     if (row.type === "spoke" && row.pillar_id) {
-      const pillar = await pool.query("SELECT keyword, wordpress_url FROM ai_content WHERE id = $1", [row.pillar_id]);
-      if (pillar.rows.length > 0) {
+      const linked = await pool.query("SELECT base_pillar_id, state FROM ai_content WHERE id = $1", [row.pillar_id]);
+      const basePillarId = linked.rows[0]?.base_pillar_id || row.pillar_id;
+      const pillar = await pool.query(
+        "SELECT keyword, wordpress_url FROM ai_content WHERE base_pillar_id = $1 AND is_current = TRUE ORDER BY version DESC LIMIT 1",
+        [basePillarId]
+      );
+      const fallback = pillar.rows[0] || (await pool.query("SELECT keyword, wordpress_url FROM ai_content WHERE id = $1", [row.pillar_id])).rows[0];
+      if (fallback) {
         pillarContext = {
-          pillarKeyword: pillar.rows[0].keyword,
-          pillarWordpressUrl: pillar.rows[0].wordpress_url,
+          pillarKeyword: fallback.keyword,
+          pillarWordpressUrl: fallback.wordpress_url,
         };
       }
     }
@@ -1282,8 +1306,21 @@ app.post("/api/ai-content/generate-bulk", async (req, res) => {
   res.json({ results });
 });
 
-// n8n callback — no auth (added to skip list above)
+// n8n callback — HMAC-protected (allows passthrough for legacy n8n that hasn't been updated yet,
+// guarded behind a feature flag so we can flip to strict once the n8n side is patched).
 app.post("/api/ai-content/callback", async (req, res) => {
+  const expectedSig = req.get("X-N8N-Signature");
+  if (process.env.AI_CONTENT_CALLBACK_STRICT === "true") {
+    const computed = crypto.createHmac("sha256", N8N_CALLBACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
+    if (expectedSig !== computed) {
+      console.warn("AI content callback HMAC mismatch — rejecting");
+      return res.status(401).json({ error: "invalid signature" });
+    }
+  } else if (expectedSig) {
+    // If n8n sends a sig and it's wrong, log it but don't reject (transition mode)
+    const computed = crypto.createHmac("sha256", N8N_CALLBACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
+    if (expectedSig !== computed) console.warn("AI content callback HMAC sent but mismatched (non-strict mode, allowing)");
+  }
   const { content_id, status, wordpress_post_id, wordpress_url, title, word_count, n8n_execution_id, error_message } = req.body;
   if (!content_id) return res.status(400).json({ error: "content_id required" });
 
@@ -1320,6 +1357,148 @@ app.post("/api/ai-content/callback", async (req, res) => {
     await pool.query(`UPDATE ai_content SET ${fields.join(", ")} WHERE id = $${params.length}`, params);
     res.json({ ok: true });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Pillar Versioning
+// - List all versions in a pillar lineage
+// - Regenerate as new version (clones metadata, bumps version, NOT yet current)
+// - Atomically promote a version to current (DB flip + WP URL update with rollback)
+// ============================================================================
+
+// List all versions in a pillar's lineage (by base_pillar_id)
+app.get("/api/ai-content/pillar/:state/versions", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.json([]);
+  const { state } = req.params;
+  try {
+    const r = await pool.query(
+      `SELECT id, version, status, title, wordpress_url, generated_at, published_at, is_current, base_pillar_id
+       FROM ai_content
+       WHERE type = 'pillar' AND state = $1
+       ORDER BY version DESC, created_at DESC`,
+      [state]
+    );
+    res.json(r.rows.map((row) => ({
+      id: row.id,
+      version: row.version,
+      status: row.status,
+      title: row.title,
+      wordpressUrl: row.wordpress_url,
+      generatedAt: row.generated_at,
+      publishedAt: row.published_at,
+      isCurrent: row.is_current,
+      basePillarId: row.base_pillar_id,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Regenerate as new version: clones metadata from a pillar, bumps version, kicks off n8n.
+// New version is NOT immediately current — must be promoted via /set-current after generation completes.
+app.post("/api/ai-content/:id/regenerate-as-new-version", async (req, res) => {
+  const { id } = req.params;
+  if (!process.env.DATABASE_URL) return res.status(501).json({ error: "DB required" });
+  try {
+    const cur = await pool.query("SELECT * FROM ai_content WHERE id = $1", [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: "Not found" });
+    const row = cur.rows[0];
+    if (row.type !== "pillar") return res.status(400).json({ error: "Only pillars can be versioned" });
+
+    const basePillarId = row.base_pillar_id || row.id;
+    const maxV = await pool.query(
+      "SELECT COALESCE(MAX(version), 1) AS max_version FROM ai_content WHERE base_pillar_id = $1",
+      [basePillarId]
+    );
+    const newVersion = (maxV.rows[0].max_version || 1) + 1;
+    const newId = `content_${Date.now()}_v${newVersion}_${Math.random().toString(36).slice(2, 6)}`;
+
+    await pool.query(
+      `INSERT INTO ai_content (id, type, status, keyword, state, base_pillar_id, version, is_current, legacy_wordpress_url)
+       VALUES ($1, 'pillar', 'queued', $2, $3, $4, $5, FALSE, $6)`,
+      [newId, row.keyword, row.state, basePillarId, newVersion, row.wordpress_url]
+    );
+
+    // Trigger n8n with existing_wp_post_id so n8n updates the same WP post (preserves SEO URL)
+    const webhookPayload = {
+      content_id: newId,
+      type: "pillar",
+      keyword: row.keyword,
+      state: row.state,
+      callback_url: `${RAILWAY_PUBLIC_URL}/api/ai-content/callback`,
+      pillar_context: null,
+      // Critical for SEO: tell n8n to UPDATE existing WP post, not create new
+      existing_wp_post_id: row.wordpress_post_id,
+      existing_wp_url: row.wordpress_url,
+      base_pillar_id: basePillarId,
+      version: newVersion,
+    };
+
+    await pool.query("UPDATE ai_content SET status = 'generating', updated_at = NOW() WHERE id = $1", [newId]);
+
+    fetch(N8N_CONTENT_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(webhookPayload),
+    })
+      .then((r) => console.log(`n8n new-version webhook: ${r.status}`))
+      .catch((err) => {
+        console.error("Webhook failed:", err);
+        pool.query("UPDATE ai_content SET status = 'failed', error_message = $1 WHERE id = $2", [`Webhook: ${err.message}`, newId]);
+      });
+
+    const created = await pool.query("SELECT * FROM ai_content WHERE id = $1", [newId]);
+    const c = created.rows[0];
+    res.status(201).json({
+      id: c.id,
+      type: c.type,
+      status: c.status,
+      version: c.version,
+      basePillarId: c.base_pillar_id,
+      isCurrent: c.is_current,
+      keyword: c.keyword,
+      state: c.state,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Promote a version to current. Atomic Postgres transaction:
+// 1) flip is_current=false on all versions in lineage
+// 2) flip is_current=true on the chosen one
+// (No WP changes here — n8n already updated the WP post at the existing URL.)
+app.post("/api/ai-content/:id/set-current", async (req, res) => {
+  const { id } = req.params;
+  if (!process.env.DATABASE_URL) return res.status(501).json({ error: "DB required" });
+  const client = await pool.connect();
+  try {
+    const cur = await client.query("SELECT * FROM ai_content WHERE id = $1", [id]);
+    if (cur.rows.length === 0) {
+      client.release();
+      return res.status(404).json({ error: "Not found" });
+    }
+    const row = cur.rows[0];
+    if (row.type !== "pillar") {
+      client.release();
+      return res.status(400).json({ error: "Only pillars can be promoted" });
+    }
+    if (row.status !== "draft" && row.status !== "published") {
+      client.release();
+      return res.status(400).json({ error: `Cannot promote — version still ${row.status}` });
+    }
+    const basePillarId = row.base_pillar_id || row.id;
+    await client.query("BEGIN");
+    await client.query("UPDATE ai_content SET is_current = FALSE, updated_at = NOW() WHERE base_pillar_id = $1", [basePillarId]);
+    await client.query("UPDATE ai_content SET is_current = TRUE, updated_at = NOW() WHERE id = $1", [id]);
+    await client.query("COMMIT");
+    client.release();
+    res.json({ ok: true, id, version: row.version, basePillarId });
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch {}
+    client.release();
     res.status(500).json({ error: err.message });
   }
 });
