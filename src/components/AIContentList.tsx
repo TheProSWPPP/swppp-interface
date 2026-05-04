@@ -9,7 +9,7 @@ import {
   Trash2,
   ExternalLink,
   X,
-  Zap,
+  PlayCircle,
   ArrowUpDown,
 } from "lucide-react";
 
@@ -164,8 +164,8 @@ export default function AIContentList({
               onClick={() => { onBulkGenerate(queuedSelected); setSelectedIds([]); }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors"
             >
-              <Zap className="h-3.5 w-3.5" />
-              Generate {queuedSelected.length}
+              <PlayCircle className="h-4 w-4" />
+              Generate {queuedSelected.length} {queuedSelected.length === 1 ? "article" : "articles"}
             </button>
           )}
           {selectedIds.length > 0 && (
@@ -332,10 +332,13 @@ export default function AIContentList({
                   <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1.5">
                       {(item.status === "queued" || item.status === "failed") && (
-                        <button onClick={() => onGenerate(item.id)}
-                          className={cn("px-2 py-1 rounded text-[10px] font-bold text-white transition-colors",
+                        <button
+                          onClick={() => onGenerate(item.id)}
+                          title={item.status === "failed" ? "Retry — runs the AI writer again" : "Generate this article — AI writes it and pushes a draft to WordPress (~2-5 min)"}
+                          className={cn("flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold text-white transition-colors",
                             item.status === "failed" ? "bg-red-500 hover:bg-red-600" : "bg-indigo-600 hover:bg-indigo-700")}>
-                          <Zap className="h-3 w-3" />
+                          <PlayCircle className="h-3 w-3" />
+                          <span>{item.status === "failed" ? "Retry" : "Generate"}</span>
                         </button>
                       )}
                       {item.wordpressUrl && (

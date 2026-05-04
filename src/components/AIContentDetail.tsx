@@ -4,7 +4,7 @@ import { US_STATES } from "../data";
 import { cn } from "../utils";
 import {
   ArrowLeft,
-  Zap,
+  PlayCircle,
   ExternalLink,
   Trash2,
   Save,
@@ -16,6 +16,7 @@ import {
   FileEdit,
   GitBranch,
   Check,
+  Info,
 } from "lucide-react";
 
 const statusColors: Record<string, string> = {
@@ -139,9 +140,11 @@ export default function AIContentDetail({
             </button>
           )}
           {(item.status === "queued" || item.status === "failed") && (
-            <button onClick={() => onGenerate(item.id)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
-              <Zap className="h-3.5 w-3.5" /> {item.status === "failed" ? "Retry" : "Generate"}
+            <button
+              onClick={() => onGenerate(item.id)}
+              title={item.status === "failed" ? "Retry generation — runs the AI writer again" : "Start AI generation — writes the article and pushes a draft to WordPress (takes 2-5 min)"}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition-colors">
+              <PlayCircle className="h-4 w-4" /> {item.status === "failed" ? "Retry generation" : "Generate article"}
             </button>
           )}
           {item.wordpressUrl && (
@@ -220,6 +223,64 @@ export default function AIContentDetail({
               </div>
             )}
           </div>
+
+          {/* What happens next? — contextual help */}
+          {item.status === "queued" && (
+            <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-xl border border-blue-100">
+              <Info className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-blue-900">Ready to generate</p>
+                <p className="text-xs text-blue-800">Click <span className="font-semibold">Generate article</span> to start. AI writes the full article (~2-5 min), uploads images, and creates a WordPress draft. You'll see the status change to "Generating" then "Draft" when done.</p>
+              </div>
+            </div>
+          )}
+          {item.status === "draft" && !isPillar && (
+            <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-xl border border-blue-100">
+              <Info className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-blue-900">Draft ready in WordPress</p>
+                <p className="text-xs text-blue-800">Click <span className="font-semibold">Open in WP</span> to review. If something's off, click <span className="font-semibold">Regenerate</span> — that overwrites the draft with a fresh AI run.</p>
+              </div>
+            </div>
+          )}
+          {item.status === "draft" && isPillar && (
+            <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-xl border border-blue-100">
+              <Info className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-blue-900">Pillar draft ready</p>
+                <p className="text-xs text-blue-800">Open in WP to review. To replace it, click <span className="font-semibold">New Version</span> — that creates a SECOND draft (separate WP URL). The current pillar URL stays untouched until you click <span className="font-semibold">Set current</span> on the new version below.</p>
+              </div>
+            </div>
+          )}
+          {item.status === "published" && isPillar && (
+            <div className="flex items-start gap-2 p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+              <Info className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-emerald-900">Pillar is live</p>
+                <p className="text-xs text-emerald-800">
+                  This article is published at the SEO URL. To rewrite it without losing rankings, click <span className="font-semibold">New Version</span> — that creates a fresh AI draft at a SEPARATE temporary URL (existing one keeps working). Review the new draft in WordPress, then click <span className="font-semibold">Set current</span> on it to copy its content into this URL. The old version is moved to WP Trash (recoverable).
+                </p>
+              </div>
+            </div>
+          )}
+          {item.status === "generating" && (
+            <div className="flex items-start gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+              <Info className="h-4 w-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-indigo-900">AI is writing</p>
+                <p className="text-xs text-indigo-800">This typically takes 2-5 minutes. Refresh the page or come back shortly. You'll see the status flip to "Draft" with a WordPress link when ready.</p>
+              </div>
+            </div>
+          )}
+          {item.status === "failed" && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-100">
+              <Info className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-amber-900">Generation failed</p>
+                <p className="text-xs text-amber-800">Click <span className="font-semibold">Retry generation</span> to try again. If it keeps failing, the n8n workflow probably hit an error (check the error message below).</p>
+              </div>
+            </div>
+          )}
 
           {/* Error */}
           {item.errorMessage && (
