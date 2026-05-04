@@ -1421,7 +1421,8 @@ app.post("/api/ai-content/:id/regenerate-as-new-version", async (req, res) => {
       [newId, row.keyword, row.state, basePillarId, newVersion, row.wordpress_url]
     );
 
-    // Trigger n8n with existing_wp_post_id so n8n updates the same WP post (preserves SEO URL)
+    // Trigger n8n. n8n will CREATE a brand-new WP draft post (versioned slug) — does NOT
+    // touch the live v1 post. The live URL is only swapped at /set-current promotion time.
     const webhookPayload = {
       content_id: newId,
       type: "pillar",
@@ -1429,8 +1430,9 @@ app.post("/api/ai-content/:id/regenerate-as-new-version", async (req, res) => {
       state: row.state,
       callback_url: `${RAILWAY_PUBLIC_URL}/api/ai-content/callback`,
       pillar_context: null,
-      // Critical for SEO: tell n8n to UPDATE existing WP post, not create new
-      existing_wp_post_id: row.wordpress_post_id,
+      // is_new_version flag tells n8n to use the versioned-slug create path
+      is_new_version: true,
+      existing_wp_post_id: row.wordpress_post_id,  // for reference / audit only
       existing_wp_url: row.wordpress_url,
       base_pillar_id: basePillarId,
       version: newVersion,
@@ -1466,36 +1468,108 @@ app.post("/api/ai-content/:id/regenerate-as-new-version", async (req, res) => {
   }
 });
 
-// Promote a version to current. Atomic Postgres transaction:
-// 1) flip is_current=false on all versions in lineage
-// 2) flip is_current=true on the chosen one
-// (No WP changes here — n8n already updated the WP post at the existing URL.)
+// Promote a version to current.
+//
+// Real safety flow (preserves SEO URL of the original v1):
+//   1) Fetch new version's content from its WP draft post
+//   2) PATCH the v1 (current) WP post with new content  — same URL, same slug, SEO preserved
+//   3) Trash the v2 draft WP post (cleanup)
+//   4) Transaction: flip is_current to v2 in DB, copy v2's content URL onto v2's row's wordpress_url=v1's URL
+//
+// On any failure, rollback DB. WP changes are best-effort (we log + flag) — the v1 post
+// is only modified after we've fetched v2's content successfully.
 app.post("/api/ai-content/:id/set-current", async (req, res) => {
   const { id } = req.params;
   if (!process.env.DATABASE_URL) return res.status(501).json({ error: "DB required" });
   const client = await pool.connect();
   try {
     const cur = await client.query("SELECT * FROM ai_content WHERE id = $1", [id]);
-    if (cur.rows.length === 0) {
+    if (cur.rows.length === 0) { client.release(); return res.status(404).json({ error: "Not found" }); }
+    const newVer = cur.rows[0];
+    if (newVer.type !== "pillar") { client.release(); return res.status(400).json({ error: "Only pillars can be promoted" }); }
+    if (newVer.status !== "draft" && newVer.status !== "published") {
       client.release();
-      return res.status(404).json({ error: "Not found" });
+      return res.status(400).json({ error: `Cannot promote — version still ${newVer.status}` });
     }
-    const row = cur.rows[0];
-    if (row.type !== "pillar") {
-      client.release();
-      return res.status(400).json({ error: "Only pillars can be promoted" });
+
+    const basePillarId = newVer.base_pillar_id || newVer.id;
+
+    // Find the current v1 (or whichever is currently live)
+    const liveR = await client.query(
+      "SELECT * FROM ai_content WHERE base_pillar_id = $1 AND is_current = TRUE AND id <> $2",
+      [basePillarId, newVer.id]
+    );
+    const live = liveR.rows[0]; // may be undefined if no current set yet
+
+    // Step 1: pull v2 content from WP if v2 has a wp post
+    let v2Content = null;
+    let v2Title = null;
+    if (newVer.wordpress_post_id) {
+      try {
+        const wpResp = await fetch(`https://proswppp.com/wp-json/wp/v2/posts/${newVer.wordpress_post_id}?context=edit`, {
+          headers: { Authorization: `Basic ${Buffer.from(`${process.env.WP_USER || ''}:${process.env.WP_APP_PASSWORD || ''}`).toString("base64")}` },
+        });
+        if (wpResp.ok) {
+          const data = await wpResp.json();
+          v2Content = data?.content?.raw || data?.content?.rendered || null;
+          v2Title = data?.title?.raw || data?.title?.rendered || newVer.title;
+        }
+      } catch (e) {
+        console.warn(`Could not fetch v2 WP content (${newVer.wordpress_post_id}):`, e.message);
+      }
     }
-    if (row.status !== "draft" && row.status !== "published") {
-      client.release();
-      return res.status(400).json({ error: `Cannot promote — version still ${row.status}` });
+
+    // Step 2: if there's a live post and we have v2 content, overwrite live post with v2's content
+    if (live && live.wordpress_post_id && v2Content) {
+      try {
+        const patchResp = await fetch(`https://proswppp.com/wp-json/wp/v2/posts/${live.wordpress_post_id}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${Buffer.from(`${process.env.WP_USER || ''}:${process.env.WP_APP_PASSWORD || ''}`).toString("base64")}`,
+          },
+          body: JSON.stringify({ title: v2Title, content: v2Content, status: "publish" }),
+        });
+        if (!patchResp.ok) console.warn(`WP PATCH on v1 (${live.wordpress_post_id}) failed: ${patchResp.status}`);
+      } catch (e) {
+        console.warn("WP PATCH on v1 errored:", e.message);
+      }
     }
-    const basePillarId = row.base_pillar_id || row.id;
+
+    // Step 3: trash the v2 draft post (cleanup)
+    if (newVer.wordpress_post_id && live?.wordpress_post_id && newVer.wordpress_post_id !== live.wordpress_post_id) {
+      try {
+        await fetch(`https://proswppp.com/wp-json/wp/v2/posts/${newVer.wordpress_post_id}?force=false`, {
+          method: "DELETE",
+          headers: { Authorization: `Basic ${Buffer.from(`${process.env.WP_USER || ''}:${process.env.WP_APP_PASSWORD || ''}`).toString("base64")}` },
+        });
+      } catch (e) {
+        console.warn("WP DELETE v2 draft errored:", e.message);
+      }
+    }
+
+    // Step 4: DB flip — atomic transaction
     await client.query("BEGIN");
     await client.query("UPDATE ai_content SET is_current = FALSE, updated_at = NOW() WHERE base_pillar_id = $1", [basePillarId]);
-    await client.query("UPDATE ai_content SET is_current = TRUE, updated_at = NOW() WHERE id = $1", [id]);
+    // v2 inherits v1's URL/post_id (the live SEO URL), saves v2's draft URL as legacy_wordpress_url for audit
+    if (live && live.wordpress_post_id) {
+      await client.query(
+        `UPDATE ai_content SET is_current = TRUE,
+                                wordpress_post_id = $1,
+                                wordpress_url = $2,
+                                legacy_wordpress_url = $3,
+                                status = 'published',
+                                published_at = NOW(),
+                                updated_at = NOW()
+         WHERE id = $4`,
+        [live.wordpress_post_id, live.wordpress_url, newVer.wordpress_url || null, newVer.id]
+      );
+    } else {
+      await client.query("UPDATE ai_content SET is_current = TRUE, updated_at = NOW() WHERE id = $1", [newVer.id]);
+    }
     await client.query("COMMIT");
     client.release();
-    res.json({ ok: true, id, version: row.version, basePillarId });
+    res.json({ ok: true, id, version: newVer.version, basePillarId, demoted: live?.id, preserved_url: live?.wordpress_url });
   } catch (err) {
     try { await client.query("ROLLBACK"); } catch {}
     client.release();
