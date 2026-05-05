@@ -384,7 +384,10 @@ app.use((req, res, next) => {
     (req.path === "/api/ai-content/callback" && req.method === "POST") ||
     (req.path === "/api/leads/upload/callback" && req.method === "POST") ||
     (req.path === "/api/leads/upload/rows/persist" && req.method === "POST") ||
-    (req.path === "/api/abbreviation-cache" && (req.method === "GET" || req.method === "POST"))
+    (req.path === "/api/abbreviation-cache" && (req.method === "GET" || req.method === "POST")) ||
+    (req.path === "/api/seo-ideas/batch" && req.method === "POST") ||
+    (req.path === "/api/seo-ideas/known-keywords" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
+    (req.path === "/api/seo-ideas/seeds" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET)
   ) {
     return next();
   }
@@ -527,6 +530,41 @@ async function initDB() {
       )
     `);
     console.log("Table 'abbreviation_cache' verified/created.");
+
+    // Phase 5 — AI SEO Content Ideas (weekly DataForSEO + Claude clustering)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS seo_ideas (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        suggested_title TEXT NOT NULL,
+        target_keyword TEXT NOT NULL,
+        keyword_normalized TEXT NOT NULL,
+        suggested_type TEXT NOT NULL DEFAULT 'spoke'
+          CHECK (suggested_type IN ('pillar','spoke','comparison')),
+        parent_pillar_keyword TEXT,
+        state TEXT,
+        monthly_volume INT,
+        competition_index INT,
+        cpc_usd NUMERIC(8,2),
+        difficulty_score INT,
+        intent TEXT,
+        why_write TEXT,
+        cluster_name TEXT,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending','approved','rejected','converted')),
+        converted_to_content_id TEXT,
+        batch_id UUID NOT NULL,
+        raw_metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        reviewed_at TIMESTAMPTZ
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_seo_ideas_status ON seo_ideas(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_seo_ideas_batch ON seo_ideas(batch_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_seo_ideas_keyword_norm ON seo_ideas(keyword_normalized)`);
+    // Prevent re-suggesting an already-pending or already-approved keyword
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_seo_ideas_open_keyword ON seo_ideas(keyword_normalized) WHERE status IN ('pending','approved')`);
+    console.log("Table 'seo_ideas' verified/created.");
   } catch (err) {
     console.error("CRITICAL: Error initializing database:", err);
   }
@@ -1574,6 +1612,268 @@ app.post("/api/ai-content/:id/set-current", async (req, res) => {
     try { await client.query("ROLLBACK"); } catch {}
     client.release();
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Phase 5 — AI SEO Content Ideas
+// Weekly cron in n8n calls DataForSEO + Claude clustering, batch-posts ideas here.
+// Derek reviews in AI Content → Ideas tab; approve converts to ai_content row.
+// ============================================================================
+
+const SEO_IDEAS_DEFAULT_SEEDS = [
+  "swppp",
+  "stormwater compliance",
+  "erosion control plan",
+  "construction stormwater permit",
+  "msgp",
+  "sediment control",
+  "swppp inspection",
+  "rain event monitoring",
+  "stormwater contractors",
+  "erosion and sediment control",
+];
+
+function normalizeKw(k) {
+  return String(k || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// n8n: fetch current seed list (env-overridable)
+app.get("/api/seo-ideas/seeds", (req, res) => {
+  const fromEnv = process.env.SEO_IDEAS_SEEDS
+    ? process.env.SEO_IDEAS_SEEDS.split(",").map((s) => s.trim()).filter(Boolean)
+    : null;
+  res.json({ seeds: fromEnv && fromEnv.length ? fromEnv : SEO_IDEAS_DEFAULT_SEEDS });
+});
+
+// n8n: dedup helper — keywords we already target (live ai_content) or already proposed/rejected
+app.get("/api/seo-ideas/known-keywords", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.json({ keywords: [] });
+  try {
+    const live = await pool.query("SELECT DISTINCT keyword FROM ai_content WHERE keyword IS NOT NULL");
+    const ideas = await pool.query("SELECT DISTINCT keyword_normalized FROM seo_ideas WHERE status IN ('pending','approved','rejected','converted')");
+    const set = new Set();
+    for (const r of live.rows) set.add(normalizeKw(r.keyword));
+    for (const r of ideas.rows) set.add(r.keyword_normalized);
+    res.json({ keywords: Array.from(set) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// n8n batch insert (HMAC-protected)
+app.post("/api/seo-ideas/batch", express.json({ limit: "2mb" }), async (req, res) => {
+  const sig = req.headers["x-callback-signature"];
+  const computed = crypto.createHmac("sha256", N8N_CALLBACK_SECRET).update(JSON.stringify(req.body)).digest("hex");
+  if (sig !== computed) return res.status(401).json({ error: "Invalid signature" });
+
+  const { batch_id, ideas } = req.body || {};
+  if (!batch_id || !Array.isArray(ideas) || ideas.length === 0) {
+    return res.status(400).json({ error: "batch_id and ideas[] required" });
+  }
+  if (!process.env.DATABASE_URL) return res.status(501).json({ error: "DB required" });
+
+  let inserted = 0;
+  let skipped = 0;
+  const errors = [];
+  for (const idea of ideas) {
+    const kn = normalizeKw(idea.target_keyword);
+    if (!kn) { skipped++; continue; }
+    try {
+      const result = await pool.query(
+        `INSERT INTO seo_ideas (
+           suggested_title, target_keyword, keyword_normalized, suggested_type,
+           parent_pillar_keyword, state, monthly_volume, competition_index, cpc_usd,
+           difficulty_score, intent, why_write, cluster_name, batch_id, raw_metadata
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         ON CONFLICT (keyword_normalized) WHERE status IN ('pending','approved') DO NOTHING
+         RETURNING id`,
+        [
+          idea.suggested_title,
+          idea.target_keyword,
+          kn,
+          idea.suggested_type || "spoke",
+          idea.parent_pillar_keyword || null,
+          idea.state || null,
+          idea.monthly_volume ?? null,
+          idea.competition_index ?? null,
+          idea.cpc_usd ?? null,
+          idea.difficulty_score ?? null,
+          idea.intent || null,
+          idea.why_write || null,
+          idea.cluster_name || null,
+          batch_id,
+          idea.raw_metadata || {},
+        ]
+      );
+      if (result.rowCount === 0) skipped++;
+      else inserted++;
+    } catch (err) {
+      errors.push({ keyword: idea.target_keyword, error: err.message });
+    }
+  }
+  res.json({ ok: true, batch_id, inserted, skipped, errors });
+});
+
+app.get("/api/seo-ideas", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.json([]);
+  const status = req.query.status || "pending";
+  const batch_id = req.query.batch_id;
+  try {
+    const params = [];
+    let query = "SELECT * FROM seo_ideas WHERE 1=1";
+    if (status !== "all") { params.push(status); query += ` AND status = $${params.length}`; }
+    if (batch_id) { params.push(batch_id); query += ` AND batch_id = $${params.length}`; }
+    query += " ORDER BY (monthly_volume IS NULL), monthly_volume DESC NULLS LAST, created_at DESC";
+    const r = await pool.query(query, params);
+    res.json(r.rows.map((row) => ({
+      id: row.id,
+      suggestedTitle: row.suggested_title,
+      targetKeyword: row.target_keyword,
+      suggestedType: row.suggested_type,
+      parentPillarKeyword: row.parent_pillar_keyword,
+      state: row.state,
+      monthlyVolume: row.monthly_volume,
+      competitionIndex: row.competition_index,
+      cpcUsd: row.cpc_usd != null ? Number(row.cpc_usd) : null,
+      difficultyScore: row.difficulty_score,
+      intent: row.intent,
+      whyWrite: row.why_write,
+      clusterName: row.cluster_name,
+      status: row.status,
+      convertedToContentId: row.converted_to_content_id,
+      batchId: row.batch_id,
+      createdAt: row.created_at,
+      reviewedAt: row.reviewed_at,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/seo-ideas/batches", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.json([]);
+  try {
+    const r = await pool.query(
+      `SELECT batch_id,
+              MIN(created_at) AS created_at,
+              COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE status='pending')::int AS pending,
+              COUNT(*) FILTER (WHERE status='approved')::int AS approved,
+              COUNT(*) FILTER (WHERE status='rejected')::int AS rejected,
+              COUNT(*) FILTER (WHERE status='converted')::int AS converted
+       FROM seo_ideas
+       GROUP BY batch_id
+       ORDER BY created_at DESC
+       LIMIT 20`
+    );
+    res.json(r.rows.map((row) => ({
+      batchId: row.batch_id,
+      createdAt: row.created_at,
+      total: row.total,
+      pending: row.pending,
+      approved: row.approved,
+      rejected: row.rejected,
+      converted: row.converted,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/seo-ideas/:id/reject", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(501).json({ error: "DB required" });
+  try {
+    const r = await pool.query(
+      "UPDATE seo_ideas SET status = 'rejected', reviewed_at = NOW(), updated_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING id",
+      [req.params.id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Not found or already reviewed" });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Approve → create ai_content row → mark idea converted
+app.post("/api/seo-ideas/:id/approve", express.json(), async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(501).json({ error: "DB required" });
+  const { id } = req.params;
+  const { typeOverride, stateOverride, pillarId, kickoffNow } = req.body || {};
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const ideaRes = await client.query("SELECT * FROM seo_ideas WHERE id = $1", [id]);
+    if (ideaRes.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Idea not found" });
+    }
+    const idea = ideaRes.rows[0];
+    if (idea.status !== "pending" && idea.status !== "approved") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `Idea is ${idea.status}, cannot approve` });
+    }
+
+    const finalType = typeOverride || idea.suggested_type || "spoke";
+    const finalState = stateOverride !== undefined ? stateOverride : idea.state;
+
+    // For pillars use the canonical state-keyword; for others use idea's target keyword
+    let finalKeyword = idea.target_keyword;
+    if (finalType === "pillar") {
+      if (!finalState) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "state required for pillar" });
+      }
+      finalKeyword = `Construction & Industrial SWPPP Requirements in ${finalState}`;
+      const existing = await client.query(
+        "SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1 AND is_current = TRUE",
+        [finalState]
+      );
+      if (existing.rows.length > 0) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: `Pillar already exists for ${finalState}`, existingId: existing.rows[0].id });
+      }
+    }
+
+    // Auto-link spoke to current pillar if not specified
+    let linkPillarId = pillarId || null;
+    if (finalType === "spoke" && finalState && !linkPillarId) {
+      const pillar = await client.query(
+        "SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1 AND is_current = TRUE ORDER BY version DESC LIMIT 1",
+        [finalState]
+      );
+      if (pillar.rows.length > 0) linkPillarId = pillar.rows[0].id;
+    }
+
+    const newId = `content_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const basePillarId = finalType === "pillar" ? newId : null;
+    await client.query(
+      `INSERT INTO ai_content (id, type, status, keyword, state, pillar_id, base_pillar_id, version, is_current, title)
+       VALUES ($1,$2,'queued',$3,$4,$5,$6,1,TRUE,$7)`,
+      [newId, finalType, finalKeyword, finalState, linkPillarId, basePillarId, idea.suggested_title]
+    );
+
+    await client.query(
+      "UPDATE seo_ideas SET status = 'converted', converted_to_content_id = $1, reviewed_at = NOW(), updated_at = NOW() WHERE id = $2",
+      [newId, id]
+    );
+
+    await client.query("COMMIT");
+
+    // Optional fire-and-forget kickoff to existing /generate flow
+    if (kickoffNow) {
+      fetch(`${RAILWAY_PUBLIC_URL}/api/ai-content/${newId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: req.headers.authorization || "" },
+      }).catch((err) => console.error("Kickoff failed:", err));
+    }
+
+    res.json({ ok: true, contentId: newId, type: finalType, state: finalState, keyword: finalKeyword, kickedOff: !!kickoffNow });
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch {}
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 

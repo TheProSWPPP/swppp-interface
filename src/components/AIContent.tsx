@@ -3,6 +3,7 @@ import type { AIContentItem } from "../data";
 import { US_STATES } from "../data";
 import AIContentList from "./AIContentList";
 import AIContentDetail from "./AIContentDetail";
+import SeoIdeas from "./SeoIdeas";
 import {
   ListOrdered,
   Loader2,
@@ -10,6 +11,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Map,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "../utils";
 
@@ -25,7 +27,7 @@ interface Stats {
   states: Record<string, { pillar: number; spoke: number; comparison: number; total: number }>;
 }
 
-type ViewMode = "states" | "list";
+type ViewMode = "states" | "list" | "ideas";
 
 export default function AIContent() {
   const [items, setItems] = useState<AIContentItem[]>([]);
@@ -283,6 +285,16 @@ export default function AIContent() {
             <ListOrdered className="h-4 w-4" />
             All Articles
           </button>
+          <button
+            onClick={() => { setViewMode("ideas"); setStatusFilter(""); }}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all",
+              viewMode === "ideas" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            <Sparkles className="h-4 w-4" />
+            Ideas
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -314,7 +326,7 @@ export default function AIContent() {
       )}
 
       {/* Article List */}
-      {(viewMode === "list" || statusFilter) && (
+      {viewMode !== "ideas" && (viewMode === "list" || statusFilter) && (
         <AIContentList
           items={filteredItems}
           allItems={items}
@@ -327,6 +339,9 @@ export default function AIContent() {
           onBulkGenerate={handleBulkGenerate}
         />
       )}
+
+      {/* SEO Ideas (Phase 5) */}
+      {viewMode === "ideas" && <SeoIdeas onConverted={fetchData} />}
     </div>
   );
 }
