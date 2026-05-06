@@ -6,6 +6,7 @@ import Methodology from "./components/Methodology";
 import SettingsView from "./components/Settings";
 import AIContent from "./components/AIContent";
 import LeadUpload from "./components/LeadUpload";
+import SystemDocs from "./components/SystemDocs";
 import {
   LayoutDashboard,
   Archive,
@@ -13,11 +14,12 @@ import {
   Settings as SettingsIcon,
   Newspaper,
   Upload,
+  FileCode,
 } from "lucide-react";
 import { cn } from "./utils";
 
-type View = "dashboard" | "archive" | "ai-content" | "leads" | "methodology" | "settings";
-const ALL_VIEWS: View[] = ["dashboard", "archive", "ai-content", "leads", "methodology", "settings"];
+type View = "dashboard" | "archive" | "ai-content" | "leads" | "methodology" | "system-docs" | "settings";
+const ALL_VIEWS: View[] = ["dashboard", "archive", "ai-content", "leads", "methodology", "system-docs", "settings"];
 
 function readViewFromHash(): View {
   const h = window.location.hash.replace(/^#\/?/, "").split("?")[0];
@@ -192,6 +194,18 @@ function App() {
                   Methodology
                 </button>
                 <button
+                  onClick={() => setView("system-docs")}
+                  className={cn(
+                    "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
+                    view === "system-docs"
+                      ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50",
+                  )}
+                >
+                  <FileCode className="h-4 w-4" />
+                  System Docs
+                </button>
+                <button
                   onClick={() => setView("settings")}
                   className={cn(
                     "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
@@ -232,6 +246,7 @@ function App() {
         {view === "ai-content" && <AIContent />}
         {view === "leads" && <LeadUpload />}
         {view === "methodology" && <Methodology />}
+        {view === "system-docs" && <SystemDocs />}
         {view === "settings" && <SettingsView />}
       </main>
     </div>
