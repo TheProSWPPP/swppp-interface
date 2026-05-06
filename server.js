@@ -1662,11 +1662,11 @@ app.get("/api/seo-ideas/known-keywords", async (req, res) => {
   }
 });
 
-// n8n: existing articles for cannibalization avoidance — pass to Claude so it can avoid topical overlap
+// n8n: existing articles + pending ideas for cannibalization avoidance — pass to Claude
 app.get("/api/seo-ideas/existing-articles", async (req, res) => {
-  if (!process.env.DATABASE_URL) return res.json({ articles: [] });
+  if (!process.env.DATABASE_URL) return res.json({ articles: [], pending_ideas: [] });
   try {
-    const r = await pool.query(
+    const articlesRes = await pool.query(
       `SELECT type, state, title, keyword
          FROM ai_content
         WHERE (is_current IS TRUE OR is_current IS NULL)
@@ -1674,8 +1674,21 @@ app.get("/api/seo-ideas/existing-articles", async (req, res) => {
           AND title IS NOT NULL
         ORDER BY type, state NULLS LAST, title`
     );
+    const pendingRes = await pool.query(
+      `SELECT suggested_type AS type, state, suggested_title AS title, target_keyword AS keyword
+         FROM seo_ideas
+        WHERE status IN ('pending','approved')
+          AND suggested_title IS NOT NULL
+        ORDER BY suggested_type, state NULLS LAST, suggested_title`
+    );
     res.json({
-      articles: r.rows.map((row) => ({
+      articles: articlesRes.rows.map((row) => ({
+        type: row.type,
+        state: row.state,
+        title: row.title,
+        keyword: row.keyword,
+      })),
+      pending_ideas: pendingRes.rows.map((row) => ({
         type: row.type,
         state: row.state,
         title: row.title,
@@ -1703,29 +1716,51 @@ app.post("/api/seo-ideas/batch", express.json({ limit: "2mb" }), async (req, res
   let skipped = 0;
   const errors = [];
 
-  // Cannibalization guard prep: load existing live keywords + state pillars once
+  // Cannibalization guard prep: load existing live keywords + open seo_ideas keywords + state pillars once
   const liveRes = await pool.query("SELECT DISTINCT keyword FROM ai_content WHERE keyword IS NOT NULL AND (is_current IS TRUE OR is_current IS NULL)");
   const liveKeywords = liveRes.rows.map((r) => normalizeKw(r.keyword));
+  const openIdeasRes = await pool.query("SELECT DISTINCT keyword_normalized FROM seo_ideas WHERE status IN ('pending','approved','converted')");
+  const openIdeaKeywords = openIdeasRes.rows.map((r) => r.keyword_normalized).filter(Boolean);
+  // Combined set used for substring overlap detection (live articles + already-proposed ideas)
+  const overlapSet = [...new Set([...liveKeywords, ...openIdeaKeywords])];
   const pillarStatesRes = await pool.query("SELECT DISTINCT state FROM ai_content WHERE type = 'pillar' AND state IS NOT NULL AND (is_current IS TRUE OR is_current IS NULL)");
   const pillarStates = new Set(pillarStatesRes.rows.map((r) => String(r.state).toLowerCase().trim()));
+  const pendingPillarStatesRes = await pool.query("SELECT DISTINCT state FROM seo_ideas WHERE suggested_type = 'pillar' AND state IS NOT NULL AND status IN ('pending','approved')");
+  const pendingPillarStates = new Set(pendingPillarStatesRes.rows.map((r) => String(r.state).toLowerCase().trim()));
 
-  for (const idea of ideas) {
+  // Within-batch dedup: sort ideas by descending volume so the strongest variant wins;
+  // weaker overlapping siblings get rejected against an in-flight inserted set.
+  const sortedIdeas = [...ideas].sort((a, b) => (b.monthly_volume || 0) - (a.monthly_volume || 0));
+  const insertedThisBatch = []; // normalized keywords inserted so far this batch
+  const insertedPillarStatesThisBatch = new Set();
+
+  for (const idea of sortedIdeas) {
     const kn = normalizeKw(idea.target_keyword);
     if (!kn) { skipped++; continue; }
 
     // Guard 1: state-pillar dedup — refuse a new pillar for a state that already has one
+    // (live ai_content OR already-pending idea OR already-inserted earlier in this batch)
     if (idea.suggested_type === "pillar" && idea.state) {
-      if (pillarStates.has(String(idea.state).toLowerCase().trim())) {
-        errors.push({ keyword: idea.target_keyword, error: `pillar already exists for ${idea.state}` });
+      const sLower = String(idea.state).toLowerCase().trim();
+      if (pillarStates.has(sLower) || pendingPillarStates.has(sLower) || insertedPillarStatesThisBatch.has(sLower)) {
+        errors.push({ keyword: idea.target_keyword, error: `pillar already exists or pending for ${idea.state}` });
         skipped++;
         continue;
       }
     }
 
-    // Guard 2: keyword-substring overlap with existing articles
-    const overlap = liveKeywords.find((k) => k && (k === kn || k.includes(kn) || kn.includes(k)));
+    // Guard 2: keyword-substring overlap with live ai_content OR already-proposed ideas
+    const overlap = overlapSet.find((k) => k && (k === kn || k.includes(kn) || kn.includes(k)));
     if (overlap) {
       errors.push({ keyword: idea.target_keyword, error: `cannibalization risk: overlaps "${overlap}"` });
+      skipped++;
+      continue;
+    }
+
+    // Guard 3: within-batch dedup — substring overlap against earlier inserts in this same batch
+    const inBatch = insertedThisBatch.find((k) => k === kn || k.includes(kn) || kn.includes(k));
+    if (inBatch) {
+      errors.push({ keyword: idea.target_keyword, error: `within-batch dedup: overlaps stronger sibling "${inBatch}"` });
       skipped++;
       continue;
     }
@@ -1757,8 +1792,15 @@ app.post("/api/seo-ideas/batch", express.json({ limit: "2mb" }), async (req, res
           idea.raw_metadata || {},
         ]
       );
-      if (result.rowCount === 0) skipped++;
-      else inserted++;
+      if (result.rowCount === 0) {
+        skipped++;
+      } else {
+        inserted++;
+        insertedThisBatch.push(kn);
+        if (idea.suggested_type === "pillar" && idea.state) {
+          insertedPillarStatesThisBatch.add(String(idea.state).toLowerCase().trim());
+        }
+      }
     } catch (err) {
       errors.push({ keyword: idea.target_keyword, error: err.message });
     }
