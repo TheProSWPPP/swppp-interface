@@ -387,7 +387,8 @@ app.use((req, res, next) => {
     (req.path === "/api/abbreviation-cache" && (req.method === "GET" || req.method === "POST")) ||
     (req.path === "/api/seo-ideas/batch" && req.method === "POST") ||
     (req.path === "/api/seo-ideas/known-keywords" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
-    (req.path === "/api/seo-ideas/seeds" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET)
+    (req.path === "/api/seo-ideas/seeds" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
+    (req.path === "/api/seo-ideas/existing-articles" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET)
   ) {
     return next();
   }
@@ -1661,6 +1662,31 @@ app.get("/api/seo-ideas/known-keywords", async (req, res) => {
   }
 });
 
+// n8n: existing articles for cannibalization avoidance — pass to Claude so it can avoid topical overlap
+app.get("/api/seo-ideas/existing-articles", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.json({ articles: [] });
+  try {
+    const r = await pool.query(
+      `SELECT type, state, title, keyword
+         FROM ai_content
+        WHERE (is_current IS TRUE OR is_current IS NULL)
+          AND status NOT IN ('failed')
+          AND title IS NOT NULL
+        ORDER BY type, state NULLS LAST, title`
+    );
+    res.json({
+      articles: r.rows.map((row) => ({
+        type: row.type,
+        state: row.state,
+        title: row.title,
+        keyword: row.keyword,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // n8n batch insert (HMAC-protected)
 app.post("/api/seo-ideas/batch", express.json({ limit: "2mb" }), async (req, res) => {
   const sig = req.headers["x-callback-signature"];
@@ -1676,9 +1702,34 @@ app.post("/api/seo-ideas/batch", express.json({ limit: "2mb" }), async (req, res
   let inserted = 0;
   let skipped = 0;
   const errors = [];
+
+  // Cannibalization guard prep: load existing live keywords + state pillars once
+  const liveRes = await pool.query("SELECT DISTINCT keyword FROM ai_content WHERE keyword IS NOT NULL AND (is_current IS TRUE OR is_current IS NULL)");
+  const liveKeywords = liveRes.rows.map((r) => normalizeKw(r.keyword));
+  const pillarStatesRes = await pool.query("SELECT DISTINCT state FROM ai_content WHERE type = 'pillar' AND state IS NOT NULL AND (is_current IS TRUE OR is_current IS NULL)");
+  const pillarStates = new Set(pillarStatesRes.rows.map((r) => String(r.state).toLowerCase().trim()));
+
   for (const idea of ideas) {
     const kn = normalizeKw(idea.target_keyword);
     if (!kn) { skipped++; continue; }
+
+    // Guard 1: state-pillar dedup — refuse a new pillar for a state that already has one
+    if (idea.suggested_type === "pillar" && idea.state) {
+      if (pillarStates.has(String(idea.state).toLowerCase().trim())) {
+        errors.push({ keyword: idea.target_keyword, error: `pillar already exists for ${idea.state}` });
+        skipped++;
+        continue;
+      }
+    }
+
+    // Guard 2: keyword-substring overlap with existing articles
+    const overlap = liveKeywords.find((k) => k && (k === kn || k.includes(kn) || kn.includes(k)));
+    if (overlap) {
+      errors.push({ keyword: idea.target_keyword, error: `cannibalization risk: overlaps "${overlap}"` });
+      skipped++;
+      continue;
+    }
+
     try {
       const result = await pool.query(
         `INSERT INTO seo_ideas (
