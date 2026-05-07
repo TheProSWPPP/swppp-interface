@@ -104,19 +104,19 @@ async function ensureLoggedIn() {
 }
 
 // === Mutex queue (one scrape at a time per browser) ===
+// QUEUE_TIMEOUT_MS: max time a request may wait in queue before being rejected.
+// Once drain() picks up the request, the timer is cancelled — the scrape itself
+// runs until NAV_TIMEOUT_MS, not this limit.
 const QUEUE_TIMEOUT_MS = parseInt(process.env.QUEUE_TIMEOUT_MS || "75000", 10);
 function withLock(fn) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      const idx = queue.findIndex((q) => q.resolve === resolve);
+    let queueTimer = setTimeout(() => {
+      const idx = queue.findIndex((q) => q.cancelTimer === cancelTimer);
       if (idx !== -1) queue.splice(idx, 1);
       reject(Object.assign(new Error("Queue wait timeout — scraper busy"), { queueTimeout: true }));
     }, QUEUE_TIMEOUT_MS);
-    queue.push({
-      fn,
-      resolve: (v) => { clearTimeout(timer); resolve(v); },
-      reject: (e) => { clearTimeout(timer); reject(e); },
-    });
+    const cancelTimer = () => { clearTimeout(queueTimer); queueTimer = null; };
+    queue.push({ fn, resolve, reject, cancelTimer });
     drain();
   });
 }
@@ -125,6 +125,7 @@ async function drain() {
   const next = queue.shift();
   if (!next) return;
   busy = true;
+  next.cancelTimer(); // stop queue-wait timer — we're processing now
   try {
     const result = await next.fn();
     next.resolve(result);
