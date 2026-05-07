@@ -104,9 +104,19 @@ async function ensureLoggedIn() {
 }
 
 // === Mutex queue (one scrape at a time per browser) ===
+const QUEUE_TIMEOUT_MS = 30000;
 function withLock(fn) {
   return new Promise((resolve, reject) => {
-    queue.push({ fn, resolve, reject });
+    const timer = setTimeout(() => {
+      const idx = queue.findIndex((q) => q.resolve === resolve);
+      if (idx !== -1) queue.splice(idx, 1);
+      reject(Object.assign(new Error("Queue wait timeout — scraper busy"), { queueTimeout: true }));
+    }, QUEUE_TIMEOUT_MS);
+    queue.push({
+      fn,
+      resolve: (v) => { clearTimeout(timer); resolve(v); },
+      reject: (e) => { clearTimeout(timer); reject(e); },
+    });
     drain();
   });
 }
@@ -136,7 +146,11 @@ async function scrapeBidder(projectUrl) {
     await page.goto(projectUrl, { waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS });
   }
 
-  await page.waitForSelector("div#bv", { timeout: 15000 });
+  try {
+    await page.waitForSelector("div#bv", { timeout: 15000 });
+  } catch {
+    return { bidder: null, military: { matched: null }, error: "div#bv not visible within 15s — pre-bid or slow page" };
+  }
 
   // Click "show more" bidders if present
   await page.evaluate(() => {
@@ -347,10 +361,14 @@ app.post("/cmd/scrape-bidder", requireKey, async (req, res) => {
   }
   try {
     const result = await withLock(() => scrapeBidder(url));
+    if (result.error) {
+      return res.json({ ok: false, ...result, login_age_seconds: Math.floor((Date.now() - loginAt) / 1000) });
+    }
     res.json({ ok: true, ...result, login_age_seconds: Math.floor((Date.now() - loginAt) / 1000) });
   } catch (err) {
     console.error("scrapeBidder error:", err);
-    res.status(500).json({ ok: false, error: err.message, stack: err.stack?.split("\n").slice(0, 3).join("\n") });
+    const status = err.queueTimeout ? 503 : 500;
+    res.status(status).json({ ok: false, error: err.message });
   }
 });
 
