@@ -1,0 +1,19 @@
+{
+  "name": "cmd-scraper",
+  "version": "0.1.0",
+  "description": "Playwright-based CMD Insight scraper — primary path with Browserless fallback in n8n.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "postinstall": "playwright install --with-deps chromium"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "playwright": "^1.49.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
