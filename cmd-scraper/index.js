@@ -139,11 +139,21 @@ async function drain() {
 // === Scrape: project page → bidder grid + military hint ===
 async function scrapeBidder(projectUrl) {
   await ensureLoggedIn();
-  await page.goto(projectUrl, { waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS });
+  try {
+    await page.goto(projectUrl, { waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS });
+  } catch {
+    await page.goto(projectUrl, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+    await page.waitForTimeout(3000);
+  }
   // If we landed on login, our session expired — re-login and retry once
   if (page.url().includes("/Account/Login")) {
     await login();
-    await page.goto(projectUrl, { waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS });
+    try {
+      await page.goto(projectUrl, { waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS });
+    } catch {
+      await page.goto(projectUrl, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+      await page.waitForTimeout(3000);
+    }
   }
 
   try {
@@ -252,10 +262,21 @@ async function scrapeBidder(projectUrl) {
 // === Scrape: company page → all contacts ===
 async function scrapeContacts(companyUrl) {
   await ensureLoggedIn();
-  await page.goto(companyUrl, { waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS });
+  try {
+    await page.goto(companyUrl, { waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS });
+  } catch {
+    // networkidle timeout — try domcontentloaded instead
+    await page.goto(companyUrl, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+    await page.waitForTimeout(5000);
+  }
   if (page.url().includes("/Account/Login")) {
     await login();
-    await page.goto(companyUrl, { waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS });
+    try {
+      await page.goto(companyUrl, { waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS });
+    } catch {
+      await page.goto(companyUrl, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+      await page.waitForTimeout(5000);
+    }
   }
   await page.waitForTimeout(5000);
 
@@ -382,7 +403,8 @@ app.post("/cmd/scrape-contacts", requireKey, async (req, res) => {
     res.json({ ok: true, ...result, login_age_seconds: Math.floor((Date.now() - loginAt) / 1000) });
   } catch (err) {
     console.error("scrapeContacts error:", err);
-    res.status(500).json({ ok: false, error: err.message });
+    const status = err.queueTimeout ? 503 : 500;
+    res.status(status).json({ ok: false, error: err.message });
   }
 });
 
