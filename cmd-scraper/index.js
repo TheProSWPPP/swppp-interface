@@ -104,7 +104,7 @@ async function ensureLoggedIn() {
 }
 
 // === Mutex queue (one scrape at a time per browser) ===
-const QUEUE_TIMEOUT_MS = 10000;
+const QUEUE_TIMEOUT_MS = parseInt(process.env.QUEUE_TIMEOUT_MS || "75000", 10);
 function withLock(fn) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
