@@ -13,6 +13,8 @@ import {
   List,
   Zap,
   Target,
+  Square,
+  CheckSquare,
 } from "lucide-react";
 
 export interface SeoIdea {
@@ -77,6 +79,7 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
   const [viewMode, setViewMode] = useState<ViewMode>("cluster");
   const [collapsedClusters, setCollapsedClusters] = useState<Set<string>>(new Set());
   const [expandedWhy, setExpandedWhy] = useState<Set<string>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const fetchIdeas = useCallback(async () => {
     const params = new URLSearchParams();
@@ -204,6 +207,38 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
     fetchIdeas();
   };
 
+  const pendingIdeas = ideas.filter((i) => i.status === "pending");
+  const allSelected = pendingIdeas.length > 0 && pendingIdeas.every((i) => selectedIds.has(i.id));
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => setSelectedIds(new Set(pendingIdeas.map((i) => i.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const bulkApproveSelected = async () => {
+    const toApprove = pendingIdeas.filter((i) => selectedIds.has(i.id));
+    if (!toApprove.length) return;
+    if (!window.confirm(`Queue ${toApprove.length} selected ideas for generation?`)) return;
+    for (const i of toApprove) await approveOne(i, false);
+    clearSelection();
+    fetchIdeas();
+  };
+
+  const bulkRejectSelected = async () => {
+    const toReject = pendingIdeas.filter((i) => selectedIds.has(i.id));
+    if (!toReject.length) return;
+    if (!window.confirm(`Reject ${toReject.length} selected ideas?`)) return;
+    await Promise.all(toReject.map((i) => rejectOne(i)));
+    clearSelection();
+    fetchIdeas();
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-slate-500">
@@ -227,9 +262,17 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
           <div className="flex-1">
             <h2 className="text-lg font-semibold text-slate-900">Weekly Content Ideas</h2>
             <p className="text-sm text-slate-600 mt-1">
-              AI-ranked SEO opportunities. Volume × (1 − competition) × intent = <b>Opportunity Score</b>.
-              Higher score = bigger SEO win for less effort.
+              AI-ranked SEO opportunities. <b>Opportunity Score</b> = monthly search volume × low-competition bonus × intent multiplier. Higher = bigger SEO win for less effort.
             </p>
+            <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px]">
+              <span className="text-slate-400">Score:</span>
+              <span className="px-2 py-0.5 rounded-full border font-semibold bg-emerald-100 text-emerald-700 border-emerald-200">≥500 High</span>
+              <span className="px-2 py-0.5 rounded-full border font-semibold bg-amber-100 text-amber-700 border-amber-200">≥200 Medium</span>
+              <span className="px-2 py-0.5 rounded-full border font-semibold bg-blue-50 text-blue-700 border-blue-200">≥50 Low</span>
+              <span className="px-2 py-0.5 rounded-full border font-semibold bg-slate-100 text-slate-500 border-slate-200">&lt;50 Minimal</span>
+              <span className="text-slate-300 mx-1">·</span>
+              <span className="text-slate-400">Stats: <b className="text-slate-600">vol</b> = searches/mo · <b className="text-slate-600">comp</b> = competition 0–100 (lower = easier) · <b className="text-slate-600">diff</b> = keyword difficulty 0–10 · <b className="text-slate-600">cpc</b> = ad value</span>
+            </div>
             {latestBatch && (
               <p className="text-xs text-slate-500 mt-2">
                 Latest batch {new Date(latestBatch.createdAt).toLocaleDateString()} ·{" "}
@@ -281,6 +324,21 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
           </>
         )}
 
+        {statusFilter === "pending" && pendingIdeas.length > 0 && (
+          <button
+            onClick={allSelected ? clearSelection : selectAll}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition",
+              allSelected
+                ? "bg-indigo-600 text-white border-indigo-600"
+                : "bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600"
+            )}
+          >
+            {allSelected ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+            {allSelected ? "Deselect all" : `Select all (${pendingIdeas.length})`}
+          </button>
+        )}
+
         <div className="flex-1" />
 
         {/* View mode toggle */}
@@ -308,6 +366,33 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl">
+          <CheckSquare className="h-4 w-4 text-indigo-600 flex-shrink-0" />
+          <span className="text-sm font-medium text-indigo-900">{selectedIds.size} idea{selectedIds.size !== 1 ? "s" : ""} selected</span>
+          <div className="flex gap-2 ml-auto">
+            <button
+              onClick={bulkApproveSelected}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              <Check className="h-3.5 w-3.5" />
+              Queue selected
+            </button>
+            <button
+              onClick={bulkRejectSelected}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              <X className="h-3.5 w-3.5" />
+              Reject selected
+            </button>
+            <button onClick={clearSelection} className="text-xs text-slate-400 hover:text-slate-600 px-1">
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Body */}
       {ideas.length === 0 ? (
         <EmptyState statusFilter={statusFilter} />
@@ -327,6 +412,8 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
               busyIds={busyIds}
               expandedWhy={expandedWhy}
               onToggleWhy={toggleWhy}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
             />
           ))}
         </div>
@@ -355,6 +442,8 @@ function ClusterCard({
   busyIds,
   expandedWhy,
   onToggleWhy,
+  selectedIds,
+  onToggleSelect,
 }: {
   name: string;
   ideas: SeoIdea[];
@@ -367,6 +456,8 @@ function ClusterCard({
   busyIds: Set<string>;
   expandedWhy: Set<string>;
   onToggleWhy: (id: string) => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
 }) {
   const pendingCount = ideas.filter((i) => i.status === "pending").length;
   const totalScore = ideas.reduce((acc, i) => acc + opportunityScore(i), 0);
@@ -416,6 +507,8 @@ function ClusterCard({
               onToggleWhy={() => onToggleWhy(idea.id)}
               onApprove={(kickoff) => onApprove(idea, kickoff)}
               onReject={() => onReject(idea)}
+              selected={selectedIds.has(idea.id)}
+              onToggleSelect={() => onToggleSelect(idea.id)}
             />
           ))}
         </div>
@@ -432,6 +525,8 @@ function IdeaRow({
   onToggleWhy,
   onApprove,
   onReject,
+  selected,
+  onToggleSelect,
 }: {
   idea: SeoIdea;
   busy: boolean;
@@ -439,6 +534,8 @@ function IdeaRow({
   onToggleWhy: () => void;
   onApprove: (kickoff: boolean) => void;
   onReject: () => void;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const score = opportunityScore(idea);
   const isPending = idea.status === "pending";
@@ -452,9 +549,16 @@ function IdeaRow({
       "px-4 py-3 transition",
       idea.status === "converted" && "bg-green-50/30",
       idea.status === "rejected" && "opacity-50",
+      selected && "bg-indigo-50/40",
       "hover:bg-slate-50/50"
     )}>
       <div className="flex items-start gap-3">
+        {/* Checkbox (pending only) */}
+        {idea.status === "pending" && onToggleSelect && (
+          <button onClick={onToggleSelect} className="mt-1 text-slate-400 hover:text-indigo-600 flex-shrink-0">
+            {selected ? <CheckSquare className="h-4 w-4 text-indigo-600" /> : <Square className="h-4 w-4" />}
+          </button>
+        )}
         {/* Score chip */}
         <div className={cn("px-2 py-1 rounded-md border font-mono text-xs font-semibold flex flex-col items-center min-w-[48px]", scoreColor(score))}>
           <Zap className="h-3 w-3 mb-0.5" />
@@ -643,6 +747,13 @@ function TableView({
 }
 
 // ===== Helpers =====
+const STAT_TITLES: Record<string, string> = {
+  vol: "Monthly search volume — how many people search this keyword per month",
+  comp: "Competition index 0–100 — lower means fewer advertisers competing, easier to rank",
+  diff: "Keyword difficulty 0–10 — lower means easier to get on page 1",
+  cpc: "Cost-per-click — what advertisers pay per click, signals commercial value",
+};
+
 function Stat({ label, value, tone = "slate" }: { label: string; value: string; tone?: "slate" | "green" | "amber" | "red" | "emerald" }) {
   const cls =
     tone === "green" ? "bg-green-100 text-green-700" :
@@ -651,7 +762,7 @@ function Stat({ label, value, tone = "slate" }: { label: string; value: string; 
     tone === "emerald" ? "bg-emerald-100 text-emerald-700" :
     "bg-slate-100 text-slate-600";
   return (
-    <span className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium", cls)}>
+    <span title={STAT_TITLES[label]} className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium cursor-help", cls)}>
       <span className="opacity-60">{label}</span>
       <span>{value}</span>
     </span>

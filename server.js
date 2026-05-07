@@ -1639,6 +1639,16 @@ function normalizeKw(k) {
   return String(k || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+const MIN_IDEA_SCORE = parseInt(process.env.MIN_IDEA_SCORE || "50", 10);
+
+function ideaOpportunityScore(idea) {
+  const vol = idea.monthly_volume || 0;
+  const comp = idea.competition_index == null ? 50 : idea.competition_index;
+  const compMult = Math.max(0.05, 1 - comp / 100);
+  const intentMult = idea.intent === "commercial" ? 1.4 : idea.intent === "local" ? 1.2 : 1.0;
+  return Math.round(vol * compMult * intentMult);
+}
+
 // n8n: fetch current seed list (env-overridable)
 app.get("/api/seo-ideas/seeds", (req, res) => {
   const fromEnv = process.env.SEO_IDEAS_SEEDS
@@ -1714,6 +1724,7 @@ app.post("/api/seo-ideas/batch", express.json({ limit: "2mb" }), async (req, res
 
   let inserted = 0;
   let skipped = 0;
+  let filtered = 0;
   const errors = [];
 
   // Cannibalization guard prep: load existing live keywords + open seo_ideas keywords + state pillars once
@@ -1737,6 +1748,9 @@ app.post("/api/seo-ideas/batch", express.json({ limit: "2mb" }), async (req, res
   for (const idea of sortedIdeas) {
     const kn = normalizeKw(idea.target_keyword);
     if (!kn) { skipped++; continue; }
+
+    // Guard 0: score threshold — skip Minimal-tier ideas
+    if (ideaOpportunityScore(idea) < MIN_IDEA_SCORE) { filtered++; continue; }
 
     // Guard 1: state-pillar dedup — refuse a new pillar for a state that already has one
     // (live ai_content OR already-pending idea OR already-inserted earlier in this batch)
@@ -1805,7 +1819,7 @@ app.post("/api/seo-ideas/batch", express.json({ limit: "2mb" }), async (req, res
       errors.push({ keyword: idea.target_keyword, error: err.message });
     }
   }
-  res.json({ ok: true, batch_id, inserted, skipped, errors });
+  res.json({ ok: true, batch_id, inserted, skipped, filtered, min_score: MIN_IDEA_SCORE, errors });
 });
 
 app.get("/api/seo-ideas", async (req, res) => {
