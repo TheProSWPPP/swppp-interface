@@ -2046,7 +2046,7 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
 // Auto-mark stuck jobs as error if no progress for STUCK_MINUTES.
 // Runs both inline (on status polling) AND on a 5-min interval so jobs get
 // reaped even when no one is actively viewing the UI.
-const STUCK_MINUTES = 15;
+const STUCK_MINUTES = 60;
 async function reapStuckJobs() {
   if (!process.env.DATABASE_URL) return;
   try {
@@ -2140,6 +2140,7 @@ app.post("/api/leads/upload/callback", express.json({ limit: "1mb" }), async (re
     if (typeof cleaned_rows_delta === "number") { params.push(cleaned_rows_delta); fields.push(`cleaned_rows = COALESCE(cleaned_rows,0) + $${params.length}`); }
     if (typeof uploaded_rows_delta === "number") { params.push(uploaded_rows_delta); fields.push(`uploaded_rows = COALESCE(uploaded_rows,0) + $${params.length}`); }
     if (error_message) { params.push(error_message); fields.push(`error_message = $${params.length}`); }
+    else if (status === "done") { fields.push(`error_message = NULL`); }
     params.push(job_id);
     await pool.query(
       `UPDATE lead_import_jobs SET ${fields.join(", ")} WHERE id = $${params.length}`,
