@@ -138,6 +138,8 @@ async function drain() {
 }
 
 // Mirrors mapProjectStage in bids-processor/index.js — keep in sync.
+// Handles both FTP format ("Low Bids Announced") and CMD DOM format
+// ("Post Bid - Low Bids Announced") by exact match first, then keyword fallback.
 function mapProjectStage(stage) {
   if (!stage) return stage;
   if (['Pre-Bid', 'Bid Date Set', 'Biddate Set', 'Schematic Design', 'Design Development'].includes(stage)) return 'Pre-Bid';
@@ -148,6 +150,15 @@ function mapProjectStage(stage) {
   if (['General Contract', 'Construction Underway'].includes(stage)) return 'GC';
   if (stage === 'Construction Manager') return 'CM';
   if (['Construction Documents', 'Pre-Design'].includes(stage)) return 'CD';
+  const s = stage.toLowerCase();
+  if (s.includes('general contractor award') || s.includes('gc award')) return 'AGC';
+  if (s.includes('low bid') || s.includes('low bids announced')) return 'LBA';
+  if (s.includes('construction underway') || s.includes('general contract')) return 'GC';
+  if (s.includes('construction manager')) return 'CM';
+  if (s.includes('construction documents') || s.includes('pre-design')) return 'CD';
+  if (s.includes('open bid') || s.includes('subbids')) return 'OB';
+  if (s.startsWith('pre-bid') || s.includes('bid date set') || s.includes('schematic design') || s.includes('design development')) return 'Pre-Bid';
+  if (s === 'post bid' || s.startsWith('post bid') || s.startsWith('post-bid')) return 'PB';
   return stage;
 }
 
