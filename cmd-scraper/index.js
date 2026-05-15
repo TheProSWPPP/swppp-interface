@@ -257,7 +257,13 @@ async function scrapeBidder(projectUrl) {
     return { matched: null };
   });
 
-  return { bidder, military, page_url: page.url() };
+  const stage = await page.evaluate(() => {
+    const stageLabel = Array.from(document.querySelectorAll("span.snapshot-label-small"))
+      .find(el => el.textContent.trim() === "Stage");
+    return stageLabel ? (stageLabel.nextElementSibling?.textContent?.trim() || "") : "";
+  });
+
+  return { bidder, military, stage, page_url: page.url() };
 }
 
 // === Scrape: company page → all contacts ===
