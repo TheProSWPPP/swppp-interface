@@ -137,6 +137,20 @@ async function drain() {
   }
 }
 
+// Mirrors mapProjectStage in bids-processor/index.js — keep in sync.
+function mapProjectStage(stage) {
+  if (!stage) return stage;
+  if (['Pre-Bid', 'Bid Date Set', 'Biddate Set', 'Schematic Design', 'Design Development'].includes(stage)) return 'Pre-Bid';
+  if (['Open Bid', 'SUBBIDS: ASAP'].includes(stage)) return 'OB';
+  if (['Low Bid Apparent', 'Low Bid / Apparent', 'Low Bids Announced'].includes(stage)) return 'LBA';
+  if (['Post-Bid - General Contractor Award', 'Post Bid - General Contractor Award', 'Architectural General Contracting', 'General Contractor Award'].includes(stage)) return 'AGC';
+  if (stage === 'Post Bid') return 'PB';
+  if (['General Contract', 'Construction Underway'].includes(stage)) return 'GC';
+  if (stage === 'Construction Manager') return 'CM';
+  if (['Construction Documents', 'Pre-Design'].includes(stage)) return 'CD';
+  return stage;
+}
+
 // === Scrape: project page → bidder grid + military hint ===
 async function scrapeBidder(projectUrl) {
   await ensureLoggedIn();
@@ -257,13 +271,15 @@ async function scrapeBidder(projectUrl) {
     return { matched: null };
   });
 
-  const stage = await page.evaluate(() => {
+  const rawStage = await page.evaluate(() => {
     const stageLabel = Array.from(document.querySelectorAll("span.snapshot-label-small"))
       .find(el => el.textContent.trim() === "Stage");
     return stageLabel ? (stageLabel.nextElementSibling?.textContent?.trim() || "") : "";
   });
 
-  return { bidder, military, stage, page_url: page.url() };
+  const stage = mapProjectStage(rawStage);
+
+  return { bidder, military, stage, raw_stage: rawStage, page_url: page.url() };
 }
 
 // === Scrape: company page → all contacts ===
