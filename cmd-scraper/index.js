@@ -157,7 +157,7 @@ function mapProjectStage(stage) {
   if (s.includes('construction manager')) return 'CM';
   if (s.includes('construction documents') || s.includes('pre-design')) return 'CD';
   if (s.includes('open bid') || s.includes('subbids')) return 'OB';
-  if (s.startsWith('pre-bid') || s.includes('bid date set') || s.includes('schematic design') || s.includes('design development')) return 'Pre-Bid';
+  if (s.startsWith('pre-bid') || s.includes('bid date set') || s.includes('biddate set') || s.includes('schematic design') || s.includes('design development')) return 'Pre-Bid';
   if (s === 'post bid' || s.startsWith('post bid') || s.startsWith('post-bid')) return 'PB';
   return stage;
 }
