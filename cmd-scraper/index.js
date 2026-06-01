@@ -182,10 +182,33 @@ async function scrapeBidder(projectUrl) {
     }
   }
 
+  // Extract stage FIRST — the snapshot panel loads before the bidder grid, so we
+  // can still return useful stage data for pre-bid projects that lack div#bv.
+  // Saves wasted Browserless fallbacks downstream when CMD genuinely has no grid yet.
+  const rawStageEarly = await page.evaluate(() => {
+    const stageLabel = Array.from(document.querySelectorAll("span.snapshot-label-small"))
+      .find(el => el.textContent.trim() === "Stage");
+    return stageLabel ? (stageLabel.nextElementSibling?.textContent?.trim() || "") : "";
+  });
+
+  let bidderGridVisible = true;
   try {
     await page.waitForSelector("div#bv", { timeout: 15000 });
   } catch {
-    return { bidder: null, military: { matched: null }, error: "div#bv not visible within 15s — pre-bid or slow page" };
+    bidderGridVisible = false;
+  }
+
+  if (!bidderGridVisible) {
+    // Page loaded successfully but no bidder grid (pre-bid or no rank yet).
+    // Return stage data so downstream can update Pipedrive without falling back to BL.
+    return {
+      bidder: null,
+      military: { matched: null },
+      stage: mapProjectStage(rawStageEarly),
+      raw_stage: rawStageEarly,
+      page_url: page.url(),
+      note: "no_bidder_grid",
+    };
   }
 
   // Click "show more" bidders if present
@@ -282,15 +305,9 @@ async function scrapeBidder(projectUrl) {
     return { matched: null };
   });
 
-  const rawStage = await page.evaluate(() => {
-    const stageLabel = Array.from(document.querySelectorAll("span.snapshot-label-small"))
-      .find(el => el.textContent.trim() === "Stage");
-    return stageLabel ? (stageLabel.nextElementSibling?.textContent?.trim() || "") : "";
-  });
+  const stage = mapProjectStage(rawStageEarly);
 
-  const stage = mapProjectStage(rawStage);
-
-  return { bidder, military, stage, raw_stage: rawStage, page_url: page.url() };
+  return { bidder, military, stage, raw_stage: rawStageEarly, page_url: page.url() };
 }
 
 // === Scrape: company page → all contacts ===
