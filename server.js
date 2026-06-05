@@ -16,6 +16,8 @@ import jwt from "jsonwebtoken";
 import * as apolloClient from "./lib/apolloClient.js";
 import * as pipedriveClient from "./lib/pipedriveClient.js";
 import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
+import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
+import { renderAllSteps, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 
 const { Pool } = pg;
 
@@ -979,6 +981,74 @@ app.get("/api/sdr/drafts/:id", async (req, res) => {
   } catch (err) {
     console.error("GET /api/sdr/drafts/:id error:", err);
     res.status(500).json({ error: "Failed to fetch draft" });
+  }
+});
+
+// SDR templates — return the 4 trigger templates rendered with placeholder context
+// (used by the UI to preview what an Apollo sequence should look like)
+app.get("/api/sdr/templates", (req, res) => {
+  const out = {};
+  for (const t of Object.keys(SDR_TEMPLATES)) {
+    out[t] = renderAllSteps(t, { first: "{First}", env: "EPA", swppp: "SWPPP", sig: "{Sig}" });
+  }
+  res.json({ templates: out });
+});
+
+// SDR drafts — generate from a Pipedrive lead (n8n calls this on lead update).
+// Body: { pipedrive_lead_id, trigger_type, apollo_sequence_id?, assigned_user_id? }
+app.post("/api/sdr/drafts/generate", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
+  const { pipedrive_lead_id, trigger_type, apollo_sequence_id, assigned_user_id } = req.body || {};
+  if (!pipedrive_lead_id || !trigger_type) {
+    return res.status(400).json({ error: "pipedrive_lead_id and trigger_type required" });
+  }
+  if (assigned_user_id && req.sdrUser.role !== "admin" && assigned_user_id !== req.sdrUser.sub) {
+    return res.status(403).json({ error: "Cannot assign draft to another user" });
+  }
+  try {
+    const payload = await buildDraftFromLead({
+      pipedriveLeadId: pipedrive_lead_id,
+      triggerType: trigger_type,
+      pool,
+      assignedUserId: assigned_user_id || null,
+      apolloSequenceId: apollo_sequence_id || null,
+    });
+
+    // Idempotency — same lead + trigger with an open draft
+    const dup = await pool.query(
+      `SELECT id, status FROM sdr_drafts
+       WHERE pipedrive_lead_id = $1 AND trigger_type = $2
+         AND status IN ('pending','approved','edited','sent') LIMIT 1`,
+      [payload.pipedrive_lead_id, payload.trigger_type],
+    );
+    if (dup.rows[0]) {
+      return res.status(409).json({
+        error: "Open draft already exists for this lead + trigger",
+        existing: dup.rows[0],
+      });
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO sdr_drafts (
+         pipedrive_lead_id, pipedrive_contact_id, pipedrive_org_id,
+         contact_id_snapshot, contact_email_snapshot, org_id_snapshot,
+         trigger_type, apollo_sequence_id,
+         subject, body, assigned_mailbox_id, assigned_user_id, metadata
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       RETURNING *`,
+      [
+        payload.pipedrive_lead_id, payload.pipedrive_contact_id, payload.pipedrive_org_id,
+        payload.contact_id_snapshot, payload.contact_email_snapshot, payload.org_id_snapshot,
+        payload.trigger_type, payload.apollo_sequence_id,
+        payload.subject, payload.body, payload.assigned_mailbox_id, payload.assigned_user_id,
+        payload.metadata,
+      ],
+    );
+    res.status(201).json({ draft: rows[0] });
+  } catch (err) {
+    console.error("POST /api/sdr/drafts/generate error:", err);
+    res.status(err.status || 500).json({ error: err.message || "Draft generation failed" });
   }
 });
 
