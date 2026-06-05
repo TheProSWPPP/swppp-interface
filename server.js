@@ -12,6 +12,11 @@ import { execFile } from "child_process";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleAIFileManager } from "@google/generative-ai/server";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import * as apolloClient from "./lib/apolloClient.js";
+import * as pipedriveClient from "./lib/pipedriveClient.js";
+import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
 
 const { Pool } = pg;
 
@@ -365,6 +370,27 @@ app.use(bodyParser.json({ limit: "50mb" }));
 const ADMIN_USER = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASS = process.env.ADMIN_PASSWORD || "swppp2026";
 
+// SDR JWT auth (Phase 3 — custom SDR interface)
+const JWT_SECRET = process.env.SDR_JWT_SECRET || "swppp-sdr-dev-jwt-secret-change-me";
+const JWT_TTL_SECONDS = 60 * 60 * 12; // 12h
+if (!process.env.SDR_JWT_SECRET) {
+  console.warn("Security: SDR_JWT_SECRET not set — using dev default. Set in Railway env before exposing /sdr publicly.");
+}
+if (!process.env.APOLLO_API_KEY) {
+  console.warn("APOLLO_API_KEY not set — SDR Apollo integration disabled until configured.");
+}
+if (!process.env.PIPEDRIVE_API_TOKEN) {
+  console.warn("PIPEDRIVE_API_TOKEN not set — SDR Pipedrive integration disabled until configured.");
+}
+
+function verifySdrJwt(token) {
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
+
 console.log(
   `Security: Using ADMIN_USERNAME=${
     process.env.ADMIN_USERNAME ? "DEFINED" : "NOT DEFINED (default: admin)"
@@ -399,6 +425,24 @@ app.use((req, res, next) => {
     req.query.callback_secret === N8N_CALLBACK_SECRET
   ) {
     return next();
+  }
+
+  // SDR login is unauthenticated (it issues the JWT)
+  if (req.path === "/api/sdr/auth/login" && req.method === "POST") {
+    return next();
+  }
+
+  // SDR routes accept JWT bearer
+  if (req.path.startsWith("/api/sdr/")) {
+    const authHeader = req.headers.authorization || "";
+    if (authHeader.startsWith("Bearer ")) {
+      const claims = verifySdrJwt(authHeader.slice(7).trim());
+      if (claims) {
+        req.sdrUser = claims;
+        return next();
+      }
+    }
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   const authHeader = req.headers.authorization || "";
@@ -566,6 +610,139 @@ async function initDB() {
     // Prevent re-suggesting an already-pending or already-approved keyword
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_seo_ideas_open_keyword ON seo_ideas(keyword_normalized) WHERE status IN ('pending','approved')`);
     console.log("Table 'seo_ideas' verified/created.");
+
+    // Phase 3 — Custom SDR Interface (mirror of migrations/2026-05-14-sdr-schema.sql)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        display_name TEXT,
+        role TEXT NOT NULL DEFAULT 'sdr' CHECK (role IN ('sdr','admin')),
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        last_login_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_mailboxes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        email TEXT UNIQUE NOT NULL,
+        display_name TEXT,
+        apollo_mailbox_id TEXT UNIQUE,
+        owner_user_id UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        pipedrive_sender_id INT,
+        daily_send_limit INT NOT NULL DEFAULT 20,
+        warmup_started_at TIMESTAMPTZ,
+        warmup_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (warmup_status IN ('pending','warming','ready','paused','disabled')),
+        warmup_current_cap INT NOT NULL DEFAULT 0,
+        deliverability_score NUMERIC(5,2),
+        last_health_check_at TIMESTAMPTZ,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_mailboxes_warmup_status ON sdr_mailboxes(warmup_status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_mailboxes_owner ON sdr_mailboxes(owner_user_id)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_drafts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        pipedrive_lead_id TEXT NOT NULL,
+        pipedrive_contact_id TEXT,
+        pipedrive_org_id TEXT,
+        contact_id_snapshot TEXT NOT NULL,
+        contact_email_snapshot TEXT NOT NULL,
+        org_id_snapshot TEXT,
+        trigger_type TEXT NOT NULL CHECK (trigger_type IN ('AGC','LBA','CM','PB')),
+        apollo_sequence_id TEXT,
+        apollo_template_id TEXT,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        assigned_mailbox_id UUID REFERENCES sdr_mailboxes(id) ON DELETE SET NULL,
+        assigned_user_id UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending','approved','edited','rejected','sent','failed','cancelled')),
+        reject_reason TEXT,
+        scheduled_for TIMESTAMPTZ,
+        approved_at TIMESTAMPTZ,
+        approved_by UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        sent_at TIMESTAMPTZ,
+        error_message TEXT,
+        metadata JSONB NOT NULL DEFAULT '{}',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_status ON sdr_drafts(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_lead ON sdr_drafts(pipedrive_lead_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_mailbox ON sdr_drafts(assigned_mailbox_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_scheduled ON sdr_drafts(scheduled_for) WHERE status IN ('pending','approved')`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_sends (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        draft_id UUID NOT NULL REFERENCES sdr_drafts(id) ON DELETE CASCADE,
+        pipedrive_lead_id TEXT NOT NULL,
+        apollo_sequence_id TEXT NOT NULL,
+        apollo_contact_id TEXT,
+        apollo_emailer_message_id TEXT,
+        mailbox_id UUID REFERENCES sdr_mailboxes(id) ON DELETE SET NULL,
+        sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        status TEXT NOT NULL DEFAULT 'enrolled'
+          CHECK (status IN ('enrolled','sent','bounced','replied','unsubscribed','failed')),
+        last_status_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_lead ON sdr_sends(pipedrive_lead_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_sequence ON sdr_sends(apollo_sequence_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_status ON sdr_sends(status)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_engagement_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        source TEXT NOT NULL DEFAULT 'apollo' CHECK (source IN ('apollo','pipedrive')),
+        event_type TEXT NOT NULL,
+        apollo_event_id TEXT UNIQUE,
+        apollo_sequence_id TEXT,
+        apollo_emailer_message_id TEXT,
+        pipedrive_lead_id TEXT,
+        pipedrive_contact_id TEXT,
+        mailbox_email TEXT,
+        occurred_at TIMESTAMPTZ NOT NULL,
+        payload JSONB NOT NULL,
+        processed_at TIMESTAMPTZ,
+        process_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (process_status IN ('pending','processed','skipped','error')),
+        process_error TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_lead_time ON sdr_engagement_events(pipedrive_lead_id, occurred_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_type ON sdr_engagement_events(event_type)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_process_status ON sdr_engagement_events(process_status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_sequence ON sdr_engagement_events(apollo_sequence_id)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_migrations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        pipedrive_lead_id TEXT NOT NULL,
+        from_system TEXT NOT NULL CHECK (from_system IN ('pipedrive','apollo','none')),
+        to_system TEXT NOT NULL CHECK (to_system IN ('pipedrive','apollo','none')),
+        reason TEXT,
+        triggered_by UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_migrations_lead ON sdr_migrations(pipedrive_lead_id)`);
+    console.log("SDR tables (sdr_users, sdr_mailboxes, sdr_drafts, sdr_sends, sdr_engagement_events, sdr_migrations) verified/created.");
   } catch (err) {
     console.error("CRITICAL: Error initializing database:", err);
   }
@@ -581,6 +758,58 @@ let memoryContent = [];
 // API Routes
 app.get("/health", (req, res) => {
   res.json({ status: "ok", database: !!process.env.DATABASE_URL });
+});
+
+// SDR auth — issue JWT against sdr_users.password_hash (bcrypt)
+app.post("/api/sdr/auth/login", async (req, res) => {
+  if (!process.env.DATABASE_URL) {
+    return res.status(503).json({ error: "Database not configured" });
+  }
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: "username and password required" });
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, username, email, password_hash, display_name, role, active
+       FROM sdr_users WHERE username = $1 LIMIT 1`,
+      [username],
+    );
+    const user = rows[0];
+    if (!user || !user.active) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    await pool.query(`UPDATE sdr_users SET last_login_at = NOW() WHERE id = $1`, [user.id]);
+    const token = jwt.sign(
+      { sub: user.id, username: user.username, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_TTL_SECONDS },
+    );
+    return res.json({
+      token,
+      expires_in: JWT_TTL_SECONDS,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        display_name: user.display_name,
+        role: user.role,
+      },
+    });
+  } catch (err) {
+    console.error("/api/sdr/auth/login error:", err);
+    return res.status(500).json({ error: "Login failed" });
+  }
+});
+
+// SDR — return current user from JWT (req.sdrUser set by global middleware)
+app.get("/api/sdr/auth/me", (req, res) => {
+  if (!req.sdrUser) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ user: req.sdrUser });
 });
 
 app.get("/api/projects", async (req, res) => {

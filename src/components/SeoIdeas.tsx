@@ -190,23 +190,6 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
     }
   };
 
-  const bulkApproveCluster = async (clusterIdeas: SeoIdea[]) => {
-    if (!window.confirm(`Queue ${clusterIdeas.length} ideas for generation? (will not auto-fire)`)) return;
-    for (const i of clusterIdeas) {
-      if (i.status !== "pending") continue;
-      // Sequential to avoid race + state-prompt repetition
-      // eslint-disable-next-line no-await-in-loop
-      await approveOne(i, false);
-    }
-    fetchIdeas();
-  };
-
-  const bulkRejectCluster = async (clusterIdeas: SeoIdea[]) => {
-    if (!window.confirm(`Reject ${clusterIdeas.length} ideas? They won't be suggested again.`)) return;
-    await Promise.all(clusterIdeas.filter((i) => i.status === "pending").map((i) => rejectOne(i)));
-    fetchIdeas();
-  };
-
   const pendingIdeas = ideas.filter((i) => i.status === "pending");
   const allSelected = pendingIdeas.length > 0 && pendingIdeas.every((i) => selectedIds.has(i.id));
 
@@ -407,8 +390,6 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
               onToggle={() => toggleCluster(name)}
               onApprove={(idea, kickoff) => approveOne(idea, kickoff)}
               onReject={(idea) => rejectOne(idea).then(fetchIdeas)}
-              onBulkApprove={() => bulkApproveCluster(clusterIdeas)}
-              onBulkReject={() => bulkRejectCluster(clusterIdeas)}
               busyIds={busyIds}
               expandedWhy={expandedWhy}
               onToggleWhy={toggleWhy}
@@ -437,8 +418,6 @@ function ClusterCard({
   onToggle,
   onApprove,
   onReject,
-  onBulkApprove,
-  onBulkReject,
   busyIds,
   expandedWhy,
   onToggleWhy,
@@ -451,8 +430,6 @@ function ClusterCard({
   onToggle: () => void;
   onApprove: (idea: SeoIdea, kickoff: boolean) => void;
   onReject: (idea: SeoIdea) => void;
-  onBulkApprove: () => void;
-  onBulkReject: () => void;
   busyIds: Set<string>;
   expandedWhy: Set<string>;
   onToggleWhy: (id: string) => void;
@@ -479,22 +456,6 @@ function ClusterCard({
           </span>
           <span className="text-xs text-slate-400">total {totalScore.toLocaleString()}</span>
         </button>
-        {pendingCount > 0 && (
-          <div className="flex gap-1.5">
-            <button
-              onClick={onBulkApprove}
-              className="text-xs px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium"
-            >
-              Queue all ({pendingCount})
-            </button>
-            <button
-              onClick={onBulkReject}
-              className="text-xs px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 font-medium"
-            >
-              Reject all
-            </button>
-          </div>
-        )}
       </div>
       {!collapsed && (
         <div className="divide-y divide-slate-100">
