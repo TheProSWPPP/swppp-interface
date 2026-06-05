@@ -13,7 +13,6 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleAIFileManager } from "@google/generative-ai/server";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
-import bcrypt from "bcryptjs";
 import * as apolloClient from "./lib/apolloClient.js";
 import * as pipedriveClient from "./lib/pipedriveClient.js";
 import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
@@ -427,8 +426,11 @@ app.use((req, res, next) => {
     return next();
   }
 
-  // SDR login is unauthenticated (it issues the JWT)
+  // SDR login + user picker are unauthenticated (login issues JWT; users fuels the picker)
   if (req.path === "/api/sdr/auth/login" && req.method === "POST") {
+    return next();
+  }
+  if (req.path === "/api/sdr/auth/users" && req.method === "GET") {
     return next();
   }
 
@@ -806,28 +808,27 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", database: !!process.env.DATABASE_URL });
 });
 
-// SDR auth — issue JWT against sdr_users.password_hash (bcrypt)
+// SDR identity — passwordless. The dashboard sits behind the basic-auth wall
+// (derek:dereksystem) which is the real perimeter; this endpoint just records
+// "who's working" so per-user mailbox/draft scoping has a subject.
+// Accepts a username, returns a JWT. No password required.
 app.post("/api/sdr/auth/login", async (req, res) => {
   if (!process.env.DATABASE_URL) {
     return res.status(503).json({ error: "Database not configured" });
   }
-  const { username, password } = req.body || {};
-  if (!username || !password) {
-    return res.status(400).json({ error: "username and password required" });
+  const { username } = req.body || {};
+  if (!username) {
+    return res.status(400).json({ error: "username required" });
   }
   try {
     const { rows } = await pool.query(
-      `SELECT id, username, email, password_hash, display_name, role, active
+      `SELECT id, username, email, display_name, role, active
        FROM sdr_users WHERE username = $1 LIMIT 1`,
       [username],
     );
     const user = rows[0];
     if (!user || !user.active) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(404).json({ error: "Unknown user" });
     }
     await pool.query(`UPDATE sdr_users SET last_login_at = NOW() WHERE id = $1`, [user.id]);
     const token = jwt.sign(
@@ -849,6 +850,21 @@ app.post("/api/sdr/auth/login", async (req, res) => {
   } catch (err) {
     console.error("/api/sdr/auth/login error:", err);
     return res.status(500).json({ error: "Login failed" });
+  }
+});
+
+// SDR — list selectable users (passwordless picker fuel)
+app.get("/api/sdr/auth/users", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT username, display_name, role
+       FROM sdr_users WHERE active = TRUE ORDER BY role DESC, username`,
+    );
+    res.json({ users: rows });
+  } catch (err) {
+    console.error("/api/sdr/auth/users error:", err);
+    res.status(500).json({ error: "Failed to list users" });
   }
 });
 
