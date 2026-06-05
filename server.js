@@ -12,6 +12,11 @@ import { execFile } from "child_process";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleAIFileManager } from "@google/generative-ai/server";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import * as apolloClient from "./lib/apolloClient.js";
+import * as pipedriveClient from "./lib/pipedriveClient.js";
+import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
 
 const { Pool } = pg;
 
@@ -365,6 +370,27 @@ app.use(bodyParser.json({ limit: "50mb" }));
 const ADMIN_USER = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASS = process.env.ADMIN_PASSWORD || "swppp2026";
 
+// SDR JWT auth (Phase 3 — custom SDR interface)
+const JWT_SECRET = process.env.SDR_JWT_SECRET || "swppp-sdr-dev-jwt-secret-change-me";
+const JWT_TTL_SECONDS = 60 * 60 * 12; // 12h
+if (!process.env.SDR_JWT_SECRET) {
+  console.warn("Security: SDR_JWT_SECRET not set — using dev default. Set in Railway env before exposing /sdr publicly.");
+}
+if (!process.env.APOLLO_API_KEY) {
+  console.warn("APOLLO_API_KEY not set — SDR Apollo integration disabled until configured.");
+}
+if (!process.env.PIPEDRIVE_API_TOKEN) {
+  console.warn("PIPEDRIVE_API_TOKEN not set — SDR Pipedrive integration disabled until configured.");
+}
+
+function verifySdrJwt(token) {
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
+
 console.log(
   `Security: Using ADMIN_USERNAME=${
     process.env.ADMIN_USERNAME ? "DEFINED" : "NOT DEFINED (default: admin)"
@@ -399,6 +425,24 @@ app.use((req, res, next) => {
     req.query.callback_secret === N8N_CALLBACK_SECRET
   ) {
     return next();
+  }
+
+  // SDR login is unauthenticated (it issues the JWT)
+  if (req.path === "/api/sdr/auth/login" && req.method === "POST") {
+    return next();
+  }
+
+  // SDR routes accept JWT bearer
+  if (req.path.startsWith("/api/sdr/")) {
+    const authHeader = req.headers.authorization || "";
+    if (authHeader.startsWith("Bearer ")) {
+      const claims = verifySdrJwt(authHeader.slice(7).trim());
+      if (claims) {
+        req.sdrUser = claims;
+        return next();
+      }
+    }
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   const authHeader = req.headers.authorization || "";
@@ -566,6 +610,185 @@ async function initDB() {
     // Prevent re-suggesting an already-pending or already-approved keyword
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_seo_ideas_open_keyword ON seo_ideas(keyword_normalized) WHERE status IN ('pending','approved')`);
     console.log("Table 'seo_ideas' verified/created.");
+
+    // Phase 3 — Custom SDR Interface (mirror of migrations/2026-05-14-sdr-schema.sql)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        display_name TEXT,
+        role TEXT NOT NULL DEFAULT 'sdr' CHECK (role IN ('sdr','admin')),
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        last_login_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_mailboxes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        email TEXT UNIQUE NOT NULL,
+        display_name TEXT,
+        apollo_mailbox_id TEXT UNIQUE,
+        owner_user_id UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        pipedrive_sender_id INT,
+        daily_send_limit INT NOT NULL DEFAULT 20,
+        warmup_started_at TIMESTAMPTZ,
+        warmup_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (warmup_status IN ('pending','warming','ready','paused','disabled')),
+        warmup_current_cap INT NOT NULL DEFAULT 0,
+        deliverability_score NUMERIC(5,2),
+        last_health_check_at TIMESTAMPTZ,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_mailboxes_warmup_status ON sdr_mailboxes(warmup_status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_mailboxes_owner ON sdr_mailboxes(owner_user_id)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_drafts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        pipedrive_lead_id TEXT NOT NULL,
+        pipedrive_contact_id TEXT,
+        pipedrive_org_id TEXT,
+        contact_id_snapshot TEXT NOT NULL,
+        contact_email_snapshot TEXT NOT NULL,
+        org_id_snapshot TEXT,
+        trigger_type TEXT NOT NULL CHECK (trigger_type IN ('AGC','LBA','CM','PB')),
+        apollo_sequence_id TEXT,
+        apollo_template_id TEXT,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        assigned_mailbox_id UUID REFERENCES sdr_mailboxes(id) ON DELETE SET NULL,
+        assigned_user_id UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending','approved','edited','rejected','sent','failed','cancelled')),
+        reject_reason TEXT,
+        scheduled_for TIMESTAMPTZ,
+        approved_at TIMESTAMPTZ,
+        approved_by UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        sent_at TIMESTAMPTZ,
+        error_message TEXT,
+        metadata JSONB NOT NULL DEFAULT '{}',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_status ON sdr_drafts(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_lead ON sdr_drafts(pipedrive_lead_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_mailbox ON sdr_drafts(assigned_mailbox_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_scheduled ON sdr_drafts(scheduled_for) WHERE status IN ('pending','approved')`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_sends (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        draft_id UUID NOT NULL REFERENCES sdr_drafts(id) ON DELETE CASCADE,
+        pipedrive_lead_id TEXT NOT NULL,
+        apollo_sequence_id TEXT NOT NULL,
+        apollo_contact_id TEXT,
+        apollo_emailer_message_id TEXT,
+        mailbox_id UUID REFERENCES sdr_mailboxes(id) ON DELETE SET NULL,
+        sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        status TEXT NOT NULL DEFAULT 'enrolled'
+          CHECK (status IN ('enrolled','sent','bounced','replied','unsubscribed','failed')),
+        last_status_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_lead ON sdr_sends(pipedrive_lead_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_sequence ON sdr_sends(apollo_sequence_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_status ON sdr_sends(status)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_engagement_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        source TEXT NOT NULL DEFAULT 'apollo' CHECK (source IN ('apollo','pipedrive')),
+        event_type TEXT NOT NULL,
+        apollo_event_id TEXT UNIQUE,
+        apollo_sequence_id TEXT,
+        apollo_emailer_message_id TEXT,
+        pipedrive_lead_id TEXT,
+        pipedrive_contact_id TEXT,
+        mailbox_email TEXT,
+        occurred_at TIMESTAMPTZ NOT NULL,
+        payload JSONB NOT NULL,
+        processed_at TIMESTAMPTZ,
+        process_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (process_status IN ('pending','processed','skipped','error')),
+        process_error TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_lead_time ON sdr_engagement_events(pipedrive_lead_id, occurred_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_type ON sdr_engagement_events(event_type)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_process_status ON sdr_engagement_events(process_status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_sequence ON sdr_engagement_events(apollo_sequence_id)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_migrations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        pipedrive_lead_id TEXT NOT NULL,
+        from_system TEXT NOT NULL CHECK (from_system IN ('pipedrive','apollo','none')),
+        to_system TEXT NOT NULL CHECK (to_system IN ('pipedrive','apollo','none')),
+        reason TEXT,
+        triggered_by UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_migrations_lead ON sdr_migrations(pipedrive_lead_id)`);
+    console.log("SDR tables (sdr_users, sdr_mailboxes, sdr_drafts, sdr_sends, sdr_engagement_events, sdr_migrations) verified/created.");
+
+    // Automation Roadmap — shared task list (team posts work, Derek tracks/edits/comments)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS automation_tasks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'planned'
+          CHECK (status IN ('planned','in_progress','blocked','done')),
+        sort_order DOUBLE PRECISION NOT NULL DEFAULT 0,
+        updates JSONB NOT NULL DEFAULT '[]',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_automation_tasks_status ON automation_tasks(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_automation_tasks_order ON automation_tasks(sort_order)`);
+
+    // Idempotent seed — only when the table is empty
+    const taskCount = await pool.query("SELECT COUNT(*)::int AS n FROM automation_tasks");
+    if (taskCount.rows[0].n === 0) {
+      const txrBrief = [
+        "Target: Active permittee list for the Texas Industrial Multi-Sector General Permit (TCEQ permit no. TXR050000). Public record.",
+        "",
+        "Action: Scrape the active permittee list from the TCEQ public website.",
+        "",
+        "Purpose: Lead source for industrial stormwater SWPPP renewal services — existing facilities (recurring inspections + 5-year permit renewal), higher-value than construction.",
+        "",
+        "Timing: TX TXR050000 expires August 2026. Market window = June–Aug 2026 (now).",
+        "",
+        "Repeatable engine: One industrial MSGP per state, each with its own expiry. Pull list → market facilities ~6 months before that state's expiry.",
+        "",
+        "Pipeline: pull list → AI compliance-doc generation (permit → compliant draft) → market expiring facilities → follow-up sequence. Output destination: lead import / Slack.",
+      ].join("\n");
+      await pool.query(
+        `INSERT INTO automation_tasks (title, description, status, sort_order) VALUES
+           ($1, $2, $3, $4),
+           ($5, $6, $7, $8)`,
+        [
+          "SDR Interface", "Custom SDR outreach interface — Pipedrive + Apollo draft review, mailbox warmup, send approval.", "in_progress", 1000,
+          "Pull TXR050000 permittee list", txrBrief, "planned", 2000,
+        ]
+      );
+      console.log("Seeded automation_tasks with starter roadmap items.");
+    }
+    console.log("Table 'automation_tasks' verified/created.");
   } catch (err) {
     console.error("CRITICAL: Error initializing database:", err);
   }
@@ -581,6 +804,375 @@ let memoryContent = [];
 // API Routes
 app.get("/health", (req, res) => {
   res.json({ status: "ok", database: !!process.env.DATABASE_URL });
+});
+
+// SDR auth — issue JWT against sdr_users.password_hash (bcrypt)
+app.post("/api/sdr/auth/login", async (req, res) => {
+  if (!process.env.DATABASE_URL) {
+    return res.status(503).json({ error: "Database not configured" });
+  }
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: "username and password required" });
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, username, email, password_hash, display_name, role, active
+       FROM sdr_users WHERE username = $1 LIMIT 1`,
+      [username],
+    );
+    const user = rows[0];
+    if (!user || !user.active) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    await pool.query(`UPDATE sdr_users SET last_login_at = NOW() WHERE id = $1`, [user.id]);
+    const token = jwt.sign(
+      { sub: user.id, username: user.username, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_TTL_SECONDS },
+    );
+    return res.json({
+      token,
+      expires_in: JWT_TTL_SECONDS,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        display_name: user.display_name,
+        role: user.role,
+      },
+    });
+  } catch (err) {
+    console.error("/api/sdr/auth/login error:", err);
+    return res.status(500).json({ error: "Login failed" });
+  }
+});
+
+// SDR — return current user from JWT (req.sdrUser set by global middleware)
+app.get("/api/sdr/auth/me", (req, res) => {
+  if (!req.sdrUser) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ user: req.sdrUser });
+});
+
+// SDR mailboxes — list (owner-scoped; admin sees all)
+app.get("/api/sdr/mailboxes", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const scope = ownerScope(req.sdrUser, "owner_user_id");
+    const params = [];
+    let sql = `SELECT id, email, display_name, apollo_mailbox_id, owner_user_id,
+                      daily_send_limit, warmup_status, warmup_current_cap,
+                      deliverability_score, last_health_check_at, active,
+                      created_at, updated_at
+               FROM sdr_mailboxes`;
+    if (scope.requires) {
+      params.push(scope.value);
+      sql += ` WHERE ${scope.column} = $${params.length}`;
+    }
+    sql += ` ORDER BY email`;
+    const { rows } = await pool.query(sql, params);
+    res.json({ mailboxes: rows });
+  } catch (err) {
+    console.error("GET /api/sdr/mailboxes error:", err);
+    res.status(500).json({ error: "Failed to list mailboxes" });
+  }
+});
+
+// SDR mailboxes — sync from Apollo (admin only). Pulls live mailbox list and upserts.
+app.post("/api/sdr/mailboxes/sync", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const accounts = await apolloClient.listEmailAccounts();
+    const synced = [];
+    for (const mb of accounts) {
+      const dailyLimit = mb.email_daily_threshold ?? 20;
+      const warmupCap = mb.mailwarming_vendor?.max_daily_emails ?? 0;
+      const warmupStatus = mb.mailwarming_vendor?.inbox_status === "started" ? "warming" : "pending";
+      const score = mb.deliverability_score?.deliverability_score ?? null;
+      await pool.query(
+        `INSERT INTO sdr_mailboxes (email, display_name, apollo_mailbox_id,
+                                     daily_send_limit, warmup_status, warmup_current_cap,
+                                     deliverability_score, last_health_check_at, active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+         ON CONFLICT (email) DO UPDATE
+           SET apollo_mailbox_id = EXCLUDED.apollo_mailbox_id,
+               daily_send_limit = EXCLUDED.daily_send_limit,
+               warmup_status = EXCLUDED.warmup_status,
+               warmup_current_cap = EXCLUDED.warmup_current_cap,
+               deliverability_score = EXCLUDED.deliverability_score,
+               last_health_check_at = NOW(),
+               active = EXCLUDED.active,
+               updated_at = NOW()`,
+        [mb.email, mb.email, mb.id, dailyLimit, warmupStatus, warmupCap, score, mb.active !== false],
+      );
+      synced.push({ email: mb.email, apollo_id: mb.id });
+    }
+    res.json({ synced_count: synced.length, synced });
+  } catch (err) {
+    console.error("POST /api/sdr/mailboxes/sync error:", err);
+    res.status(500).json({ error: err.message || "Apollo sync failed" });
+  }
+});
+
+// SDR drafts — list (owner-scoped; admin sees all)
+app.get("/api/sdr/drafts", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const scope = ownerScope(req.sdrUser, "assigned_user_id");
+    const status = req.query.status; // optional filter
+    const params = [];
+    let sql = `SELECT * FROM sdr_drafts`;
+    const where = [];
+    if (status) {
+      params.push(status);
+      where.push(`status = $${params.length}`);
+    }
+    if (scope.requires) {
+      params.push(scope.value);
+      where.push(`${scope.column} = $${params.length}`);
+    }
+    if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
+    sql += ` ORDER BY created_at DESC LIMIT 200`;
+    const { rows } = await pool.query(sql, params);
+    res.json({ drafts: rows });
+  } catch (err) {
+    console.error("GET /api/sdr/drafts error:", err);
+    res.status(500).json({ error: "Failed to list drafts" });
+  }
+});
+
+// SDR drafts — single fetch
+app.get("/api/sdr/drafts/:id", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const scope = ownerScope(req.sdrUser, "assigned_user_id");
+    const params = [req.params.id];
+    let sql = `SELECT * FROM sdr_drafts WHERE id = $1`;
+    if (scope.requires) {
+      params.push(scope.value);
+      sql += ` AND ${scope.column} = $${params.length}`;
+    }
+    const { rows } = await pool.query(sql, params);
+    if (!rows[0]) return res.status(404).json({ error: "Draft not found" });
+    res.json({ draft: rows[0] });
+  } catch (err) {
+    console.error("GET /api/sdr/drafts/:id error:", err);
+    res.status(500).json({ error: "Failed to fetch draft" });
+  }
+});
+
+// SDR drafts — create (typically called by n8n or internal job; sdrUser must be admin OR the assigned_user_id matches)
+app.post("/api/sdr/drafts", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  const {
+    pipedrive_lead_id,
+    pipedrive_contact_id,
+    pipedrive_org_id,
+    contact_id_snapshot,
+    contact_email_snapshot,
+    org_id_snapshot,
+    trigger_type,
+    apollo_sequence_id,
+    apollo_template_id,
+    subject,
+    body,
+    assigned_mailbox_id,
+    assigned_user_id,
+    scheduled_for,
+    metadata,
+  } = req.body || {};
+
+  if (!pipedrive_lead_id || !contact_id_snapshot || !contact_email_snapshot || !trigger_type || !subject || !body) {
+    return res.status(400).json({ error: "Missing required fields: pipedrive_lead_id, contact_id_snapshot, contact_email_snapshot, trigger_type, subject, body" });
+  }
+  if (!["AGC", "LBA", "CM", "PB"].includes(trigger_type)) {
+    return res.status(400).json({ error: "trigger_type must be one of AGC, LBA, CM, PB" });
+  }
+  if (req.sdrUser.role !== "admin" && assigned_user_id && assigned_user_id !== req.sdrUser.sub) {
+    return res.status(403).json({ error: "Cannot assign draft to another user" });
+  }
+
+  try {
+    const dup = await pool.query(
+      `SELECT id FROM sdr_drafts
+       WHERE pipedrive_lead_id = $1 AND trigger_type = $2
+         AND status IN ('pending','approved','sent') LIMIT 1`,
+      [pipedrive_lead_id, trigger_type],
+    );
+    if (dup.rows[0]) {
+      return res.status(409).json({ error: "Open draft already exists for this lead + trigger", existing_id: dup.rows[0].id });
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO sdr_drafts (
+         pipedrive_lead_id, pipedrive_contact_id, pipedrive_org_id,
+         contact_id_snapshot, contact_email_snapshot, org_id_snapshot,
+         trigger_type, apollo_sequence_id, apollo_template_id,
+         subject, body, assigned_mailbox_id, assigned_user_id,
+         scheduled_for, metadata
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       RETURNING *`,
+      [
+        pipedrive_lead_id, pipedrive_contact_id || null, pipedrive_org_id || null,
+        contact_id_snapshot, contact_email_snapshot, org_id_snapshot || null,
+        trigger_type, apollo_sequence_id || null, apollo_template_id || null,
+        subject, body, assigned_mailbox_id || null, assigned_user_id || null,
+        scheduled_for || null, metadata || {},
+      ],
+    );
+    res.status(201).json({ draft: rows[0] });
+  } catch (err) {
+    console.error("POST /api/sdr/drafts error:", err);
+    res.status(500).json({ error: "Failed to create draft" });
+  }
+});
+
+// SDR drafts — edit subject/body while pending or approved (not after sent)
+app.patch("/api/sdr/drafts/:id", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  const { subject, body, scheduled_for, assigned_mailbox_id } = req.body || {};
+  if (!subject && !body && !scheduled_for && !assigned_mailbox_id) {
+    return res.status(400).json({ error: "Provide at least one field to update" });
+  }
+  try {
+    const scope = ownerScope(req.sdrUser, "assigned_user_id");
+    const params = [req.params.id];
+    let where = `id = $1 AND status IN ('pending','approved','edited')`;
+    if (scope.requires) {
+      params.push(scope.value);
+      where += ` AND ${scope.column} = $${params.length}`;
+    }
+    const sets = [];
+    if (subject) { params.push(subject); sets.push(`subject = $${params.length}`); }
+    if (body) { params.push(body); sets.push(`body = $${params.length}`); }
+    if (scheduled_for) { params.push(scheduled_for); sets.push(`scheduled_for = $${params.length}`); }
+    if (assigned_mailbox_id) { params.push(assigned_mailbox_id); sets.push(`assigned_mailbox_id = $${params.length}`); }
+    sets.push(`status = 'edited'`);
+    sets.push(`updated_at = NOW()`);
+    const { rows } = await pool.query(
+      `UPDATE sdr_drafts SET ${sets.join(", ")} WHERE ${where} RETURNING *`,
+      params,
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Draft not found or not editable" });
+    res.json({ draft: rows[0] });
+  } catch (err) {
+    console.error("PATCH /api/sdr/drafts/:id error:", err);
+    res.status(500).json({ error: "Failed to update draft" });
+  }
+});
+
+// SDR drafts — reject
+app.post("/api/sdr/drafts/:id/reject", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  const reason = req.body?.reason || "(no reason given)";
+  try {
+    const scope = ownerScope(req.sdrUser, "assigned_user_id");
+    const params = [req.params.id, reason];
+    let where = `id = $1 AND status IN ('pending','approved','edited')`;
+    if (scope.requires) {
+      params.push(scope.value);
+      where += ` AND ${scope.column} = $${params.length}`;
+    }
+    const { rows } = await pool.query(
+      `UPDATE sdr_drafts SET status = 'rejected', reject_reason = $2, updated_at = NOW()
+       WHERE ${where} RETURNING *`,
+      params,
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Draft not found or not rejectable" });
+    res.json({ draft: rows[0] });
+  } catch (err) {
+    console.error("POST /api/sdr/drafts/:id/reject error:", err);
+    res.status(500).json({ error: "Failed to reject draft" });
+  }
+});
+
+// SDR drafts — approve + atomically enroll in Apollo + record sdr_sends.
+// Wrapped in per-lead advisory lock to prevent parallel enrollment races.
+app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (!process.env.APOLLO_API_KEY) return res.status(503).json({ error: "Apollo not configured" });
+
+  try {
+    // Pre-fetch the draft (outside tx) to get the lead_id for the advisory lock
+    const scope = ownerScope(req.sdrUser, "assigned_user_id");
+    const preParams = [req.params.id];
+    let preSql = `SELECT * FROM sdr_drafts WHERE id = $1`;
+    if (scope.requires) {
+      preParams.push(scope.value);
+      preSql += ` AND ${scope.column} = $${preParams.length}`;
+    }
+    const pre = await pool.query(preSql, preParams);
+    const draft = pre.rows[0];
+    if (!draft) return res.status(404).json({ error: "Draft not found" });
+    if (!["pending", "approved", "edited"].includes(draft.status)) {
+      return res.status(409).json({ error: `Draft is ${draft.status}, cannot send` });
+    }
+    if (!draft.apollo_sequence_id) {
+      return res.status(400).json({ error: "Draft has no apollo_sequence_id set — specify which Apollo sequence to enroll into" });
+    }
+    if (!draft.assigned_mailbox_id) {
+      return res.status(400).json({ error: "Draft has no assigned_mailbox_id" });
+    }
+
+    // Resolve mailbox → apollo_mailbox_id
+    const { rows: mbRows } = await pool.query(
+      `SELECT id, email, apollo_mailbox_id FROM sdr_mailboxes WHERE id = $1`,
+      [draft.assigned_mailbox_id],
+    );
+    const mailbox = mbRows[0];
+    if (!mailbox?.apollo_mailbox_id) {
+      return res.status(500).json({ error: "Assigned mailbox has no apollo_mailbox_id — run /api/sdr/mailboxes/sync" });
+    }
+
+    // Per-lead lock + tx: match Apollo contact, enroll, record send, mark draft sent.
+    const result = await withLeadLock(pool, draft.pipedrive_lead_id, async (client) => {
+      // Match snapshot email → Apollo contact id
+      const match = await apolloClient.matchContactByEmail(draft.contact_email_snapshot);
+      const apolloContactId = match?.person?.id || match?.contact?.id;
+      if (!apolloContactId) throw new Error(`Apollo could not match contact by email ${draft.contact_email_snapshot}`);
+
+      // Enroll in sequence with the assigned mailbox as the sender
+      const enroll = await apolloClient.addContactsToSequence(
+        draft.apollo_sequence_id,
+        [apolloContactId],
+        mailbox.apollo_mailbox_id,
+      );
+
+      // Mark draft sent
+      const { rows: updRows } = await client.query(
+        `UPDATE sdr_drafts SET status = 'sent', sent_at = NOW(), approved_at = NOW(),
+                                approved_by = $2, updated_at = NOW()
+         WHERE id = $1 RETURNING *`,
+        [draft.id, req.sdrUser.sub],
+      );
+
+      // Record sdr_sends row
+      const { rows: sendRows } = await client.query(
+        `INSERT INTO sdr_sends (draft_id, pipedrive_lead_id, apollo_sequence_id,
+                                 apollo_contact_id, mailbox_id, status)
+         VALUES ($1, $2, $3, $4, $5, 'enrolled')
+         RETURNING *`,
+        [draft.id, draft.pipedrive_lead_id, draft.apollo_sequence_id, apolloContactId, mailbox.id],
+      );
+
+      return { draft: updRows[0], send: sendRows[0], apollo_response: enroll };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error("POST /api/sdr/drafts/:id/approve-and-send error:", err);
+    // Mark draft as failed if we got past pre-checks
+    await pool.query(
+      `UPDATE sdr_drafts SET status = 'failed', error_message = $2, updated_at = NOW()
+       WHERE id = $1 AND status IN ('pending','approved','edited')`,
+      [req.params.id, String(err.message).slice(0, 1000)],
+    ).catch(() => {});
+    res.status(err.status || 500).json({ error: err.message || "Approve-and-send failed" });
+  }
 });
 
 app.get("/api/projects", async (req, res) => {
@@ -2589,6 +3181,114 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
     for (const f of tempFiles) {
       try { fs.unlinkSync(f); } catch (_) {}
     }
+  }
+});
+
+// ── Automation Roadmap ──────────────────────────────────────────────
+const VALID_TASK_STATUSES = ["planned", "in_progress", "blocked", "done"];
+
+function mapTask(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    sortOrder: row.sort_order != null ? Number(row.sort_order) : 0,
+    updates: Array.isArray(row.updates) ? row.updates : [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+app.get("/api/automation-tasks", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.json([]);
+  try {
+    const r = await pool.query(
+      "SELECT * FROM automation_tasks ORDER BY sort_order ASC, created_at ASC"
+    );
+    res.json(r.rows.map(mapTask));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/automation-tasks", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(501).json({ error: "DB required" });
+  const { title, description = "", status = "planned" } = req.body || {};
+  if (!title || !title.trim()) return res.status(400).json({ error: "title is required" });
+  if (!VALID_TASK_STATUSES.includes(status)) return res.status(400).json({ error: "invalid status" });
+  try {
+    const next = await pool.query("SELECT COALESCE(MAX(sort_order), 0) + 1000 AS n FROM automation_tasks");
+    const r = await pool.query(
+      `INSERT INTO automation_tasks (title, description, status, sort_order)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [title.trim(), description, status, next.rows[0].n]
+    );
+    res.status(201).json(mapTask(r.rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/automation-tasks/:id", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(501).json({ error: "DB required" });
+  const { title, description, status, sortOrder } = req.body || {};
+  if (status !== undefined && !VALID_TASK_STATUSES.includes(status)) {
+    return res.status(400).json({ error: "invalid status" });
+  }
+  const sets = [];
+  const params = [];
+  if (title !== undefined) { params.push(title); sets.push(`title = $${params.length}`); }
+  if (description !== undefined) { params.push(description); sets.push(`description = $${params.length}`); }
+  if (status !== undefined) { params.push(status); sets.push(`status = $${params.length}`); }
+  if (sortOrder !== undefined) { params.push(sortOrder); sets.push(`sort_order = $${params.length}`); }
+  if (sets.length === 0) return res.status(400).json({ error: "no fields to update" });
+  sets.push("updated_at = NOW()");
+  params.push(req.params.id);
+  try {
+    const r = await pool.query(
+      `UPDATE automation_tasks SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
+      params
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Not found" });
+    res.json(mapTask(r.rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/automation-tasks/:id/updates", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(501).json({ error: "DB required" });
+  const { author = "", body = "" } = req.body || {};
+  if (!body || !body.trim()) return res.status(400).json({ error: "body is required" });
+  const entry = {
+    id: crypto.randomUUID(),
+    author: (author || "").trim() || "Pro SWPPP",
+    body: body.trim(),
+    created_at: new Date().toISOString(),
+  };
+  try {
+    const r = await pool.query(
+      `UPDATE automation_tasks
+       SET updates = updates || $1::jsonb, updated_at = NOW()
+       WHERE id = $2 RETURNING *`,
+      [JSON.stringify([entry]), req.params.id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Not found" });
+    res.status(201).json(mapTask(r.rows[0]));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/automation-tasks/:id", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(501).json({ error: "DB required" });
+  try {
+    const r = await pool.query("DELETE FROM automation_tasks WHERE id = $1 RETURNING id", [req.params.id]);
+    if (r.rowCount === 0) return res.status(404).json({ error: "Not found" });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
