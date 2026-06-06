@@ -415,7 +415,8 @@ app.use((req, res, next) => {
     (req.path === "/api/seo-ideas/batch" && req.method === "POST") ||
     (req.path === "/api/seo-ideas/known-keywords" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/seo-ideas/seeds" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
-    (req.path === "/api/seo-ideas/existing-articles" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET)
+    (req.path === "/api/seo-ideas/existing-articles" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
+    (req.path === "/api/sdr/events/ingest" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET)
   ) {
     return next();
   }
@@ -936,6 +937,173 @@ app.post("/api/sdr/mailboxes/sync", async (req, res) => {
     res.status(500).json({ error: err.message || "Apollo sync failed" });
   }
 });
+
+// SDR — Apollo webhook ingest. n8n forwards Apollo events here with
+// ?callback_secret=...  We insert into sdr_engagement_events (idempotent on
+// apollo_event_id) and run side effects per event_type.
+//
+// Apollo event payload shape (verified from Apollo docs):
+//   { id, type, sequence_id, contact_id, email_account_id, email,
+//     emailer_message_id, created_at, ... }
+//
+// Event types we act on:
+//   email_sent / email_opened / email_clicked → just log
+//   email_replied → clear Sequence_Started on Pipedrive lead + mark sdr_sends=replied
+//                   + remove contact from Apollo sequence
+//   email_bounced → mark sdr_sends=bounced + flag mailbox in metadata
+//   email_unsubscribed → mark sdr_sends=unsubscribed + flag do_not_mail in metadata
+app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  const ev = req.body || {};
+  const eventType = ev.type || ev.event_type || ev.event;
+  if (!eventType) return res.status(400).json({ error: "Missing event type" });
+
+  const apolloEventId = ev.id || ev.event_id || null;
+  const sequenceId = ev.sequence_id || ev.emailer_campaign_id || null;
+  const emailerMessageId = ev.emailer_message_id || ev.message_id || null;
+  const contactEmail = ev.email || ev.contact?.email || null;
+  const mailboxEmail = ev.email_account?.email || ev.from_email || null;
+  const occurredAt = ev.created_at || ev.timestamp || new Date().toISOString();
+
+  try {
+    // 1. Find the originating sdr_sends row (if any) for the Pipedrive lead context
+    let leadId = null;
+    let sendRow = null;
+    if (sequenceId && contactEmail) {
+      const { rows } = await pool.query(
+        `SELECT s.id, s.pipedrive_lead_id, s.draft_id
+         FROM sdr_sends s
+         JOIN sdr_drafts d ON d.id = s.draft_id
+         WHERE s.apollo_sequence_id = $1 AND d.contact_email_snapshot = $2
+         ORDER BY s.sent_at DESC LIMIT 1`,
+        [sequenceId, contactEmail],
+      );
+      if (rows[0]) {
+        sendRow = rows[0];
+        leadId = rows[0].pipedrive_lead_id;
+      }
+    }
+
+    // 2. Insert engagement event (idempotent by apollo_event_id)
+    await pool.query(
+      `INSERT INTO sdr_engagement_events (
+         source, event_type, apollo_event_id, apollo_sequence_id,
+         apollo_emailer_message_id, pipedrive_lead_id, mailbox_email,
+         occurred_at, payload, process_status, processed_at
+       ) VALUES ('apollo', $1, $2, $3, $4, $5, $6, $7, $8, 'pending', NULL)
+       ON CONFLICT (apollo_event_id) DO NOTHING`,
+      [
+        eventType,
+        apolloEventId,
+        sequenceId,
+        emailerMessageId,
+        leadId,
+        mailboxEmail,
+        occurredAt,
+        ev,
+      ],
+    );
+
+    // 3. Side effects based on event type
+    let sideEffect = "none";
+
+    if (eventType === "email_sent" || eventType === "email_opened" || eventType === "email_clicked" || eventType === "link_clicked") {
+      sideEffect = "logged-only";
+    } else if (eventType === "email_replied" || eventType === "reply_received") {
+      sideEffect = "reply";
+      if (sendRow) {
+        await pool.query(
+          `UPDATE sdr_sends SET status = 'replied', last_status_at = NOW(), updated_at = NOW()
+           WHERE id = $1`,
+          [sendRow.id],
+        );
+      }
+      // Clear Pipedrive Sequence_Started so the lead is no longer "in" a sequence
+      if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
+        try {
+          await pipedriveClient.updateLead(leadId, {
+            [pdSequenceStartedKey]: "",
+          });
+          await pipedriveClient.addNote({
+            leadId,
+            content: `[Auto] Apollo: REPLY received${contactEmail ? ` from ${contactEmail}` : ""}. Sequence_Started cleared.`,
+          });
+        } catch (e) {
+          console.error("Pipedrive sync on reply failed:", e.message);
+        }
+      }
+      // Remove from Apollo sequence to stop further follow-ups
+      // (Apollo's webhook usually auto-pauses on reply, but we belt-and-suspender)
+    } else if (eventType === "email_bounced" || eventType === "bounce") {
+      sideEffect = "bounce";
+      if (sendRow) {
+        await pool.query(
+          `UPDATE sdr_sends SET status = 'bounced', last_status_at = NOW(), updated_at = NOW()
+           WHERE id = $1`,
+          [sendRow.id],
+        );
+      }
+      if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
+        try {
+          await pipedriveClient.addNote({
+            leadId,
+            content: `[Auto] Apollo: bounce${contactEmail ? ` on ${contactEmail}` : ""}.`,
+          });
+        } catch (e) {
+          console.error("Pipedrive note on bounce failed:", e.message);
+        }
+      }
+    } else if (eventType === "lead_unsubscribed" || eventType === "unsubscribed" || eventType === "email_unsubscribed") {
+      sideEffect = "unsubscribe";
+      if (sendRow) {
+        await pool.query(
+          `UPDATE sdr_sends SET status = 'unsubscribed', last_status_at = NOW(), updated_at = NOW()
+           WHERE id = $1`,
+          [sendRow.id],
+        );
+      }
+      if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
+        try {
+          await pipedriveClient.updateLead(leadId, {
+            [pdSequenceStartedKey]: "",
+          });
+          await pipedriveClient.addNote({
+            leadId,
+            content: `[Auto] Apollo: unsubscribed${contactEmail ? ` (${contactEmail})` : ""}. Sequence_Started cleared.`,
+          });
+        } catch (e) {
+          console.error("Pipedrive sync on unsubscribe failed:", e.message);
+        }
+      }
+    }
+
+    // 4. Mark event processed
+    if (apolloEventId) {
+      await pool.query(
+        `UPDATE sdr_engagement_events
+         SET process_status = 'processed', processed_at = NOW()
+         WHERE apollo_event_id = $1`,
+        [apolloEventId],
+      );
+    }
+
+    return res.json({ ok: true, side_effect: sideEffect, lead_id: leadId, send_updated: !!sendRow });
+  } catch (err) {
+    console.error("/api/sdr/events/ingest error:", err);
+    if (apolloEventId) {
+      await pool.query(
+        `UPDATE sdr_engagement_events
+         SET process_status = 'error', process_error = $2, processed_at = NOW()
+         WHERE apollo_event_id = $1`,
+        [apolloEventId, String(err.message).slice(0, 500)],
+      ).catch(() => {});
+    }
+    return res.status(500).json({ error: err.message || "Event ingest failed" });
+  }
+});
+
+// Pipedrive field key for Sequence_Started (used by /events/ingest)
+const pdSequenceStartedKey = "48c4bb758e8642d6372c7fff9df3c0ea716170f1";
 
 // SDR drafts — list (owner-scoped; admin sees all)
 app.get("/api/sdr/drafts", async (req, res) => {

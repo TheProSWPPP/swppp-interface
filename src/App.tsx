@@ -8,6 +8,7 @@ import AIContent from "./components/AIContent";
 import LeadUpload from "./components/LeadUpload";
 import SystemDocs from "./components/SystemDocs";
 import AutomationRoadmap from "./components/AutomationRoadmap";
+import SdrInterface from "./components/SdrInterface";
 import {
   LayoutDashboard,
   Archive,
@@ -17,11 +18,12 @@ import {
   Upload,
   FileCode,
   ListChecks,
+  Send,
 } from "lucide-react";
 import { cn } from "./utils";
 
-type View = "dashboard" | "archive" | "ai-content" | "leads" | "roadmap" | "methodology" | "system-docs" | "settings";
-const ALL_VIEWS: View[] = ["dashboard", "archive", "ai-content", "leads", "roadmap", "methodology", "system-docs", "settings"];
+type View = "dashboard" | "archive" | "ai-content" | "leads" | "sdr" | "roadmap" | "methodology" | "system-docs" | "settings";
+const ALL_VIEWS: View[] = ["dashboard", "archive", "ai-content", "leads", "sdr", "roadmap", "methodology", "system-docs", "settings"];
 
 function readViewFromHash(): View {
   const h = window.location.hash.replace(/^#\/?/, "").split("?")[0];
@@ -184,6 +186,18 @@ function App() {
                   Lead Import
                 </button>
                 <button
+                  onClick={() => setView("sdr")}
+                  className={cn(
+                    "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
+                    view === "sdr"
+                      ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50",
+                  )}
+                >
+                  <Send className="h-4 w-4" />
+                  SDR
+                </button>
+                <button
                   onClick={() => setView("roadmap")}
                   className={cn(
                     "flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
@@ -259,6 +273,7 @@ function App() {
         {view === "archive" && <ArchiveList onRestore={fetchProjects} />}
         {view === "ai-content" && <AIContent />}
         {view === "leads" && <LeadUpload />}
+        {view === "sdr" && <SdrInterface />}
         {view === "roadmap" && <AutomationRoadmap />}
         {view === "methodology" && <Methodology />}
         {view === "system-docs" && <SystemDocs />}
