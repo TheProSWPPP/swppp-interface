@@ -416,7 +416,8 @@ app.use((req, res, next) => {
     (req.path === "/api/seo-ideas/known-keywords" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/seo-ideas/seeds" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/seo-ideas/existing-articles" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
-    (req.path === "/api/sdr/events/ingest" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET)
+    (req.path === "/api/sdr/events/ingest" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
+    (req.path === "/api/sdr/drafts/generate" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET)
   ) {
     return next();
   }
@@ -1168,10 +1169,11 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
   const { pipedrive_lead_id, trigger_type, apollo_sequence_id, assigned_user_id } = req.body || {};
-  if (!pipedrive_lead_id || !trigger_type) {
-    return res.status(400).json({ error: "pipedrive_lead_id and trigger_type required" });
+  if (!pipedrive_lead_id) {
+    return res.status(400).json({ error: "pipedrive_lead_id required (trigger_type optional — inferred from Pipedrive Trigger_* fields)" });
   }
-  if (assigned_user_id && req.sdrUser.role !== "admin" && assigned_user_id !== req.sdrUser.sub) {
+  // Permission check only applies to JWT-auth'd users; callback_secret callers (n8n) bypass.
+  if (req.sdrUser && assigned_user_id && req.sdrUser.role !== "admin" && assigned_user_id !== req.sdrUser.sub) {
     return res.status(403).json({ error: "Cannot assign draft to another user" });
   }
   try {
