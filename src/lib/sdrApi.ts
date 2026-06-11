@@ -74,6 +74,45 @@ export interface SdrTemplateStep {
   body: string;
 }
 
+export interface SdrTemplate {
+  steps: SdrTemplateStep[];
+  default_subject: string;
+}
+
+export interface SdrEngagementLead {
+  draft_id: string;
+  pipedrive_lead_id: string;
+  trigger_type: SdrTriggerType;
+  assigned_user_id: string | null;
+  contact_email_snapshot: string;
+  lead_title: string | null;
+  sent_at: string | null;
+  send_status: "enrolled" | "sent" | "bounced" | "replied" | "unsubscribed" | "failed" | null;
+  opens: number;
+  clicks: number;
+  replies: number;
+  last_event_at: string | null;
+  score: number;
+}
+
+export interface SdrEngagementRate {
+  sent: number;
+  opened: number;
+  clicked: number;
+  replied: number;
+}
+
+export interface SdrEngagementSummary {
+  leads: SdrEngagementLead[];
+  by_trigger: (SdrEngagementRate & { trigger_type: SdrTriggerType })[];
+  by_sender: (SdrEngagementRate & { username: string; display_name: string })[];
+}
+
+// Pipedrive deep link for a lead (proswpppllc = Pipedrive company domain)
+export function pipedriveLeadUrl(leadId: string): string {
+  return `https://proswpppllc.pipedrive.com/leads/inbox/${leadId}`;
+}
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -106,6 +145,8 @@ async function sdrFetch<T>(path: string, opts: RequestInit & { auth?: boolean } 
   const res = await fetch(path, { credentials: "include", headers: h, ...rest });
   if (res.status === 401 && auth) {
     clearSession();
+    // Tell the UI to bounce back to the user picker (JWT expired mid-session)
+    window.dispatchEvent(new Event("sdr-session-expired"));
   }
   const text = await res.text();
   let data: unknown;
@@ -144,7 +185,7 @@ export const sdrApi = {
     ),
 
   listTemplates: () =>
-    sdrFetch<{ templates: Record<SdrTriggerType, SdrTemplateStep[]> }>("/api/sdr/templates"),
+    sdrFetch<{ templates: Record<SdrTriggerType, SdrTemplate> }>("/api/sdr/templates"),
 
   listDrafts: (status?: SdrDraftStatus) => {
     const q = status ? `?status=${status}` : "";
@@ -153,9 +194,14 @@ export const sdrApi = {
 
   getDraft: (id: string) => sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}`),
 
+  engagementSummary: () => sdrFetch<SdrEngagementSummary>("/api/sdr/engagement/summary"),
+
+  refreshDraft: (id: string) =>
+    sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}/refresh`, { method: "POST" }),
+
   patchDraft: (
     id: string,
-    fields: Partial<Pick<SdrDraft, "subject" | "body" | "scheduled_for" | "assigned_mailbox_id">>,
+    fields: Partial<Pick<SdrDraft, "subject" | "body" | "scheduled_for" | "assigned_mailbox_id" | "apollo_sequence_id">>,
   ) =>
     sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}`, {
       method: "PATCH",

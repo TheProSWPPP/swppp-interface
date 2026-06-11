@@ -17,7 +17,7 @@ import * as apolloClient from "./lib/apolloClient.js";
 import * as pipedriveClient from "./lib/pipedriveClient.js";
 import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
-import { renderAllSteps, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
+import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 
 const { Pool } = pg;
 
@@ -959,57 +959,113 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
   const eventType = ev.type || ev.event_type || ev.event;
   if (!eventType) return res.status(400).json({ error: "Missing event type" });
 
-  const apolloEventId = ev.id || ev.event_id || null;
   const sequenceId = ev.sequence_id || ev.emailer_campaign_id || null;
   const emailerMessageId = ev.emailer_message_id || ev.message_id || null;
   const contactEmail = ev.email || ev.contact?.email || null;
   const mailboxEmail = ev.email_account?.email || ev.from_email || null;
   const occurredAt = ev.created_at || ev.timestamp || new Date().toISOString();
+  // Apollo doesn't always send an event id — synthesize a stable dedupe key so
+  // webhook retries don't double-insert (NULLs never conflict in a UNIQUE index).
+  const apolloEventId =
+    ev.id || ev.event_id ||
+    `synthetic:${crypto.createHash("sha1").update([eventType, emailerMessageId, contactEmail, sequenceId, occurredAt].join("|")).digest("hex")}`;
 
   try {
-    // 1. Find the originating sdr_sends row (if any) for the Pipedrive lead context
+    // 1. Find the originating sdr_sends row for Pipedrive lead context.
+    //    Match priority: emailer_message_id → sequence+email → email-only (latest sent).
     let leadId = null;
     let sendRow = null;
-    if (sequenceId && contactEmail) {
-      const { rows } = await pool.query(
-        `SELECT s.id, s.pipedrive_lead_id, s.draft_id
-         FROM sdr_sends s
-         JOIN sdr_drafts d ON d.id = s.draft_id
+    const pickSend = async (sql, params) => {
+      const { rows } = await pool.query(sql, params);
+      return rows[0] || null;
+    };
+    const SEND_COLS = `s.id, s.pipedrive_lead_id, s.draft_id, s.apollo_sequence_id, s.apollo_contact_id, d.pipedrive_contact_id, d.contact_email_snapshot`;
+    if (emailerMessageId) {
+      sendRow = await pickSend(
+        `SELECT ${SEND_COLS} FROM sdr_sends s JOIN sdr_drafts d ON d.id = s.draft_id
+         WHERE s.apollo_emailer_message_id = $1 ORDER BY s.sent_at DESC LIMIT 1`,
+        [emailerMessageId],
+      );
+    }
+    if (!sendRow && sequenceId && contactEmail) {
+      sendRow = await pickSend(
+        `SELECT ${SEND_COLS} FROM sdr_sends s JOIN sdr_drafts d ON d.id = s.draft_id
          WHERE s.apollo_sequence_id = $1 AND d.contact_email_snapshot = $2
          ORDER BY s.sent_at DESC LIMIT 1`,
         [sequenceId, contactEmail],
       );
-      if (rows[0]) {
-        sendRow = rows[0];
-        leadId = rows[0].pipedrive_lead_id;
-      }
     }
+    if (!sendRow && contactEmail) {
+      sendRow = await pickSend(
+        `SELECT ${SEND_COLS} FROM sdr_sends s JOIN sdr_drafts d ON d.id = s.draft_id
+         WHERE d.contact_email_snapshot = $1 ORDER BY s.sent_at DESC LIMIT 1`,
+        [contactEmail],
+      );
+    }
+    if (sendRow) leadId = sendRow.pipedrive_lead_id;
 
-    // 2. Insert engagement event (idempotent by apollo_event_id)
-    await pool.query(
+    // 2. Insert engagement event (idempotent by apollo_event_id incl. synthetic key)
+    const insertResult = await pool.query(
       `INSERT INTO sdr_engagement_events (
          source, event_type, apollo_event_id, apollo_sequence_id,
-         apollo_emailer_message_id, pipedrive_lead_id, mailbox_email,
+         apollo_emailer_message_id, pipedrive_lead_id, pipedrive_contact_id, mailbox_email,
          occurred_at, payload, process_status, processed_at
-       ) VALUES ('apollo', $1, $2, $3, $4, $5, $6, $7, $8, 'pending', NULL)
-       ON CONFLICT (apollo_event_id) DO NOTHING`,
+       ) VALUES ('apollo', $1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', NULL)
+       ON CONFLICT (apollo_event_id) DO NOTHING
+       RETURNING id`,
       [
         eventType,
         apolloEventId,
-        sequenceId,
+        sequenceId || sendRow?.apollo_sequence_id || null,
         emailerMessageId,
         leadId,
+        sendRow?.pipedrive_contact_id || null,
         mailboxEmail,
         occurredAt,
         ev,
       ],
     );
+    const newlyInserted = insertResult.rows.length > 0;
 
     // 3. Side effects based on event type
     let sideEffect = "none";
 
     if (eventType === "email_sent" || eventType === "email_opened" || eventType === "email_clicked" || eventType === "link_clicked") {
       sideEffect = "logged-only";
+      // Backfill the Apollo message id onto the send row on first 'sent' event so
+      // later open/click/reply events can match by message id directly.
+      if (eventType === "email_sent" && sendRow && emailerMessageId) {
+        await pool.query(
+          `UPDATE sdr_sends SET apollo_emailer_message_id = COALESCE(apollo_emailer_message_id, $2),
+                                status = CASE WHEN status = 'enrolled' THEN 'sent' ELSE status END,
+                                last_status_at = NOW(), updated_at = NOW()
+           WHERE id = $1`,
+          [sendRow.id, emailerMessageId],
+        );
+      }
+      // First click on a lead = high engagement → one Pipedrive note, ever.
+      // Gated on newlyInserted so webhook retries can't double-note.
+      if (
+        (eventType === "email_clicked" || eventType === "link_clicked") &&
+        newlyInserted && leadId && process.env.PIPEDRIVE_API_TOKEN
+      ) {
+        const { rows: clickRows } = await pool.query(
+          `SELECT COUNT(*)::int AS n FROM sdr_engagement_events
+           WHERE pipedrive_lead_id = $1 AND event_type IN ('email_clicked','link_clicked')`,
+          [leadId],
+        );
+        if (clickRows[0]?.n === 1) {
+          sideEffect = "first-click-note";
+          try {
+            await pipedriveClient.addNote({
+              leadId,
+              content: `[Auto] Apollo: first link CLICK${contactEmail ? ` from ${contactEmail}` : ""} — high engagement, consider a call.`,
+            });
+          } catch (e) {
+            console.error("Pipedrive note on first click failed:", e.message);
+          }
+        }
+      }
     } else if (eventType === "email_replied" || eventType === "reply_received") {
       sideEffect = "reply";
       if (sendRow) {
@@ -1034,7 +1090,15 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
         }
       }
       // Remove from Apollo sequence to stop further follow-ups
-      // (Apollo's webhook usually auto-pauses on reply, but we belt-and-suspender)
+      // (Apollo usually auto-pauses on reply, but we belt-and-suspender)
+      const replySeqId = sendRow?.apollo_sequence_id || sequenceId;
+      if (sendRow?.apollo_contact_id && replySeqId && process.env.APOLLO_API_KEY) {
+        try {
+          await apolloClient.removeContactsFromSequence(replySeqId, [sendRow.apollo_contact_id], "remove");
+        } catch (e) {
+          console.error("Apollo remove-from-sequence on reply failed:", e.message);
+        }
+      }
     } else if (eventType === "email_bounced" || eventType === "bounce") {
       sideEffect = "bounce";
       if (sendRow) {
@@ -1074,6 +1138,15 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
           });
         } catch (e) {
           console.error("Pipedrive sync on unsubscribe failed:", e.message);
+        }
+      }
+      // Hard-stop any remaining Apollo follow-ups for an unsubscribed contact
+      const unsubSeqId = sendRow?.apollo_sequence_id || sequenceId;
+      if (sendRow?.apollo_contact_id && unsubSeqId && process.env.APOLLO_API_KEY) {
+        try {
+          await apolloClient.removeContactsFromSequence(unsubSeqId, [sendRow.apollo_contact_id], "remove");
+        } catch (e) {
+          console.error("Apollo remove-from-sequence on unsubscribe failed:", e.message);
         }
       }
     }
@@ -1158,9 +1231,98 @@ app.get("/api/sdr/drafts/:id", async (req, res) => {
 app.get("/api/sdr/templates", (req, res) => {
   const out = {};
   for (const t of Object.keys(SDR_TEMPLATES)) {
-    out[t] = renderAllSteps(t, { first: "{First}", env: "EPA", swppp: "SWPPP", sig: "{Sig}" });
+    out[t] = {
+      steps: renderAllSteps(t, { first: "{First}", env: "EPA", swppp: "SWPPP", sig: "{Sig}" }),
+      default_subject: defaultSubject(t, "{Lead Title}"),
+    };
   }
   res.json({ templates: out });
+});
+
+// SDR engagement — per-lead engagement scores + per-trigger/per-sender rates.
+// Score = replies×10 + clicks×5 + opens×1, recency-decayed (half-life 7 days),
+// so a click yesterday outranks five opens last month. Owner-scoped like drafts.
+app.get("/api/sdr/engagement/summary", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const scope = ownerScope(req.sdrUser, "d.assigned_user_id");
+    const params = [];
+    let ownerWhere = "";
+    if (scope.requires) {
+      params.push(scope.value);
+      ownerWhere = ` AND d.assigned_user_id = $${params.length}`;
+    }
+
+    const leads = await pool.query(
+      `SELECT
+         d.id AS draft_id,
+         d.pipedrive_lead_id,
+         d.trigger_type,
+         d.assigned_user_id,
+         d.contact_email_snapshot,
+         d.metadata->>'pipedrive_lead_title' AS lead_title,
+         d.sent_at,
+         s.status AS send_status,
+         COUNT(e.id) FILTER (WHERE e.event_type = 'email_opened')::int AS opens,
+         COUNT(e.id) FILTER (WHERE e.event_type IN ('email_clicked','link_clicked'))::int AS clicks,
+         COUNT(e.id) FILTER (WHERE e.event_type IN ('email_replied','reply_received'))::int AS replies,
+         MAX(e.occurred_at) AS last_event_at,
+         ROUND(COALESCE(SUM(
+           (CASE WHEN e.event_type IN ('email_replied','reply_received') THEN 10
+                 WHEN e.event_type IN ('email_clicked','link_clicked') THEN 5
+                 WHEN e.event_type = 'email_opened' THEN 1
+                 ELSE 0 END)
+           * EXP(-LN(2) * GREATEST(EXTRACT(EPOCH FROM (NOW() - e.occurred_at)), 0) / (7 * 86400))
+         ), 0)::numeric, 2)::float AS score
+       FROM sdr_drafts d
+       LEFT JOIN LATERAL (
+         SELECT status FROM sdr_sends WHERE draft_id = d.id ORDER BY sent_at DESC LIMIT 1
+       ) s ON TRUE
+       LEFT JOIN sdr_engagement_events e ON e.pipedrive_lead_id = d.pipedrive_lead_id
+       WHERE d.status = 'sent'${ownerWhere}
+       GROUP BY d.id, s.status
+       ORDER BY score DESC, last_event_at DESC NULLS LAST, d.sent_at DESC
+       LIMIT 200`,
+      params,
+    );
+
+    const byTrigger = await pool.query(
+      `SELECT
+         d.trigger_type,
+         COUNT(DISTINCT d.id)::int AS sent,
+         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type = 'email_opened')::int AS opened,
+         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type IN ('email_clicked','link_clicked'))::int AS clicked,
+         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type IN ('email_replied','reply_received'))::int AS replied
+       FROM sdr_drafts d
+       LEFT JOIN sdr_engagement_events e ON e.pipedrive_lead_id = d.pipedrive_lead_id
+       WHERE d.status = 'sent'${ownerWhere}
+       GROUP BY d.trigger_type
+       ORDER BY d.trigger_type`,
+      params,
+    );
+
+    const bySender = await pool.query(
+      `SELECT
+         u.username,
+         u.display_name,
+         COUNT(DISTINCT d.id)::int AS sent,
+         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type = 'email_opened')::int AS opened,
+         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type IN ('email_clicked','link_clicked'))::int AS clicked,
+         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type IN ('email_replied','reply_received'))::int AS replied
+       FROM sdr_drafts d
+       JOIN sdr_users u ON u.id = d.assigned_user_id
+       LEFT JOIN sdr_engagement_events e ON e.pipedrive_lead_id = d.pipedrive_lead_id
+       WHERE d.status = 'sent'${ownerWhere}
+       GROUP BY u.username, u.display_name
+       ORDER BY u.username`,
+      params,
+    );
+
+    res.json({ leads: leads.rows, by_trigger: byTrigger.rows, by_sender: bySender.rows });
+  } catch (err) {
+    console.error("GET /api/sdr/engagement/summary error:", err);
+    res.status(500).json({ error: "Failed to build engagement summary" });
+  }
 });
 
 // SDR drafts — generate from a Pipedrive lead (n8n calls this on lead update).
@@ -1290,9 +1452,13 @@ app.post("/api/sdr/drafts", async (req, res) => {
 // SDR drafts — edit subject/body while pending or approved (not after sent)
 app.patch("/api/sdr/drafts/:id", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
-  const { subject, body, scheduled_for, assigned_mailbox_id } = req.body || {};
-  if (!subject && !body && !scheduled_for && !assigned_mailbox_id) {
+  const { subject, body, scheduled_for, assigned_mailbox_id, apollo_sequence_id } = req.body || {};
+  if (!subject && !body && !scheduled_for && !assigned_mailbox_id && !apollo_sequence_id) {
     return res.status(400).json({ error: "Provide at least one field to update" });
+  }
+  // Sequence reassignment changes WHERE the contact gets enrolled — admin only.
+  if (apollo_sequence_id && req.sdrUser?.role !== "admin") {
+    return res.status(403).json({ error: "Only admin can change apollo_sequence_id" });
   }
   try {
     const scope = ownerScope(req.sdrUser, "assigned_user_id");
@@ -1307,6 +1473,7 @@ app.patch("/api/sdr/drafts/:id", async (req, res) => {
     if (body) { params.push(body); sets.push(`body = $${params.length}`); }
     if (scheduled_for) { params.push(scheduled_for); sets.push(`scheduled_for = $${params.length}`); }
     if (assigned_mailbox_id) { params.push(assigned_mailbox_id); sets.push(`assigned_mailbox_id = $${params.length}`); }
+    if (apollo_sequence_id) { params.push(apollo_sequence_id); sets.push(`apollo_sequence_id = $${params.length}`); }
     sets.push(`status = 'edited'`);
     sets.push(`updated_at = NOW()`);
     const { rows } = await pool.query(
@@ -1339,10 +1506,70 @@ app.post("/api/sdr/drafts/:id/reject", async (req, res) => {
       params,
     );
     if (!rows[0]) return res.status(404).json({ error: "Draft not found or not rejectable" });
+    // Leave a Pipedrive trail so Derek can see why a lead was skipped (non-fatal)
+    if (process.env.PIPEDRIVE_API_TOKEN && rows[0].pipedrive_lead_id) {
+      try {
+        await pipedriveClient.addNote({
+          leadId: rows[0].pipedrive_lead_id,
+          content: `[Auto] Apollo draft rejected by ${req.sdrUser?.username || "system"}: ${reason}`,
+        });
+      } catch (e) {
+        console.error("Pipedrive note on reject failed:", e.message);
+      }
+    }
     res.json({ draft: rows[0] });
   } catch (err) {
     console.error("POST /api/sdr/drafts/:id/reject error:", err);
     res.status(500).json({ error: "Failed to reject draft" });
+  }
+});
+
+// SDR drafts — refresh from Pipedrive. Re-runs the draft generator against the
+// live lead and overwrites the draft's content + snapshots. User-triggered, so
+// clobbering manual edits is intentional (the button warns about it).
+app.post("/api/sdr/drafts/:id/refresh", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
+  try {
+    const scope = ownerScope(req.sdrUser, "assigned_user_id");
+    const params = [req.params.id];
+    let sql = `SELECT * FROM sdr_drafts WHERE id = $1 AND status IN ('pending','approved','edited')`;
+    if (scope.requires) {
+      params.push(scope.value);
+      sql += ` AND ${scope.column} = $${params.length}`;
+    }
+    const { rows } = await pool.query(sql, params);
+    const draft = rows[0];
+    if (!draft) return res.status(404).json({ error: "Draft not found or not refreshable" });
+
+    const payload = await buildDraftFromLead({
+      pipedriveLeadId: draft.pipedrive_lead_id,
+      triggerType: draft.trigger_type,
+      pool,
+      assignedUserId: draft.assigned_user_id,
+      apolloSequenceId: draft.apollo_sequence_id,
+    });
+
+    const { rows: updRows } = await pool.query(
+      `UPDATE sdr_drafts SET
+         subject = $2, body = $3,
+         contact_id_snapshot = $4, contact_email_snapshot = $5, org_id_snapshot = $6,
+         pipedrive_contact_id = $7, pipedrive_org_id = $8,
+         apollo_sequence_id = COALESCE(apollo_sequence_id, $9),
+         metadata = $10, status = 'pending', updated_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [
+        draft.id, payload.subject, payload.body,
+        payload.contact_id_snapshot, payload.contact_email_snapshot, payload.org_id_snapshot,
+        payload.pipedrive_contact_id, payload.pipedrive_org_id,
+        payload.apollo_sequence_id,
+        payload.metadata,
+      ],
+    );
+    res.json({ draft: updRows[0] });
+  } catch (err) {
+    console.error("POST /api/sdr/drafts/:id/refresh error:", err);
+    res.status(err.status || 500).json({ error: err.message || "Refresh failed" });
   }
 });
 
@@ -1385,38 +1612,86 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     }
 
     // Per-lead lock + tx: match Apollo contact, enroll, record send, mark draft sent.
-    const result = await withLeadLock(pool, draft.pipedrive_lead_id, async (client) => {
-      // Match snapshot email → Apollo contact id
-      const match = await apolloClient.matchContactByEmail(draft.contact_email_snapshot);
-      const apolloContactId = match?.person?.id || match?.contact?.id;
-      if (!apolloContactId) throw new Error(`Apollo could not match contact by email ${draft.contact_email_snapshot}`);
+    // `enrolled` tracks whether the Apollo call succeeded — if it did and a later
+    // DB write fails, we must NOT mark the draft 'failed' (re-approving would
+    // enroll the contact in Apollo a second time).
+    let enrolled = false;
+    let apolloContactId = null;
+    let enrollResponse = null;
 
-      // Enroll in sequence with the assigned mailbox as the sender
-      const enroll = await apolloClient.addContactsToSequence(
-        draft.apollo_sequence_id,
-        [apolloContactId],
-        mailbox.apollo_mailbox_id,
-      );
+    let result;
+    try {
+      result = await withLeadLock(pool, draft.pipedrive_lead_id, async (client) => {
+        // Match snapshot email → Apollo contact id
+        const match = await apolloClient.matchContactByEmail(draft.contact_email_snapshot);
+        apolloContactId = match?.person?.id || match?.contact?.id;
+        if (!apolloContactId) throw new Error(`Apollo could not match contact by email ${draft.contact_email_snapshot}`);
 
-      // Mark draft sent
-      const { rows: updRows } = await client.query(
+        // Enroll in sequence with the assigned mailbox as the sender
+        enrollResponse = await apolloClient.addContactsToSequence(
+          draft.apollo_sequence_id,
+          [apolloContactId],
+          mailbox.apollo_mailbox_id,
+        );
+        enrolled = true;
+
+        // Mark draft sent
+        const { rows: updRows } = await client.query(
+          `UPDATE sdr_drafts SET status = 'sent', sent_at = NOW(), approved_at = NOW(),
+                                  approved_by = $2, updated_at = NOW()
+           WHERE id = $1 RETURNING *`,
+          [draft.id, req.sdrUser.sub],
+        );
+
+        // Record sdr_sends row
+        const { rows: sendRows } = await client.query(
+          `INSERT INTO sdr_sends (draft_id, pipedrive_lead_id, apollo_sequence_id,
+                                   apollo_contact_id, mailbox_id, status)
+           VALUES ($1, $2, $3, $4, $5, 'enrolled')
+           RETURNING *`,
+          [draft.id, draft.pipedrive_lead_id, draft.apollo_sequence_id, apolloContactId, mailbox.id],
+        );
+
+        return { draft: updRows[0], send: sendRows[0], apollo_response: enrollResponse };
+      });
+    } catch (txErr) {
+      if (!enrolled) throw txErr; // Apollo never enrolled — safe to fall through to the 'failed' path
+
+      // Apollo enrolled but local bookkeeping failed: record best-effort state so
+      // the draft can't be re-approved, surface the warning instead of erroring.
+      console.error("approve-and-send: Apollo enrolled but DB write failed:", txErr);
+      const warn = `Apollo enrolled OK but local bookkeeping failed: ${String(txErr.message).slice(0, 500)}`;
+      const { rows: updRows } = await pool.query(
         `UPDATE sdr_drafts SET status = 'sent', sent_at = NOW(), approved_at = NOW(),
-                                approved_by = $2, updated_at = NOW()
+                                approved_by = $2, error_message = $3, updated_at = NOW()
          WHERE id = $1 RETURNING *`,
-        [draft.id, req.sdrUser.sub],
-      );
-
-      // Record sdr_sends row
-      const { rows: sendRows } = await client.query(
+        [draft.id, req.sdrUser.sub, warn],
+      ).catch(() => ({ rows: [] }));
+      const { rows: sendRows } = await pool.query(
         `INSERT INTO sdr_sends (draft_id, pipedrive_lead_id, apollo_sequence_id,
                                  apollo_contact_id, mailbox_id, status)
-         VALUES ($1, $2, $3, $4, $5, 'enrolled')
-         RETURNING *`,
+         VALUES ($1, $2, $3, $4, $5, 'enrolled') RETURNING *`,
         [draft.id, draft.pipedrive_lead_id, draft.apollo_sequence_id, apolloContactId, mailbox.id],
-      );
+      ).catch(() => ({ rows: [] }));
+      result = { draft: updRows[0] || { ...draft, status: "sent" }, send: sendRows[0] || null, apollo_response: enrollResponse, warning: warn };
+    }
 
-      return { draft: updRows[0], send: sendRows[0], apollo_response: enroll };
-    });
+    // Pipedrive write-back (non-fatal): mark the lead as in-sequence + leave a note,
+    // so other workflows/humans don't double-outreach this lead.
+    if (process.env.PIPEDRIVE_API_TOKEN) {
+      try {
+        await pipedriveClient.updateLead(draft.pipedrive_lead_id, {
+          [pdSequenceStartedKey]: `Apollo:${draft.trigger_type} ${new Date().toISOString().slice(0, 10)}`,
+        });
+        await pipedriveClient.addNote({
+          leadId: draft.pipedrive_lead_id,
+          content: `[Auto] Apollo: enrolled in ${draft.trigger_type} sequence (${draft.apollo_sequence_id}) by ${req.sdrUser?.username || "system"}. Sender: ${mailbox.email}. Sequence_Started set.`,
+        });
+      } catch (e) {
+        console.error("Pipedrive sync on send failed:", e.message);
+        result.pipedrive_sync = `failed: ${e.message}`;
+      }
+    }
 
     res.json(result);
   } catch (err) {

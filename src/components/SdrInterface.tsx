@@ -1,36 +1,45 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
+  Flame,
   Inbox,
   LayoutGrid,
   LogOut,
   Mail,
+  MousePointerClick,
   RefreshCw,
+  Reply,
   Send,
   Settings as SettingsIcon,
   ShieldCheck,
   Sparkles,
+  X,
   XCircle,
+  Eye,
 } from "lucide-react";
 import {
   clearSession,
   getToken,
   getUser,
+  pipedriveLeadUrl,
   sdrApi,
   setSession,
   type SdrDraft,
+  type SdrEngagementLead,
+  type SdrEngagementSummary,
   type SdrMailbox,
-  type SdrTemplateStep,
+  type SdrTemplate,
   type SdrTriggerType,
   type SdrUser,
   type SdrUserPublic,
 } from "../lib/sdrApi";
 import { cn } from "../utils";
 
-type SdrTab = "queue" | "dashboard" | "mailboxes" | "templates";
+type SdrTab = "queue" | "engaged" | "dashboard" | "mailboxes" | "templates";
 
 const TRIGGER_LABELS: Record<SdrTriggerType, string> = {
   AGC: "Awarded GC",
@@ -56,6 +65,15 @@ const STATUS_COLORS: Record<SdrDraft["status"], string> = {
   cancelled: "bg-slate-100 text-slate-500",
 };
 
+const SEND_STATUS_COLORS: Record<string, string> = {
+  enrolled: "bg-indigo-100 text-indigo-700",
+  sent: "bg-emerald-100 text-emerald-700",
+  replied: "bg-emerald-100 text-emerald-800",
+  bounced: "bg-rose-100 text-rose-700",
+  unsubscribed: "bg-slate-200 text-slate-600",
+  failed: "bg-rose-100 text-rose-700",
+};
+
 function formatRelative(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -72,9 +90,75 @@ function initials(name: string): string {
   return name.split(/\s+/).map((s) => s[0]).join("").slice(0, 2).toUpperCase();
 }
 
+function pct(n: number, d: number): string {
+  return d ? `${Math.round((n / d) * 100)}%` : "—";
+}
+
+// --------------------------------------------------------------------------
+// Toasts (lightweight, local)
+// --------------------------------------------------------------------------
+
+interface Toast {
+  id: number;
+  kind: "success" | "error";
+  text: string;
+}
+
+function useToasts() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const nextId = useRef(1);
+  const push = useCallback((kind: Toast["kind"], text: string) => {
+    const id = nextId.current++;
+    setToasts((t) => [...t, { id, kind, text }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === "error" ? 8000 : 4000);
+  }, []);
+  const dismiss = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
+  return { toasts, push, dismiss };
+}
+
+function ToastStack({ toasts, dismiss }: { toasts: Toast[]; dismiss: (id: number) => void }) {
+  if (!toasts.length) return null;
+  return (
+    <div className="fixed bottom-4 right-4 z-50 space-y-2 max-w-sm">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className={cn(
+            "flex items-start gap-2 rounded-xl px-4 py-3 text-sm shadow-lg border",
+            t.kind === "success"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+              : "bg-rose-50 border-rose-200 text-rose-800",
+          )}
+        >
+          {t.kind === "success" ? (
+            <CheckCircle2 className="h-4 w-4 mt-0.5 flex-shrink-0" />
+          ) : (
+            <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+          )}
+          <span className="flex-1">{t.text}</span>
+          <button onClick={() => dismiss(t.id)} className="text-current opacity-50 hover:opacity-100">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------
+// Root
+// --------------------------------------------------------------------------
+
 export default function SdrInterface() {
   const [user, setUser] = useState<SdrUser | null>(() => getUser());
   const isSignedIn = !!user && !!getToken();
+
+  // JWT expired mid-session (12h TTL) → bounce back to the picker cleanly
+  useEffect(() => {
+    const onExpired = () => setUser(null);
+    window.addEventListener("sdr-session-expired", onExpired);
+    return () => window.removeEventListener("sdr-session-expired", onExpired);
+  }, []);
 
   if (!isSignedIn) {
     return <UserPicker onSignIn={setUser} />;
@@ -170,9 +254,24 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
 
 function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void }) {
   const [tab, setTab] = useState<SdrTab>("queue");
+  const { toasts, push, dismiss } = useToasts();
+
+  // Mailbox lookup shared by Queue (resolve UUID → email in draft detail)
+  const [mailboxById, setMailboxById] = useState<Record<string, SdrMailbox>>({});
+  useEffect(() => {
+    sdrApi
+      .listMailboxes()
+      .then((d) => {
+        const map: Record<string, SdrMailbox> = {};
+        for (const m of d.mailboxes) map[m.id] = m;
+        setMailboxById(map);
+      })
+      .catch(() => {});
+  }, []);
 
   return (
     <div>
+      <ToastStack toasts={toasts} dismiss={dismiss} />
       <div className="flex items-center justify-between mb-6">
         <div>
           <div className="text-xs uppercase tracking-wide font-semibold text-slate-400">SDR</div>
@@ -200,6 +299,9 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
         <TabButton current={tab} value="queue" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>
           Queue
         </TabButton>
+        <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />}>
+          Engaged
+        </TabButton>
         <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>
           Dashboard
         </TabButton>
@@ -211,8 +313,9 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
         </TabButton>
       </div>
 
-      {tab === "queue" && <QueueView user={user} />}
-      {tab === "dashboard" && <DashboardView user={user} />}
+      {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
+      {tab === "engaged" && <EngagedView />}
+      {tab === "dashboard" && <DashboardView />}
       {tab === "mailboxes" && <MailboxesView user={user} />}
       {tab === "templates" && <TemplatesView />}
     </div>
@@ -253,7 +356,17 @@ function TabButton({
 // Queue
 // --------------------------------------------------------------------------
 
-function QueueView({ user: _user }: { user: SdrUser }) {
+const QUEUE_POLL_MS = 60_000;
+
+function QueueView({
+  user,
+  mailboxById,
+  pushToast,
+}: {
+  user: SdrUser;
+  mailboxById: Record<string, SdrMailbox>;
+  pushToast: (kind: "success" | "error", text: string) => void;
+}) {
   const [drafts, setDrafts] = useState<SdrDraft[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -264,13 +377,22 @@ function QueueView({ user: _user }: { user: SdrUser }) {
     try {
       const d = await sdrApi.listDrafts();
       setDrafts(d.drafts);
+      setError(null);
     } catch (e) {
       setError((e as Error).message);
     }
   }, []);
 
+  // Initial load + poll + refresh when the tab regains focus
   useEffect(() => {
     load();
+    const interval = setInterval(load, QUEUE_POLL_MS);
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [load]);
 
   const filtered = useMemo(() => {
@@ -282,28 +404,29 @@ function QueueView({ user: _user }: { user: SdrUser }) {
   }, [drafts, statusFilter]);
 
   async function onApprove(id: string) {
-    if (!confirm("Approve this draft and send to Apollo? This enrolls the contact in the sequence and triggers the first email.")) return;
     setBusyId(id);
     try {
-      await sdrApi.approveAndSendDraft(id);
+      const result = await sdrApi.approveAndSendDraft(id);
+      const warning = (result as { warning?: string }).warning;
+      pushToast(warning ? "error" : "success", warning || "Draft approved — contact enrolled in Apollo.");
       await load();
       setExpandedId(null);
     } catch (e) {
-      alert(`Failed to approve and send: ${(e as Error).message}`);
+      pushToast("error", `Approve & send failed: ${(e as Error).message}`);
+      await load(); // status may have flipped to 'failed'
     } finally {
       setBusyId(null);
     }
   }
 
-  async function onReject(id: string) {
-    const reason = prompt("Why are you rejecting this draft?", "Not a good fit");
-    if (!reason) return;
+  async function onReject(id: string, reason: string) {
     setBusyId(id);
     try {
       await sdrApi.rejectDraft(id, reason);
+      pushToast("success", "Draft rejected.");
       await load();
     } catch (e) {
-      alert(`Failed to reject: ${(e as Error).message}`);
+      pushToast("error", `Reject failed: ${(e as Error).message}`);
     } finally {
       setBusyId(null);
     }
@@ -313,9 +436,36 @@ function QueueView({ user: _user }: { user: SdrUser }) {
     setBusyId(id);
     try {
       await sdrApi.patchDraft(id, { subject, body });
+      pushToast("success", "Edits saved.");
       await load();
     } catch (e) {
-      alert(`Failed to save edit: ${(e as Error).message}`);
+      pushToast("error", `Save failed: ${(e as Error).message}`);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onRefreshFromPipedrive(id: string) {
+    setBusyId(id);
+    try {
+      await sdrApi.refreshDraft(id);
+      pushToast("success", "Draft re-rendered from the live Pipedrive lead.");
+      await load();
+    } catch (e) {
+      pushToast("error", `Refresh failed: ${(e as Error).message}`);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onSetSequenceId(id: string, sequenceId: string) {
+    setBusyId(id);
+    try {
+      await sdrApi.patchDraft(id, { apollo_sequence_id: sequenceId });
+      pushToast("success", "Apollo sequence id set.");
+      await load();
+    } catch (e) {
+      pushToast("error", `Failed to set sequence id: ${(e as Error).message}`);
     } finally {
       setBusyId(null);
     }
@@ -344,12 +494,15 @@ function QueueView({ user: _user }: { user: SdrUser }) {
             All
           </button>
         </div>
-        <button
-          onClick={load}
-          className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 flex items-center gap-2"
-        >
-          <RefreshCw className="h-3.5 w-3.5" /> Refresh
-        </button>
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <span>Auto-refreshes every minute</span>
+          <button
+            onClick={load}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 flex items-center gap-2"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -375,12 +528,16 @@ function QueueView({ user: _user }: { user: SdrUser }) {
           <DraftRow
             key={d.id}
             draft={d}
+            isAdmin={user.role === "admin"}
+            mailbox={d.assigned_mailbox_id ? mailboxById[d.assigned_mailbox_id] : undefined}
             expanded={expandedId === d.id}
             onToggle={() => setExpandedId(expandedId === d.id ? null : d.id)}
             busy={busyId === d.id}
             onApprove={() => onApprove(d.id)}
-            onReject={() => onReject(d.id)}
+            onReject={(reason) => onReject(d.id, reason)}
             onSaveEdit={(s, b) => onSaveEdit(d.id, s, b)}
+            onRefresh={() => onRefreshFromPipedrive(d.id)}
+            onSetSequenceId={(seq) => onSetSequenceId(d.id, seq)}
           />
         ))}
       </div>
@@ -390,23 +547,41 @@ function QueueView({ user: _user }: { user: SdrUser }) {
 
 function DraftRow({
   draft,
+  isAdmin,
+  mailbox,
   expanded,
   onToggle,
   busy,
   onApprove,
   onReject,
   onSaveEdit,
+  onRefresh,
+  onSetSequenceId,
 }: {
   draft: SdrDraft;
+  isAdmin: boolean;
+  mailbox?: SdrMailbox;
   expanded: boolean;
   onToggle: () => void;
   busy: boolean;
   onApprove: () => void;
-  onReject: () => void;
+  onReject: (reason: string) => void;
   onSaveEdit: (subject: string, body: string) => void;
+  onRefresh: () => void;
+  onSetSequenceId: (sequenceId: string) => void;
 }) {
   const [subject, setSubject] = useState(draft.subject);
   const [body, setBody] = useState(draft.body);
+  const [confirming, setConfirming] = useState<"approve" | "reject" | "refresh" | null>(null);
+  const [rejectReason, setRejectReason] = useState("Not a good fit");
+  const [seqInput, setSeqInput] = useState("");
+
+  // Re-sync local edit state when the draft itself changes server-side
+  useEffect(() => {
+    setSubject(draft.subject);
+    setBody(draft.body);
+  }, [draft.subject, draft.body, draft.updated_at]);
+
   const dirty = subject !== draft.subject || body !== draft.body;
   const canSend = ["pending", "approved", "edited"].includes(draft.status);
   const leadTitle = (draft.metadata as { pipedrive_lead_title?: string })?.pipedrive_lead_title;
@@ -433,6 +608,17 @@ function DraftRow({
             {draft.contact_email_snapshot} · {TRIGGER_LABELS[draft.trigger_type]} · {formatRelative(draft.created_at)}
           </div>
         </div>
+        <a
+          href={pipedriveLeadUrl(draft.pipedrive_lead_id)}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          title="Open lead in Pipedrive"
+          className="flex items-center gap-1 text-xs text-slate-400 hover:text-indigo-600 flex-shrink-0"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Pipedrive
+        </a>
       </button>
 
       {expanded && (
@@ -458,52 +644,291 @@ function DraftRow({
             />
           </div>
           <div className="text-xs text-slate-500 space-y-1">
-            <div>Apollo sequence: <span className="font-mono">{draft.apollo_sequence_id || "(none set — required to send)"}</span></div>
-            <div>Mailbox: <span className="font-mono">{draft.assigned_mailbox_id || "(none)"}</span></div>
+            <div>
+              Apollo sequence:{" "}
+              {draft.apollo_sequence_id ? (
+                <span className="font-mono">{draft.apollo_sequence_id}</span>
+              ) : (
+                <span className="text-amber-600 font-semibold">none set — required to send</span>
+              )}
+            </div>
+            <div>
+              Sender: <span className="font-mono">{mailbox?.email || draft.assigned_mailbox_id || "(none)"}</span>
+            </div>
             {draft.reject_reason && <div>Reject reason: <span className="italic">{draft.reject_reason}</span></div>}
             {draft.error_message && (
               <div className="text-rose-600">Error: <span className="italic">{draft.error_message}</span></div>
             )}
           </div>
 
-          {canSend && (
-            <div className="flex items-center justify-end gap-2 pt-2">
-              {dirty && (
-                <button
-                  onClick={() => onSaveEdit(subject, body)}
-                  disabled={busy}
-                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-                >
-                  Save edits
-                </button>
-              )}
+          {/* Admin: set a missing sequence id inline instead of via SQL */}
+          {canSend && !draft.apollo_sequence_id && isAdmin && (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={seqInput}
+                onChange={(e) => setSeqInput(e.target.value)}
+                placeholder="Apollo sequence id (from sequence URL)"
+                className="flex-1 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-mono focus:border-amber-400 focus:outline-none"
+              />
               <button
-                onClick={onReject}
-                disabled={busy}
-                className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 flex items-center gap-2"
+                onClick={() => seqInput.trim() && onSetSequenceId(seqInput.trim())}
+                disabled={busy || !seqInput.trim()}
+                className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500 disabled:opacity-50"
               >
-                <XCircle className="h-4 w-4" />
-                Reject
-              </button>
-              <button
-                onClick={onApprove}
-                disabled={busy || dirty || !draft.apollo_sequence_id || !draft.assigned_mailbox_id}
-                title={
-                  !draft.apollo_sequence_id
-                    ? "Set apollo_sequence_id before sending"
-                    : !draft.assigned_mailbox_id
-                    ? "No mailbox assigned"
-                    : dirty
-                    ? "Save edits first"
-                    : "Enroll in Apollo sequence + send first email"
-                }
-                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50 flex items-center gap-2"
-              >
-                <Send className="h-4 w-4" />
-                Approve & send
+                Set sequence
               </button>
             </div>
           )}
+
+          {canSend && confirming === "approve" && (
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 flex items-center gap-3">
+              <Send className="h-4 w-4 text-indigo-600 flex-shrink-0" />
+              <div className="flex-1 text-sm text-indigo-900">
+                Enrolls <span className="font-semibold">{draft.contact_email_snapshot}</span> in the Apollo sequence and
+                sends the first email from <span className="font-semibold">{mailbox?.email || "the assigned mailbox"}</span>.
+              </div>
+              <button
+                onClick={() => setConfirming(null)}
+                disabled={busy}
+                className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setConfirming(null); onApprove(); }}
+                disabled={busy}
+                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                Confirm send
+              </button>
+            </div>
+          )}
+
+          {canSend && confirming === "reject" && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 flex items-center gap-3">
+              <XCircle className="h-4 w-4 text-rose-600 flex-shrink-0" />
+              <input
+                type="text"
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="Why is this draft being rejected?"
+                className="flex-1 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-sm focus:border-rose-400 focus:outline-none"
+              />
+              <button
+                onClick={() => setConfirming(null)}
+                disabled={busy}
+                className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setConfirming(null); onReject(rejectReason.trim() || "(no reason given)"); }}
+                disabled={busy}
+                className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
+              >
+                Confirm reject
+              </button>
+            </div>
+          )}
+
+          {canSend && confirming === "refresh" && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center gap-3">
+              <RefreshCw className="h-4 w-4 text-amber-600 flex-shrink-0" />
+              <div className="flex-1 text-sm text-amber-900">
+                Re-renders this draft from the live Pipedrive lead. {dirty ? "Your unsaved edits will be lost." : "Any manual edits will be overwritten."}
+              </div>
+              <button
+                onClick={() => setConfirming(null)}
+                disabled={busy}
+                className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setConfirming(null); onRefresh(); }}
+                disabled={busy}
+                className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-500 disabled:opacity-50"
+              >
+                Confirm refresh
+              </button>
+            </div>
+          )}
+
+          {canSend && !confirming && (
+            <div className="flex items-center justify-between gap-2 pt-2">
+              <button
+                onClick={() => setConfirming("refresh")}
+                disabled={busy}
+                title="Re-render this draft from the live Pipedrive lead"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-2"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Refresh from Pipedrive
+              </button>
+              <div className="flex items-center gap-2">
+                {dirty && (
+                  <button
+                    onClick={() => onSaveEdit(subject, body)}
+                    disabled={busy}
+                    className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    Save edits
+                  </button>
+                )}
+                <button
+                  onClick={() => setConfirming("reject")}
+                  disabled={busy}
+                  className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 flex items-center gap-2"
+                >
+                  <XCircle className="h-4 w-4" />
+                  Reject
+                </button>
+                <button
+                  onClick={() => setConfirming("approve")}
+                  disabled={busy || dirty || !draft.apollo_sequence_id || !draft.assigned_mailbox_id}
+                  title={
+                    !draft.apollo_sequence_id
+                      ? "Set the Apollo sequence id before sending"
+                      : !draft.assigned_mailbox_id
+                      ? "No mailbox assigned"
+                      : dirty
+                      ? "Save edits first"
+                      : "Enroll in Apollo sequence + send first email"
+                  }
+                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50 flex items-center gap-2"
+                >
+                  <Send className="h-4 w-4" />
+                  Approve & send
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------
+// Engaged — sent leads ranked by engagement score (clicks > opens, recent > old)
+// --------------------------------------------------------------------------
+
+function isHot(l: SdrEngagementLead): boolean {
+  return l.replies > 0 || l.clicks > 0 || l.opens >= 3;
+}
+
+function EngagedView() {
+  const [summary, setSummary] = useState<SdrEngagementSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    sdrApi
+      .engagementSummary()
+      .then(setSummary)
+      .catch((e) => setError(e.message));
+  }, []);
+
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, QUEUE_POLL_MS);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  if (error)
+    return <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>;
+  if (!summary) return <div className="text-center text-slate-400 py-12">Loading…</div>;
+
+  const hot = summary.leads.filter(isHot);
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <StatTile label="Sent leads" value={summary.leads.length} icon={<Send className="h-4 w-4" />} tone="indigo" />
+        <StatTile label="Hot leads" value={hot.length} icon={<Flame className="h-4 w-4" />} tone="rose" />
+        <StatTile
+          label="Total clicks"
+          value={summary.leads.reduce((a, l) => a + l.clicks, 0)}
+          icon={<MousePointerClick className="h-4 w-4" />}
+          tone="emerald"
+        />
+        <StatTile
+          label="Replies"
+          value={summary.leads.reduce((a, l) => a + l.replies, 0)}
+          icon={<Reply className="h-4 w-4" />}
+          tone="emerald"
+        />
+      </div>
+
+      {summary.leads.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-12 text-center">
+          <Flame className="h-8 w-8 text-slate-300 mx-auto mb-3" />
+          <div className="text-sm font-semibold text-slate-700">No sent leads yet</div>
+          <p className="text-xs text-slate-500 mt-1">
+            Once drafts are approved and Apollo engagement events start flowing, leads will rank here by opens, clicks
+            and replies — most engaged first.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <div className="text-sm font-semibold text-slate-900">Prioritized by engagement</div>
+            <div className="text-xs text-slate-400">Replies ×10 · Clicks ×5 · Opens ×1 · recent activity weighs more</div>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {summary.leads.map((l) => (
+              <li
+                key={l.draft_id}
+                className={cn("px-4 py-3 flex items-center gap-3", isHot(l) && "bg-amber-50/50")}
+              >
+                {isHot(l) ? (
+                  <Flame className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                ) : (
+                  <span className="w-4 flex-shrink-0" />
+                )}
+                <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset", TRIGGER_COLORS[l.trigger_type])}>
+                  {l.trigger_type}
+                </span>
+                {l.send_status && (
+                  <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full", SEND_STATUS_COLORS[l.send_status] || "bg-slate-100 text-slate-600")}>
+                    {l.send_status}
+                  </span>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-900 truncate">
+                    {l.lead_title || `Lead #${l.pipedrive_lead_id}`}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">{l.contact_email_snapshot}</div>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-slate-600 flex-shrink-0">
+                  <span className="flex items-center gap-1" title="Opens">
+                    <Eye className="h-3.5 w-3.5 text-slate-400" /> {l.opens}
+                  </span>
+                  <span className="flex items-center gap-1" title="Clicks">
+                    <MousePointerClick className="h-3.5 w-3.5 text-slate-400" /> {l.clicks}
+                  </span>
+                  <span className="flex items-center gap-1" title="Replies">
+                    <Reply className="h-3.5 w-3.5 text-slate-400" /> {l.replies}
+                  </span>
+                  <span className="text-slate-400 w-16 text-right" title="Last activity">
+                    {formatRelative(l.last_event_at)}
+                  </span>
+                  <span className="font-mono font-semibold text-slate-900 w-12 text-right" title="Engagement score">
+                    {l.score.toFixed(1)}
+                  </span>
+                </div>
+                <a
+                  href={pipedriveLeadUrl(l.pipedrive_lead_id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open lead in Pipedrive"
+                  className="text-slate-400 hover:text-indigo-600 flex-shrink-0"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>
@@ -514,8 +939,9 @@ function DraftRow({
 // Dashboard
 // --------------------------------------------------------------------------
 
-function DashboardView({ user: _user }: { user: SdrUser }) {
+function DashboardView() {
   const [drafts, setDrafts] = useState<SdrDraft[] | null>(null);
+  const [summary, setSummary] = useState<SdrEngagementSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -523,6 +949,10 @@ function DashboardView({ user: _user }: { user: SdrUser }) {
       .listDrafts()
       .then((d) => setDrafts(d.drafts))
       .catch((e) => setError(e.message));
+    sdrApi
+      .engagementSummary()
+      .then(setSummary)
+      .catch(() => {}); // rates are additive — dashboard still works without them
   }, []);
 
   if (error)
@@ -535,16 +965,34 @@ function DashboardView({ user: _user }: { user: SdrUser }) {
     rejected: drafts.filter((d) => d.status === "rejected").length,
     failed: drafts.filter((d) => d.status === "failed").length,
   };
-  const recent = drafts.slice(0, 10);
+  const recent = [...drafts]
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    .slice(0, 10);
 
   return (
-    <div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatTile label="In queue" value={counts.pending} icon={<Inbox className="h-4 w-4" />} tone="indigo" />
         <StatTile label="Sent" value={counts.sent} icon={<CheckCircle2 className="h-4 w-4" />} tone="emerald" />
         <StatTile label="Rejected" value={counts.rejected} icon={<XCircle className="h-4 w-4" />} tone="slate" />
         <StatTile label="Failed" value={counts.failed} icon={<AlertCircle className="h-4 w-4" />} tone="rose" />
       </div>
+
+      {summary && summary.by_trigger.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <RatesTable
+            title="By trigger type"
+            rows={summary.by_trigger.map((r) => ({
+              label: `${r.trigger_type} — ${TRIGGER_LABELS[r.trigger_type]}`,
+              ...r,
+            }))}
+          />
+          <RatesTable
+            title="By sender"
+            rows={summary.by_sender.map((r) => ({ label: r.display_name || r.username, ...r }))}
+          />
+        </div>
+      )}
 
       <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100">
@@ -571,6 +1019,50 @@ function DashboardView({ user: _user }: { user: SdrUser }) {
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+function RatesTable({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: { label: string; sent: number; opened: number; clicked: number; replied: number }[];
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100">
+        <div className="text-sm font-semibold text-slate-900">{title}</div>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-xs text-slate-400 uppercase tracking-wide">
+            <th className="text-left font-semibold px-4 py-2"></th>
+            <th className="text-right font-semibold px-2 py-2">Sent</th>
+            <th className="text-right font-semibold px-2 py-2">Open</th>
+            <th className="text-right font-semibold px-2 py-2">Click</th>
+            <th className="text-right font-semibold px-4 py-2">Reply</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map((r) => (
+            <tr key={r.label}>
+              <td className="px-4 py-2 text-slate-700 font-medium">{r.label}</td>
+              <td className="px-2 py-2 text-right font-mono text-slate-900">{r.sent}</td>
+              <td className="px-2 py-2 text-right font-mono text-slate-700" title={`${r.opened} of ${r.sent}`}>
+                {pct(r.opened, r.sent)}
+              </td>
+              <td className="px-2 py-2 text-right font-mono text-slate-700" title={`${r.clicked} of ${r.sent}`}>
+                {pct(r.clicked, r.sent)}
+              </td>
+              <td className="px-4 py-2 text-right font-mono text-slate-700" title={`${r.replied} of ${r.sent}`}>
+                {pct(r.replied, r.sent)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -611,6 +1103,7 @@ function MailboxesView({ user }: { user: SdrUser }) {
   const [mailboxes, setMailboxes] = useState<SdrMailbox[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -627,11 +1120,12 @@ function MailboxesView({ user }: { user: SdrUser }) {
 
   async function sync() {
     setSyncing(true);
+    setSyncError(null);
     try {
       await sdrApi.syncMailboxesFromApollo();
       await load();
     } catch (e) {
-      alert(`Sync failed: ${(e as Error).message}`);
+      setSyncError((e as Error).message);
     } finally {
       setSyncing(false);
     }
@@ -643,7 +1137,8 @@ function MailboxesView({ user }: { user: SdrUser }) {
   return (
     <div>
       {user.role === "admin" && (
-        <div className="flex items-center justify-end mb-3">
+        <div className="flex items-center justify-end gap-3 mb-3">
+          {syncError && <span className="text-xs text-rose-600">Sync failed: {syncError}</span>}
           <button
             onClick={sync}
             disabled={syncing}
@@ -703,7 +1198,7 @@ function MailboxesView({ user }: { user: SdrUser }) {
 // --------------------------------------------------------------------------
 
 function TemplatesView() {
-  const [templates, setTemplates] = useState<Record<SdrTriggerType, SdrTemplateStep[]> | null>(null);
+  const [templates, setTemplates] = useState<Record<SdrTriggerType, SdrTemplate> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -724,15 +1219,23 @@ function TemplatesView() {
       </p>
       {(Object.keys(templates) as SdrTriggerType[]).map((t) => (
         <div key={t} className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 flex-wrap">
             <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset", TRIGGER_COLORS[t])}>{t}</span>
             <span className="text-sm font-semibold text-slate-900">{TRIGGER_LABELS[t]}</span>
-            <span className="text-xs text-slate-500">— {templates[t].length} step{templates[t].length === 1 ? "" : "s"}</span>
+            <span className="text-xs text-slate-500">— {templates[t].steps.length} step{templates[t].steps.length === 1 ? "" : "s"}</span>
+            <span className="ml-auto text-xs text-slate-500">
+              Subject: <span className="font-mono text-slate-700">{templates[t].default_subject}</span>
+            </span>
           </div>
           <ul className="divide-y divide-slate-100">
-            {templates[t].map((step, i) => (
+            {templates[t].steps.map((step, i) => (
               <li key={i} className="px-4 py-3">
-                <div className="text-xs font-semibold text-slate-500 mb-1">Day {step.day}</div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                    Day {step.day}
+                  </span>
+                  {i === 0 && <span className="text-[10px] text-slate-400">sent as the draft — steps below live in Apollo</span>}
+                </div>
                 <pre className="text-xs text-slate-700 whitespace-pre-wrap font-mono bg-slate-50 rounded-lg px-3 py-2">{step.body}</pre>
               </li>
             ))}
