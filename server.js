@@ -1179,6 +1179,11 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
 // Pipedrive field key for Sequence_Started (used by /events/ingest)
 const pdSequenceStartedKey = "48c4bb758e8642d6372c7fff9df3c0ea716170f1";
 
+// Apollo contact custom fields carrying the approved draft into the sequence
+// step-1 template (created via API 2026-06-11; override via env if recreated)
+const APOLLO_CF_DRAFT_SUBJECT = process.env.APOLLO_CF_DRAFT_SUBJECT || "6a2adb32a2b9130020474786";
+const APOLLO_CF_DRAFT_BODY = process.env.APOLLO_CF_DRAFT_BODY || "6a2adb32bfaa320020f80f97";
+
 // SDR drafts — list (owner-scoped; admin sees all)
 app.get("/api/sdr/drafts", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
@@ -1626,6 +1631,15 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         const match = await apolloClient.matchContactByEmail(draft.contact_email_snapshot);
         apolloContactId = match?.person?.id || match?.contact?.id;
         if (!apolloContactId) throw new Error(`Apollo could not match contact by email ${draft.contact_email_snapshot}`);
+
+        // Carry the approved subject/body into Apollo contact custom fields.
+        // The sequences' step-1 templates merge {{contact.swppp_draft_subject/body}},
+        // so what was approved in the queue is exactly what Apollo sends.
+        // Must succeed BEFORE enrollment — otherwise Apollo would send raw merge tags.
+        await apolloClient.updateContactCustomFields(apolloContactId, {
+          [APOLLO_CF_DRAFT_SUBJECT]: draft.subject,
+          [APOLLO_CF_DRAFT_BODY]: draft.body,
+        });
 
         // Enroll in sequence with the assigned mailbox as the sender
         enrollResponse = await apolloClient.addContactsToSequence(
