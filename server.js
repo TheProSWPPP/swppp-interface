@@ -18,6 +18,7 @@ import * as pipedriveClient from "./lib/pipedriveClient.js";
 import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
+import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 
 const { Pool } = pg;
 
@@ -3882,6 +3883,9 @@ app.use(express.static(path.join(__dirname, "dist")));
 app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
+
+// Brevo Nurture lane routes (inherit the /api/sdr/* JWT + basic-auth perimeter above)
+registerNurtureRoutes(app);
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
