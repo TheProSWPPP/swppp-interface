@@ -132,7 +132,7 @@ export function clearSession(): void {
   localStorage.removeItem(USER_KEY);
 }
 
-async function sdrFetch<T>(path: string, opts: RequestInit & { auth?: boolean } = {}): Promise<T> {
+export async function sdrFetch<T>(path: string, opts: RequestInit & { auth?: boolean } = {}): Promise<T> {
   const { auth = true, headers, ...rest } = opts;
   const h: Record<string, string> = {
     "Content-Type": "application/json",
