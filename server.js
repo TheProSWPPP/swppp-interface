@@ -19,6 +19,7 @@ import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
+import { registerPermitRoutes } from "./lib/permitRoutes.js";
 
 const { Pool } = pg;
 
@@ -3940,6 +3941,7 @@ setInterval(async () => {
 // MUST be registered before the SPA catch-all below, or authenticated GETs to these
 // routes get shadowed by the index.html fallback.
 registerNurtureRoutes(app, pool);
+registerPermitRoutes(app, pool);
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, "dist")));
