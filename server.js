@@ -3876,6 +3876,11 @@ setInterval(async () => {
   }
 }, 60 * 1000); // Check every minute
 
+// Brevo Nurture lane routes (inherit the /api/sdr/* JWT + basic-auth perimeter above).
+// MUST be registered before the SPA catch-all below, or authenticated GETs to these
+// routes get shadowed by the index.html fallback.
+registerNurtureRoutes(app);
+
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, "dist")));
 
@@ -3883,9 +3888,6 @@ app.use(express.static(path.join(__dirname, "dist")));
 app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
-
-// Brevo Nurture lane routes (inherit the /api/sdr/* JWT + basic-auth perimeter above)
-registerNurtureRoutes(app);
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
