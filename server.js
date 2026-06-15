@@ -749,6 +749,19 @@ async function initDB() {
       )
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_migrations_lead ON sdr_migrations(pipedrive_lead_id)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS nurture_audit (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        sdr_user TEXT,
+        action TEXT NOT NULL,
+        target_kind TEXT,
+        target_id TEXT,
+        summary TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_nurture_audit_time ON nurture_audit(created_at DESC)`);
     console.log("SDR tables (sdr_users, sdr_mailboxes, sdr_drafts, sdr_sends, sdr_engagement_events, sdr_migrations) verified/created.");
 
     // Automation Roadmap — shared task list (team posts work, Derek tracks/edits/comments)
@@ -3879,7 +3892,7 @@ setInterval(async () => {
 // Brevo Nurture lane routes (inherit the /api/sdr/* JWT + basic-auth perimeter above).
 // MUST be registered before the SPA catch-all below, or authenticated GETs to these
 // routes get shadowed by the index.html fallback.
-registerNurtureRoutes(app);
+registerNurtureRoutes(app, pool);
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, "dist")));
