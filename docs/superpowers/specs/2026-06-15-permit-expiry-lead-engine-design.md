@@ -189,6 +189,8 @@ The Permits tab shows **"today's remaining send budget"** so the ceiling is alwa
 - TCEQ scrape transport: plain HTTP GET (n8n node vs Railway backend) vs Browserless+residential-proxy fallback — decided by build task 1 (IP-block test).
 - Daily enrollment cap default value (start conservative).
 
+- **Plan 1 (foundation) shipped 2026-06-15** on branch `feat/permit-engine`: EPA ingest + `permit_facilities`/`permit_operators` schema + scoring v1 + pool/operators/promote API + Pool tab in the Cold lane. Live ingest loaded **8,947 active NOI facilities → 5,525 deduped operators** into the prod DB (NEC excluded; verified). Plan 2 starts at build-task-1 (TCEQ transport IP test from n8n/Railway), then TCEQ scrape → `permit_enrichment` table → email discovery → ECHO compliance flags (feed the scoring slots already built) → activation/mailbox controls → MSGP Renewal Apollo sequence → multi-channel output, consuming `permit_facilities.status='promoted'` rows.
+
 ---
 
 ## 11. Validation Log (spikes run 2026-06-15)
