@@ -68,8 +68,11 @@ function CampaignRow({ c, admin, lists, busy, expanded, onToggle, setBusy, reloa
   const [confirm, setConfirm] = useState<null | "send" | "delete" | "suspend">(null);
   const [testEmail, setTestEmail] = useState("");
   const [dupName, setDupName] = useState(`${c.name} (copy)`);
-  const [dupList, setDupList] = useState<number | "">("");
+  const [dupList, setDupList] = useState<string>(""); // string so the controlled <select> matches its option values
   const [showDup, setShowDup] = useState(false);
+
+  // Don't leave a stale confirm bar / duplicate panel open when the row is collapsed
+  useEffect(() => { if (!expanded) { setConfirm(null); setShowDup(false); } }, [expanded]);
 
   const run = async (fn: () => Promise<unknown>, okMsg: string) => {
     setBusy(true);
@@ -114,7 +117,7 @@ function CampaignRow({ c, admin, lists, busy, expanded, onToggle, setBusy, reloa
           {showDup && (
             <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
               <input value={dupName} onChange={(e) => setDupName(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm" placeholder="New campaign name" />
-              <select value={dupList} onChange={(e) => setDupList(e.target.value ? Number(e.target.value) : "")} className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm">
+              <select value={dupList} onChange={(e) => setDupList(e.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm">
                 <option value="">Recipient list (optional)</option>
                 {lists.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.count ?? "?"})</option>)}
               </select>
