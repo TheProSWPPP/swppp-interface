@@ -1641,9 +1641,9 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     let result;
     try {
       result = await withLeadLock(pool, draft.pipedrive_lead_id, async (client) => {
-        // Match snapshot email → Apollo contact id
+        // Match snapshot email → Apollo ACCOUNT CONTACT id (find-or-create)
         const match = await apolloClient.matchContactByEmail(draft.contact_email_snapshot);
-        apolloContactId = match?.person?.id || match?.contact?.id;
+        apolloContactId = match?.id || match?.contact?.id;
         if (!apolloContactId) throw new Error(`Apollo could not match contact by email ${draft.contact_email_snapshot}`);
 
         // Carry the approved subject/body into Apollo contact custom fields.
