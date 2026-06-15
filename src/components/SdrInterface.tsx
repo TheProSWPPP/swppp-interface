@@ -372,7 +372,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             <NurtureTabButton current={nurtureTab} value="contacts" onClick={(v) => { setNurtureTab(v); setDrillListId(null); }} icon={<Inbox className="h-4 w-4" />}>Contacts</NurtureTabButton>
             <NurtureTabButton current={nurtureTab} value="automations" onClick={(v) => setNurtureTab(v)} icon={<RefreshCw className="h-4 w-4" />}>Automations</NurtureTabButton>
           </div>
-          {nurtureTab === "campaigns" && <CampaignsView />}
+          {nurtureTab === "campaigns" && <CampaignsView pushToast={push} />}
           {nurtureTab === "lists" && (
             <ListsView
               onDrill={(id) => { setDrillListId(id); setNurtureTab("contacts"); }}
