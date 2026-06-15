@@ -1,5 +1,5 @@
 // Nurture (Brevo) read client. Reuses sdrFetch for JWT auth + 401 handling.
-import { sdrFetch } from "./sdrApi";
+import { getUser, sdrFetch } from "./sdrApi";
 
 export interface NurtureAccount {
   email: string | null;
@@ -60,6 +60,10 @@ export interface AutomationEngine {
   error?: string;
 }
 
+export function isAdmin(): boolean {
+  return getUser()?.role === "admin";
+}
+
 // Deep links for capabilities the Brevo API can't do. Exact paths verified at build;
 // any unknown kind falls back to the Brevo home app.
 export function brevoUrl(kind: "campaigns" | "campaign" | "automations" | "senders" | "lists" | "templates" | "home", id?: number | string): string {
@@ -84,4 +88,42 @@ export const nurtureApi = {
   contact: (id: string) => sdrFetch<{ contact: NurtureContact }>(`/api/sdr/nurture/contacts/${encodeURIComponent(id)}`),
   senders: () => sdrFetch<{ senders: NurtureSender[] }>("/api/sdr/nurture/senders"),
   automationEngine: () => sdrFetch<AutomationEngine>("/api/sdr/nurture/automation-engine"),
+
+  folders: () => sdrFetch<{ folders: { id: number; name: string }[] }>("/api/sdr/nurture/folders"),
+
+  // campaign actions
+  campaignTest: (id: number, emailTo: string[]) =>
+    sdrFetch(`/api/sdr/nurture/campaigns/${id}/test`, { method: "POST", body: JSON.stringify({ emailTo }) }),
+  campaignSend: (id: number) =>
+    sdrFetch(`/api/sdr/nurture/campaigns/${id}/send`, { method: "POST" }),
+  campaignSchedule: (id: number, scheduledAt: string) =>
+    sdrFetch(`/api/sdr/nurture/campaigns/${id}/schedule`, { method: "PATCH", body: JSON.stringify({ scheduledAt }) }),
+  campaignSuspend: (id: number) =>
+    sdrFetch(`/api/sdr/nurture/campaigns/${id}/suspend`, { method: "POST" }),
+  campaignDuplicate: (id: number, name: string, listIds: number[], scheduledAt?: string) =>
+    sdrFetch<{ id: number }>(`/api/sdr/nurture/campaigns/${id}/duplicate`, { method: "POST", body: JSON.stringify({ name, listIds, scheduledAt }) }),
+  campaignDelete: (id: number) =>
+    sdrFetch(`/api/sdr/nurture/campaigns/${id}`, { method: "DELETE" }),
+
+  // list actions
+  listCreate: (name: string, folderId?: number) =>
+    sdrFetch<{ id: number }>("/api/sdr/nurture/lists", { method: "POST", body: JSON.stringify({ name, folderId }) }),
+  listRename: (id: number, name: string) =>
+    sdrFetch(`/api/sdr/nurture/lists/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+  listDelete: (id: number) =>
+    sdrFetch(`/api/sdr/nurture/lists/${id}`, { method: "DELETE" }),
+  listAddContacts: (id: number, emails: string[]) =>
+    sdrFetch(`/api/sdr/nurture/lists/${id}/contacts/add`, { method: "POST", body: JSON.stringify({ emails }) }),
+  listRemoveContacts: (id: number, emails: string[]) =>
+    sdrFetch(`/api/sdr/nurture/lists/${id}/contacts/remove`, { method: "POST", body: JSON.stringify({ emails }) }),
+
+  // contact actions
+  contactCreate: (email: string, attributes: Record<string, unknown>, listIds: number[]) =>
+    sdrFetch(`/api/sdr/nurture/contacts`, { method: "POST", body: JSON.stringify({ email, attributes, listIds }) }),
+  contactUpdate: (id: string, attributes: Record<string, unknown>) =>
+    sdrFetch(`/api/sdr/nurture/contacts/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ attributes }) }),
+  contactBlocklist: (id: string, blocked = true) =>
+    sdrFetch(`/api/sdr/nurture/contacts/${encodeURIComponent(id)}/blocklist`, { method: "POST", body: JSON.stringify({ blocked }) }),
+  contactDelete: (id: string) =>
+    sdrFetch(`/api/sdr/nurture/contacts/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
