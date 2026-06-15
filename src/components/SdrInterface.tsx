@@ -16,7 +16,9 @@ import {
   Send,
   Settings as SettingsIcon,
   ShieldCheck,
+  Snowflake,
   Sparkles,
+  Sprout,
   X,
   XCircle,
   Eye,
@@ -38,8 +40,22 @@ import {
   type SdrUserPublic,
 } from "../lib/sdrApi";
 import { cn } from "../utils";
+import CampaignsView from "./nurture/CampaignsView";
+import ListsView from "./nurture/ListsView";
+import ContactsView from "./nurture/ContactsView";
+import AutomationsView from "./nurture/AutomationsView";
 
 type SdrTab = "queue" | "engaged" | "dashboard" | "mailboxes" | "templates";
+type OutreachLane = "cold" | "nurture";
+type NurtureTab = "campaigns" | "lists" | "contacts" | "automations";
+
+const LANE_KEY = "swppp_outreach_lane";
+function getLane(): OutreachLane {
+  return localStorage.getItem(LANE_KEY) === "nurture" ? "nurture" : "cold";
+}
+function setLaneStored(l: OutreachLane) {
+  localStorage.setItem(LANE_KEY, l);
+}
 
 const TRIGGER_LABELS: Record<SdrTriggerType, string> = {
   AGC: "Awarded GC",
@@ -253,8 +269,10 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
 // --------------------------------------------------------------------------
 
 function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void }) {
+  const [lane, setLane] = useState<OutreachLane>(() => getLane());
   const [tab, setTab] = useState<SdrTab>("queue");
-  const { toasts, push, dismiss } = useToasts();
+  const [nurtureTab, setNurtureTab] = useState<NurtureTab>("campaigns");
+  const [drillListId, setDrillListId] = useState<number | null>(null);
 
   // Mailbox lookup shared by Queue (resolve UUID → email in draft detail)
   const [mailboxById, setMailboxById] = useState<Record<string, SdrMailbox>>({});
@@ -269,13 +287,20 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
       .catch(() => {});
   }, []);
 
+  const { toasts, push, dismiss } = useToasts();
+
+  function switchLane(l: OutreachLane) {
+    setLane(l);
+    setLaneStored(l);
+  }
+
   return (
     <div>
       <ToastStack toasts={toasts} dismiss={dismiss} />
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <div className="text-xs uppercase tracking-wide font-semibold text-slate-400">SDR</div>
-          <h2 className="text-2xl font-semibold text-slate-900">Apollo outreach console</h2>
+          <h2 className="text-2xl font-semibold text-slate-900">Outreach console</h2>
         </div>
         <div className="flex items-center gap-3">
           <div className="text-right">
@@ -295,30 +320,84 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
         </div>
       </div>
 
-      <div className="flex items-center gap-1 mb-6 border-b border-slate-200">
-        <TabButton current={tab} value="queue" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>
-          Queue
-        </TabButton>
-        <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />}>
-          Engaged
-        </TabButton>
-        <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>
-          Dashboard
-        </TabButton>
-        <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>
-          Mailboxes
-        </TabButton>
-        <TabButton current={tab} value="templates" onClick={setTab} icon={<SettingsIcon className="h-4 w-4" />}>
-          Templates
-        </TabButton>
+      {/* Lane toggle */}
+      <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 mb-5">
+        <button
+          onClick={() => switchLane("cold")}
+          className={cn(
+            "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
+            lane === "cold" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
+          )}
+        >
+          <Snowflake className="h-4 w-4" />
+          Cold · Apollo
+        </button>
+        <button
+          onClick={() => switchLane("nurture")}
+          className={cn(
+            "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
+            lane === "nurture" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
+          )}
+        >
+          <Sprout className="h-4 w-4" />
+          Nurture · Brevo
+        </button>
       </div>
 
-      {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
-      {tab === "engaged" && <EngagedView />}
-      {tab === "dashboard" && <DashboardView />}
-      {tab === "mailboxes" && <MailboxesView user={user} />}
-      {tab === "templates" && <TemplatesView />}
+      {lane === "cold" ? (
+        <>
+          <div className="flex items-center gap-1 mb-6 border-b border-slate-200">
+            <TabButton current={tab} value="queue" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Queue</TabButton>
+            <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />}>Engaged</TabButton>
+            <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
+            <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
+            <TabButton current={tab} value="templates" onClick={setTab} icon={<SettingsIcon className="h-4 w-4" />}>Templates</TabButton>
+          </div>
+          {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
+          {tab === "dashboard" && <DashboardView />}
+          {tab === "engaged" && <EngagedView />}
+          {tab === "mailboxes" && <MailboxesView user={user} />}
+          {tab === "templates" && <TemplatesView />}
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-1 mb-6 border-b border-slate-200">
+            <NurtureTabButton current={nurtureTab} value="campaigns" onClick={(v) => { setNurtureTab(v); setDrillListId(null); }} icon={<Send className="h-4 w-4" />}>Campaigns</NurtureTabButton>
+            <NurtureTabButton current={nurtureTab} value="lists" onClick={(v) => { setNurtureTab(v); setDrillListId(null); }} icon={<LayoutGrid className="h-4 w-4" />}>Lists</NurtureTabButton>
+            <NurtureTabButton current={nurtureTab} value="contacts" onClick={(v) => setNurtureTab(v)} icon={<Inbox className="h-4 w-4" />}>Contacts</NurtureTabButton>
+            <NurtureTabButton current={nurtureTab} value="automations" onClick={(v) => setNurtureTab(v)} icon={<RefreshCw className="h-4 w-4" />}>Automations</NurtureTabButton>
+          </div>
+          {nurtureTab === "campaigns" && <CampaignsView />}
+          {nurtureTab === "lists" && (
+            <ListsView
+              onDrill={(id) => { setDrillListId(id); setNurtureTab("contacts"); }}
+            />
+          )}
+          {nurtureTab === "contacts" && <ContactsView listId={drillListId} />}
+          {nurtureTab === "automations" && <AutomationsView />}
+        </>
+      )}
     </div>
+  );
+}
+
+function NurtureTabButton({
+  current, value, onClick, icon, children,
+}: {
+  current: NurtureTab; value: NurtureTab; onClick: (v: NurtureTab) => void; icon: React.ReactNode; children: React.ReactNode;
+}) {
+  const active = current === value;
+  return (
+    <button
+      onClick={() => onClick(value)}
+      className={cn(
+        "flex items-center gap-2 px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors",
+        active ? "border-emerald-600 text-emerald-600" : "border-transparent text-slate-500 hover:text-slate-900",
+      )}
+    >
+      {icon}
+      {children}
+    </button>
   );
 }
 
