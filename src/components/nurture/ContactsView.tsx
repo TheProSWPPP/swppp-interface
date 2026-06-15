@@ -22,6 +22,15 @@ export default function ContactsView({ listId, pushToast }: { listId: number | n
 
   useEffect(() => { if (listId == null) return; setOffset(0); load(listId, 0); }, [listId, load]);
 
+  // If a page goes empty after a removal/delete but more contacts exist on earlier pages, step back.
+  useEffect(() => {
+    if (listId != null && contacts && contacts.length === 0 && count > 0 && offset > 0) {
+      const o = Math.max(0, offset - PAGE);
+      setOffset(o);
+      load(listId, o);
+    }
+  }, [contacts, count, offset, listId, load]);
+
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true);
     try { await fn(); toast("success", ok); if (listId != null) load(listId, offset); } catch (e) { toast("error", (e as Error).message); } finally { setBusy(false); }
