@@ -376,9 +376,10 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {nurtureTab === "lists" && (
             <ListsView
               onDrill={(id) => { setDrillListId(id); setNurtureTab("contacts"); }}
+              pushToast={push}
             />
           )}
-          {nurtureTab === "contacts" && <ContactsView listId={drillListId} />}
+          {nurtureTab === "contacts" && <ContactsView listId={drillListId} pushToast={push} />}
           {nurtureTab === "automations" && <AutomationsView />}
         </>
       )}
