@@ -292,6 +292,9 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   function switchLane(l: OutreachLane) {
     setLane(l);
     setLaneStored(l);
+    // re-entering a lane should start fresh — no stale drill-down
+    setNurtureTab("campaigns");
+    setDrillListId(null);
   }
 
   return (
@@ -321,9 +324,10 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
       </div>
 
       {/* Lane toggle */}
-      <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 mb-5">
+      <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 mb-5" role="group" aria-label="Outreach lane">
         <button
           onClick={() => switchLane("cold")}
+          aria-pressed={lane === "cold"}
           className={cn(
             "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
             lane === "cold" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
@@ -334,6 +338,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
         </button>
         <button
           onClick={() => switchLane("nurture")}
+          aria-pressed={lane === "nurture"}
           className={cn(
             "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
             lane === "nurture" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
@@ -354,8 +359,8 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             <TabButton current={tab} value="templates" onClick={setTab} icon={<SettingsIcon className="h-4 w-4" />}>Templates</TabButton>
           </div>
           {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
-          {tab === "dashboard" && <DashboardView />}
           {tab === "engaged" && <EngagedView />}
+          {tab === "dashboard" && <DashboardView />}
           {tab === "mailboxes" && <MailboxesView user={user} />}
           {tab === "templates" && <TemplatesView />}
         </>
@@ -364,7 +369,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           <div className="flex items-center gap-1 mb-6 border-b border-slate-200">
             <NurtureTabButton current={nurtureTab} value="campaigns" onClick={(v) => { setNurtureTab(v); setDrillListId(null); }} icon={<Send className="h-4 w-4" />}>Campaigns</NurtureTabButton>
             <NurtureTabButton current={nurtureTab} value="lists" onClick={(v) => { setNurtureTab(v); setDrillListId(null); }} icon={<LayoutGrid className="h-4 w-4" />}>Lists</NurtureTabButton>
-            <NurtureTabButton current={nurtureTab} value="contacts" onClick={(v) => setNurtureTab(v)} icon={<Inbox className="h-4 w-4" />}>Contacts</NurtureTabButton>
+            <NurtureTabButton current={nurtureTab} value="contacts" onClick={(v) => { setNurtureTab(v); setDrillListId(null); }} icon={<Inbox className="h-4 w-4" />}>Contacts</NurtureTabButton>
             <NurtureTabButton current={nurtureTab} value="automations" onClick={(v) => setNurtureTab(v)} icon={<RefreshCw className="h-4 w-4" />}>Automations</NurtureTabButton>
           </div>
           {nurtureTab === "campaigns" && <CampaignsView />}
