@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  FileSearch,
   Flame,
   Inbox,
   LayoutGrid,
@@ -44,8 +45,9 @@ import CampaignsView from "./nurture/CampaignsView";
 import ListsView from "./nurture/ListsView";
 import ContactsView from "./nurture/ContactsView";
 import AutomationsView from "./nurture/AutomationsView";
+import PoolView from "./permits/PoolView";
 
-type SdrTab = "queue" | "engaged" | "dashboard" | "mailboxes" | "templates";
+type SdrTab = "queue" | "engaged" | "dashboard" | "mailboxes" | "templates" | "permits";
 type OutreachLane = "cold" | "nurture";
 type NurtureTab = "campaigns" | "lists" | "contacts" | "automations";
 
@@ -357,12 +359,14 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
             <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
             <TabButton current={tab} value="templates" onClick={setTab} icon={<SettingsIcon className="h-4 w-4" />}>Templates</TabButton>
+            <TabButton current={tab} value="permits" onClick={setTab} icon={<FileSearch className="h-4 w-4" />}>Permits</TabButton>
           </div>
           {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
           {tab === "engaged" && <EngagedView />}
           {tab === "dashboard" && <DashboardView />}
           {tab === "mailboxes" && <MailboxesView user={user} />}
           {tab === "templates" && <TemplatesView />}
+          {tab === "permits" && <PoolView pushToast={(m, k) => push(k ?? "success", m)} />}
         </>
       ) : (
         <>
