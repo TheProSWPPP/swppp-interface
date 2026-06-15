@@ -110,7 +110,7 @@ function CampaignRow({ c, admin, lists, busy, expanded, onToggle, setBusy, reloa
           <div className="flex flex-wrap items-center gap-2">
             <a href={brevoUrl("campaign", c.id)} target="_blank" rel="noreferrer" className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1.5">Edit design <ExternalLink className="h-3.5 w-3.5" /></a>
             <button disabled={busy} onClick={() => setShowDup((v) => !v)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">Duplicate</button>
-            {isQueued && <button disabled={busy} onClick={() => setConfirm("suspend")} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-700 hover:bg-amber-100">Cancel send</button>}
+            {admin && isQueued && <button disabled={busy} onClick={() => setConfirm("suspend")} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-700 hover:bg-amber-100">Cancel send</button>}
             {admin && isDraft && <button disabled={busy} onClick={() => setConfirm("send")} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">Send now</button>}
             {admin && isDraft && <button disabled={busy} onClick={() => setConfirm("delete")} className="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-sm font-semibold text-rose-700 hover:bg-rose-50">Delete</button>}
           </div>
