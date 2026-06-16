@@ -20,6 +20,7 @@ import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
+import { syncLeadState } from "./lib/pipedriveSync.js";
 
 const { Pool } = pg;
 
@@ -751,6 +752,30 @@ async function initDB() {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_migrations_lead ON sdr_migrations(pipedrive_lead_id)`);
 
+    // Mirror of Pipedrive lead + linked-person outreach state (populated by lib/pipedriveSync.js).
+    // Lets the interface show who's already been contacted and dedup before sending.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_lead_state (
+        pipedrive_lead_id TEXT PRIMARY KEY,
+        pipedrive_person_id TEXT,
+        person_name TEXT,
+        person_email TEXT,
+        last_outgoing_mail_time TIMESTAMPTZ,
+        email_messages_count INT,
+        last_activity_date DATE,
+        lowbid_flag BOOLEAN NOT NULL DEFAULT FALSE,
+        sequence_started TEXT,
+        project_stage TEXT,
+        trigger_type TEXT,
+        lead_title TEXT,
+        outreach_status TEXT NOT NULL DEFAULT 'clear'
+          CHECK (outreach_status IN ('clear','contacted_recent','contacted_stale','sequenced')),
+        synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_status ON sdr_lead_state(outreach_status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_person ON sdr_lead_state(pipedrive_person_id)`);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS nurture_audit (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -864,6 +889,17 @@ async function initDB() {
 
 initDB();
 
+// Pipedrive → sdr_lead_state sync: once shortly after boot, then every 6h.
+// Non-blocking; failures are logged and retried on the next tick.
+if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
+  const runSync = () =>
+    syncLeadState(pool)
+      .then((r) => console.log("[sync] sdr_lead_state:", JSON.stringify(r)))
+      .catch((e) => console.error("[sync] sdr_lead_state failed:", e.message));
+  setTimeout(runSync, 30_000);
+  setInterval(runSync, 6 * 60 * 60 * 1000);
+}
+
 // Fallback in-memory store if no DB is connected (for local dev)
 let memoryProjects = [];
 let memoryArchive = [];
@@ -961,6 +997,50 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
   } catch (err) {
     console.error("GET /api/sdr/mailboxes error:", err);
     res.status(500).json({ error: "Failed to list mailboxes" });
+  }
+});
+
+// SDR lead-state — mirror of Pipedrive outreach state. Read by the interface to show
+// who's already been contacted (dedup). Newest sync first; optional ?status= and ?q= filters.
+app.get("/api/sdr/leads", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const params = [];
+    const where = [];
+    if (req.query.status) {
+      params.push(req.query.status);
+      where.push(`outreach_status = $${params.length}`);
+    }
+    if (req.query.q) {
+      params.push(`%${req.query.q}%`);
+      where.push(`(lead_title ILIKE $${params.length} OR person_name ILIKE $${params.length} OR person_email ILIKE $${params.length})`);
+    }
+    let sql = `
+      SELECT *,
+             CASE WHEN last_outgoing_mail_time IS NULL THEN NULL
+                  ELSE EXTRACT(DAY FROM (NOW() - last_outgoing_mail_time))::int END AS days_since_outgoing
+      FROM sdr_lead_state`;
+    if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
+    sql += ` ORDER BY synced_at DESC, last_outgoing_mail_time DESC NULLS LAST LIMIT 500`;
+    const { rows } = await pool.query(sql, params);
+    res.json({ leads: rows, count: rows.length });
+  } catch (err) {
+    console.error("GET /api/sdr/leads error:", err);
+    res.status(500).json({ error: err.message || "Failed to load leads" });
+  }
+});
+
+// SDR lead-state — trigger an on-demand Pipedrive sync (admin only).
+app.post("/api/sdr/sync/leads", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
+  try {
+    const result = await syncLeadState(pool, { force: true });
+    res.json(result);
+  } catch (err) {
+    console.error("POST /api/sdr/sync/leads error:", err);
+    res.status(500).json({ error: err.message || "Sync failed" });
   }
 });
 
