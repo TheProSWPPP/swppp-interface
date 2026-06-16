@@ -67,7 +67,14 @@ export interface SdrDraft {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  // Joined from sdr_lead_state (dedup) — present on list responses, may be null/absent.
+  outreach_status?: SdrOutreachStatus | null;
+  last_outgoing_mail_time?: string | null;
+  lead_person_name?: string | null;
+  days_since_outgoing?: number | null;
 }
+
+export type SdrOutreachStatus = "clear" | "contacted_recent" | "contacted_stale" | "sequenced";
 
 export interface SdrTemplateStep {
   day: number;
@@ -214,10 +221,13 @@ export const sdrApi = {
       body: JSON.stringify({ reason }),
     }),
 
-  approveAndSendDraft: (id: string) =>
+  // `override: true` lets an admin send to an already-contacted lead (server returns
+  // 409 {code:"already_outreached"} otherwise). The thrown error's `.data` carries
+  // { code, daysAgo, personName, lastOutgoing } for the UI to surface.
+  approveAndSendDraft: (id: string, override = false) =>
     sdrFetch<{ draft: SdrDraft; send: Record<string, unknown>; apollo_response: unknown }>(
       `/api/sdr/drafts/${id}/approve-and-send`,
-      { method: "POST" },
+      { method: "POST", body: JSON.stringify(override ? { override: true } : {}) },
     ),
 
   generateDraftFromLead: (params: {

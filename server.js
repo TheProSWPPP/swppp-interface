@@ -1333,18 +1333,27 @@ app.get("/api/sdr/drafts", async (req, res) => {
     const scope = ownerScope(req.sdrUser, "assigned_user_id");
     const status = req.query.status; // optional filter
     const params = [];
-    let sql = `SELECT * FROM sdr_drafts`;
+    // Enrich each draft with its lead's outreach state (for the dedup badge).
+    let sql = `
+      SELECT d.*,
+             ls.outreach_status,
+             ls.last_outgoing_mail_time,
+             ls.person_name AS lead_person_name,
+             CASE WHEN ls.last_outgoing_mail_time IS NULL THEN NULL
+                  ELSE EXTRACT(DAY FROM (NOW() - ls.last_outgoing_mail_time))::int END AS days_since_outgoing
+      FROM sdr_drafts d
+      LEFT JOIN sdr_lead_state ls ON ls.pipedrive_lead_id = d.pipedrive_lead_id`;
     const where = [];
     if (status) {
       params.push(status);
-      where.push(`status = $${params.length}`);
+      where.push(`d.status = $${params.length}`);
     }
     if (scope.requires) {
       params.push(scope.value);
-      where.push(`${scope.column} = $${params.length}`);
+      where.push(`d.${scope.column} = $${params.length}`);
     }
     if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
-    sql += ` ORDER BY created_at DESC LIMIT 200`;
+    sql += ` ORDER BY d.created_at DESC LIMIT 200`;
     const { rows } = await pool.query(sql, params);
     res.json({ drafts: rows });
   } catch (err) {

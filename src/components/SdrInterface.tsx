@@ -83,6 +83,32 @@ const STATUS_COLORS: Record<SdrDraft["status"], string> = {
   cancelled: "bg-slate-100 text-slate-500",
 };
 
+// Dedup: how recently the lead was already contacted in Pipedrive. Red = recent /
+// already sequenced (don't send), amber = contacted long ago (re-sequence ok), green = fresh.
+const OUTREACH_BADGE: Record<string, { label: string; cls: string }> = {
+  contacted_recent: { label: "Contacted", cls: "bg-rose-50 text-rose-700 ring-rose-200" },
+  sequenced: { label: "Sequenced", cls: "bg-rose-50 text-rose-700 ring-rose-200" },
+  contacted_stale: { label: "Contacted (old)", cls: "bg-amber-50 text-amber-700 ring-amber-200" },
+  clear: { label: "Fresh", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+};
+
+function OutreachBadge({ status, days }: { status?: string | null; days?: number | null }) {
+  if (!status || !OUTREACH_BADGE[status]) return null;
+  const { label, cls } = OUTREACH_BADGE[status];
+  const title =
+    status === "clear"
+      ? "No prior outreach found in Pipedrive"
+      : status === "sequenced"
+        ? "Already in an Apollo sequence"
+        : `Already emailed ${days ?? "?"} days ago in Pipedrive`;
+  return (
+    <span title={title} className={cn("text-xs font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset", cls)}>
+      {label}
+      {typeof days === "number" && status !== "clear" ? ` ${days}d` : ""}
+    </span>
+  );
+}
+
 const SEND_STATUS_COLORS: Record<string, string> = {
   enrolled: "bg-indigo-100 text-indigo-700",
   sent: "bg-emerald-100 text-emerald-700",
@@ -493,16 +519,40 @@ function QueueView({
   }, [drafts, statusFilter]);
 
   async function onApprove(id: string) {
-    setBusyId(id);
-    try {
-      const result = await sdrApi.approveAndSendDraft(id);
+    const send = async (override: boolean) => {
+      const result = await sdrApi.approveAndSendDraft(id, override);
       const warning = (result as { warning?: string }).warning;
       pushToast(warning ? "error" : "success", warning || "Draft approved — contact enrolled in Apollo.");
       await load();
       setExpandedId(null);
+    };
+    setBusyId(id);
+    try {
+      await send(false);
     } catch (e) {
-      pushToast("error", `Approve & send failed: ${(e as Error).message}`);
-      await load(); // status may have flipped to 'failed'
+      const err = e as Error & { status?: number; data?: { code?: string; daysAgo?: number; personName?: string } };
+      // Dedup guard: lead already contacted in Pipedrive.
+      if (err.status === 409 && err.data?.code === "already_outreached") {
+        const who = err.data.personName || "This lead";
+        const days = err.data.daysAgo ?? "?";
+        if (user.role !== "admin") {
+          pushToast("error", `Blocked — ${who} was already emailed ${days}d ago in Pipedrive. Admin override required.`);
+        } else if (
+          window.confirm(`⚠️ ${who} was already emailed ${days} days ago via Pipedrive.\n\nSend anyway? This will email them again.`)
+        ) {
+          try {
+            await send(true);
+          } catch (e2) {
+            pushToast("error", `Override send failed: ${(e2 as Error).message}`);
+            await load();
+          }
+        } else {
+          pushToast("error", "Send cancelled — lead already contacted.");
+        }
+      } else {
+        pushToast("error", `Approve & send failed: ${err.message}`);
+        await load(); // status may have flipped to 'failed'
+      }
     } finally {
       setBusyId(null);
     }
@@ -689,6 +739,7 @@ function DraftRow({
         <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full", STATUS_COLORS[draft.status])}>
           {draft.status}
         </span>
+        <OutreachBadge status={draft.outreach_status} days={draft.days_since_outgoing} />
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-slate-900 truncate">
             {leadTitle || `Lead #${draft.pipedrive_lead_id}`}
