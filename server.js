@@ -1035,13 +1035,13 @@ app.post("/api/sdr/sync/leads", async (req, res) => {
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
-  try {
-    const result = await syncLeadState(pool, { force: true });
-    res.json(result);
-  } catch (err) {
-    console.error("POST /api/sdr/sync/leads error:", err);
-    res.status(500).json({ error: err.message || "Sync failed" });
-  }
+  // Fire-and-forget: a full sync (hundreds of leads × per-person fetch) exceeds the
+  // gateway request timeout. Kick it off and return immediately; the in-module
+  // `running` guard makes overlapping triggers safe. Poll GET /api/sdr/leads for results.
+  syncLeadState(pool, { force: true })
+    .then((r) => console.log("[sync] on-demand sdr_lead_state:", JSON.stringify(r)))
+    .catch((e) => console.error("[sync] on-demand failed:", e.message));
+  res.status(202).json({ started: true, note: "Sync running in background; poll GET /api/sdr/leads for updated state." });
 });
 
 // SDR mailboxes — sync from Apollo (admin only). Pulls live mailbox list and upserts.
@@ -1748,6 +1748,45 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       return res.status(400).json({ error: "Draft has no assigned_mailbox_id" });
     }
 
+    // Dedup guard: never silently re-email an already-contacted lead. Live re-check
+    // against Pipedrive (`last_outgoing_mail_time` on the linked person) — the mirror
+    // can be up to ~6h stale, so we check live at the moment of send. An admin can
+    // override; non-admins are blocked. If the Pipedrive check itself fails, we allow
+    // the send rather than hard-block on an outage (and log it).
+    let overrideContext = null;
+    {
+      const personId = draft.contact_id_snapshot || draft.pipedrive_contact_id;
+      if (personId && process.env.PIPEDRIVE_API_TOKEN) {
+        let lastOut = null;
+        let personName = null;
+        try {
+          const person = await pipedriveClient.getPerson(personId);
+          lastOut = person?.last_outgoing_mail_time || null;
+          personName = person?.name || null;
+        } catch (e) {
+          console.warn("approve-and-send dedup precheck failed (allowing send):", e.message);
+        }
+        if (lastOut) {
+          const daysAgo = Math.floor((Date.now() - new Date(lastOut.replace(" ", "T") + "Z").getTime()) / 86400000);
+          if (req.body?.override === true) {
+            if (req.sdrUser?.role !== "admin") {
+              return res.status(403).json({ error: "Admin override required to send to an already-contacted lead" });
+            }
+            overrideContext = `admin override by ${req.sdrUser?.username || req.sdrUser?.sub}: last emailed ${daysAgo}d ago (${lastOut})`;
+            console.log(`[dedup] ${overrideContext} — lead ${draft.pipedrive_lead_id}`);
+          } else {
+            return res.status(409).json({
+              code: "already_outreached",
+              lastOutgoing: lastOut,
+              daysAgo,
+              personName,
+              message: `${personName || "This lead"} was already emailed ${daysAgo}d ago via Pipedrive. Admin override required to send.`,
+            });
+          }
+        }
+      }
+    }
+
     // Resolve mailbox → apollo_mailbox_id
     const { rows: mbRows } = await pool.query(
       `SELECT id, email, apollo_mailbox_id FROM sdr_mailboxes WHERE id = $1`,
@@ -1839,9 +1878,14 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         await pipedriveClient.updateLead(draft.pipedrive_lead_id, {
           [pdSequenceStartedKey]: `Apollo:${draft.trigger_type} ${new Date().toISOString().slice(0, 10)}`,
         });
+        const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
         await pipedriveClient.addNote({
           leadId: draft.pipedrive_lead_id,
-          content: `[Auto] Apollo: enrolled in ${draft.trigger_type} sequence (${draft.apollo_sequence_id}) by ${req.sdrUser?.username || "system"}. Sender: ${mailbox.email}. Sequence_Started set.`,
+          content:
+            `[Auto] Apollo: enrolled in ${draft.trigger_type} sequence (${draft.apollo_sequence_id}) by ${req.sdrUser?.username || "system"}. ` +
+            `Sender: ${mailbox.email}. Sequence_Started set.` +
+            (overrideContext ? ` ⚠️ ${overrideContext}.` : "") +
+            `\nOpen in interface: ${appBase}/#/sdr?lead=${draft.pipedrive_lead_id}`,
         });
       } catch (e) {
         console.error("Pipedrive sync on send failed:", e.message);
