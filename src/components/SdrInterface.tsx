@@ -45,7 +45,7 @@ import CampaignsView from "./nurture/CampaignsView";
 import ListsView from "./nurture/ListsView";
 import ContactsView from "./nurture/ContactsView";
 import AutomationsView from "./nurture/AutomationsView";
-import PoolView from "./permits/PoolView";
+import PermitsTab from "./permits/PermitsTab";
 
 type SdrTab = "queue" | "engaged" | "dashboard" | "mailboxes" | "templates" | "permits";
 type OutreachLane = "cold" | "nurture";
@@ -392,7 +392,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {tab === "dashboard" && <DashboardView />}
           {tab === "mailboxes" && <MailboxesView user={user} />}
           {tab === "templates" && <TemplatesView />}
-          {tab === "permits" && <PoolView pushToast={(m, k) => push(k ?? "success", m)} />}
+          {tab === "permits" && <PermitsTab pushToast={(m, k) => push(k ?? "success", m)} />}
         </>
       ) : (
         <>
