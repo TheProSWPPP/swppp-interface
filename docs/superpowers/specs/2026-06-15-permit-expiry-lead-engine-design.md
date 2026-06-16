@@ -67,10 +67,10 @@ monthly re-pull     deduped, scored,      b. Apollo/pattern (person+co) → emai
                                                                                       no-email → call/mail CSV
 ```
 
-**Enrichment chain (Stage 3) — replaces the failed Apollo-only approach:**
-- **a. TCEQ scrape** (HTTP GET from n8n/Railway, US infra; Browserless+residential-proxy fallback) adds the contact name + address EPA lacks — ~100% coverage.
-- **b. Email discovery** — Apollo person-match (name + company, higher yield than company-only) and/or email-pattern+verify. The email-able subset enrolls into the Apollo sequence.
-- **c. Multi-channel output** — facilities with no discoverable email are **not discarded**: they export to a **call/direct-mail CSV** (full mailing address + contact name + Aug-2026 hook) for Derek's team. Both channels ship.
+**Enrichment chain (Stage 3) — direct-mail primary (revised after 2026-06-15 spikes, see §11):**
+- **a. TCEQ scrape** (Browserless + residential proxy — the proven CMD-scraper transport; plain HTTP from n8n/Railway is an optional later optimization) adds contact name + mailing address + SIC/sector EPA lacks — ~100% coverage.
+- **b. Direct-mail output (PRIMARY)** — the spike proved Apollo email reaches ~0% of these permittees (small operators aren't in Apollo). So the main deliverable is a **print-ready/CSV direct-mail list** (contact name + mailing address + permit + Aug-2026 deadline hook) for ~100% of the enriched batch. Direct mail is a strong, low-competition channel for this blue-collar industrial audience.
+- **c. Email the few (SECONDARY)** — for the ~10–25% of larger operators that DO match in Apollo, enroll into the MSGP Apollo sequence. Low volume by nature.
 
 **Key principle: storage is free; scraping, enrichment, and sending are the constrained resources.**
 - Stages 1→2 run on the **entire** population (Postgres handles 8,847 rows trivially; EPA pull is free).
@@ -175,7 +175,7 @@ The Permits tab shows **"today's remaining send budget"** so the ceiling is alwa
 ## 9. Risks & Mitigations
 
 1. **Apollo match rate is too low for the long tail — RESOLVED by design change.** Spike (§11) measured **~20% company-match, noisy** on small industrial operators. *Mitigation, now baked in:* TCEQ supplies contact name + address for ~100%; Apollo is demoted to one of two email-discovery methods, not the source. The no-email remainder goes to the call/mail CSV instead of being lost.
-2. **Email-discovery rate from name+company is still unknown** (the new open question) — TCEQ gives a name + company + city but no email; how many convert to a verified email via Apollo person-match / pattern is unmeasured. *Mitigation:* a secondary spike during build measures email-find rate on ~30 TCEQ-enriched records; whatever doesn't resolve simply routes to the CSV channel (still actionable).
+2. **Email-discovery rate — MEASURED 2026-06-15: ~0% for the typical permittee.** Apollo person-match on 7 real TCEQ contacts (name+company+city) returned 0 hits — the small-operator owners/managers simply aren't in Apollo. *Resolution:* direct mail is now the PRIMARY channel (TCEQ gives name + mailing address for ~100%); Apollo email is a secondary path for the larger-operator minority only. The engine's value no longer depends on email coverage.
 3. **TCEQ scrape volume — cost + time** — ~8,847 detail fetches take wall-clock (and Browserless minutes if the fallback is used). *Mitigation:* the gated/batched model means we only scrape promoted top-N batches, not the whole pool; EPA (free) covers full-pool targeting. Re-pulls are incremental.
 4. **Enrichment dependency on broken OOM workflows** — do NOT reuse the OOM `Apollo Email Verification` workflow; build a clean standalone enrichment path.
 5. **TCEQ access from production IPs (open until build task 1)** — dev sandbox is IP-blocked; a US datacenter IP (Firecrawl) reached it fine. Whether n8n/Railway's specific IPs are blocked is unconfirmed. *Mitigation:* first build task tests the plain HTTP GET from n8n/Railway; if blocked, use the existing Browserless + residential proxy (no new vendor). Also monitor for TCEQ HTML/form changes to the `wq_dpa` `fuseaction` endpoints.
@@ -199,4 +199,8 @@ The Permits tab shows **"today's remaining send budget"** so the ceiling is alwa
 
 **Apollo match-rate spike** — 18 active NOI operators, search-only (no credit burn). **4/18 (~22%)** had a targetable contact; relaxed filters gave 29% any-contact / 43% "company known" but with **false positives** ("Mh Trucking"→"Linkedin Articles", "Smart Materials"→Italian "Saes Smart Materials"). Matches skewed to large firms (Nucor 8 people). **Conclusion: Apollo-only is not viable** for this population.
 
-**TCEQ source check** — dev sandbox cannot reach TCEQ (TCP connect fails; EPA/others fine → IP block, not VPN-needed). Via Firecrawl (US infra) the `wq_dpa` tool loaded and returned, per authorization: operator + CN, **contact person name**, mailing address, site address, county, SIC, sector, status, dates. Verified on 4 permits (TXR05DP22 Marshall Davis; TXR05CO95 David Clark; TXR05BB10 Wanda Kersh; TXR05EH17 Matthew Hughes). **No email/phone in public view.** Advanced search supports *Multi-Sector NOI (TXR05) + ACTIVE* enumeration.
+**TCEQ source check** — dev sandbox cannot reach TCEQ (TCP connect fails; EPA/others fine → IP block, not VPN-needed). Via Firecrawl (US infra) the `wq_dpa` tool loaded and returned, per authorization: operator + CN, **contact person name**, mailing address, site address, county, SIC, sector, status, dates. Verified on 4 permits (TXR05DP22 Marshall Davis; TXR05CO95 David Clark; TXR05BB10 Wanda Kersh; TXR05EH17 Matthew Hughes). **No email/phone in public view.** Advanced search supports *Multi-Sector NOI (TXR05) + ACTIVE* enumeration. (Firecrawl was the dev-time verification proxy only; production uses Browserless + residential proxy.)
+
+**Email-discovery spike (2026-06-15, Plan-2 gate)** — scraped 7 real TCEQ contacts (Austin Sparks @ Allied Waste, Tim Soule @ Armadillo Materials, Juston Bruno @ JB Auto Salvage, Sandy Talley @ Stinky's Scrap Metals, etc.), ran Apollo `mixed_people/search` on name + company + city. **0/7 found.** These small-operator contacts are not in Apollo. Decisive: email cannot be the primary channel. → Plan 2 pivots to **direct-mail primary, email-the-few secondary** (user decision 2026-06-15).
+
+**Plan-1 ingest (2026-06-15)** — `scripts/permit-ingest.mjs` ran live against prod: 29,749 EPA raw → 8,947 active NOI facilities → 5,525 deduped operators. NEC excluded. Endpoints + Permits tab verified, merged to main (PR #1), deployed.
