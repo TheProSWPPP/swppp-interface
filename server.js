@@ -19,6 +19,7 @@ import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
+import { registerPermitRoutes } from "./lib/permitRoutes.js";
 
 const { Pool } = pg;
 
@@ -762,6 +763,53 @@ async function initDB() {
       )
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_nurture_audit_time ON nurture_audit(created_at DESC)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS permit_facilities (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        external_permit_nmbr TEXT UNIQUE NOT NULL,
+        master_permit TEXT NOT NULL DEFAULT 'TXR050000',
+        state TEXT NOT NULL DEFAULT 'TX',
+        operator_name TEXT,
+        operator_key TEXT NOT NULL DEFAULT '',
+        coverage_type TEXT NOT NULL DEFAULT 'NOI' CHECK (coverage_type IN ('NOI','NEC')),
+        site_address TEXT,
+        city TEXT,
+        zip TEXT,
+        sector_code TEXT,
+        ownership_type TEXT,
+        compliance_flags JSONB NOT NULL DEFAULT '{}',
+        effective_date DATE,
+        expiration_date DATE,
+        original_issue_date DATE,
+        score NUMERIC(8,2) NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pool'
+          CHECK (status IN ('pool','promoted','scraped','enriched','enrolled','exported','engaged','dead')),
+        last_pulled_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_permit_facilities_master ON permit_facilities(master_permit)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_permit_facilities_status ON permit_facilities(status)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_permit_facilities_opkey ON permit_facilities(operator_key)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_permit_facilities_score ON permit_facilities(score DESC)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS permit_operators (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        operator_key TEXT UNIQUE NOT NULL,
+        operator_name TEXT,
+        customer_number TEXT,
+        state TEXT NOT NULL DEFAULT 'TX',
+        facility_count INT NOT NULL DEFAULT 0,
+        best_score NUMERIC(8,2) NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pool',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_permit_operators_score ON permit_operators(best_score DESC)`);
     console.log("SDR tables (sdr_users, sdr_mailboxes, sdr_drafts, sdr_sends, sdr_engagement_events, sdr_migrations) verified/created.");
 
     // Automation Roadmap — shared task list (team posts work, Derek tracks/edits/comments)
@@ -3893,6 +3941,7 @@ setInterval(async () => {
 // MUST be registered before the SPA catch-all below, or authenticated GETs to these
 // routes get shadowed by the index.html fallback.
 registerNurtureRoutes(app, pool);
+registerPermitRoutes(app, pool);
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, "dist")));
