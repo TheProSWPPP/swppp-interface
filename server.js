@@ -1710,7 +1710,7 @@ app.get("/api/sdr/templates", (req, res) => {
   for (const t of Object.keys(SDR_TEMPLATES)) {
     out[t] = {
       steps: renderAllSteps(t, { first: "{First}", env: "EPA", swppp: "SWPPP", sig: "{Sig}" }),
-      default_subject: defaultSubject(t, "{Lead Title}"),
+      default_subject: defaultSubject("{Lead Title}", "SWPPP"),
     };
   }
   res.json({ templates: out });
