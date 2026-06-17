@@ -1123,6 +1123,66 @@ app.post("/api/sdr/engagement/poll", async (req, res) => {
   }
 });
 
+// SDR sequences — list all Apollo sequences with their editable step templates.
+app.get("/api/sdr/sequences", async (req, res) => {
+  if (!process.env.APOLLO_API_KEY) return res.status(503).json({ error: "Apollo not configured" });
+  try {
+    const list = await apolloClient.searchSequences({ perPage: 50 });
+    const seqs = list.emailer_campaigns || [];
+    const out = [];
+    for (const s of seqs) {
+      const detail = await apolloClient.getSequenceDetail(s.id);
+      const steps = detail.emailer_steps || [];
+      const touches = detail.emailer_touches || [];
+      const tmpls = detail.emailer_templates || [];
+      const stepRows = touches
+        .map((t) => {
+          const step = steps.find((x) => x.id === t.emailer_step_id) || {};
+          const tpl = tmpls.find((x) => x.id === t.emailer_template_id) || {};
+          return {
+            position: step.position ?? null,
+            step_type: step.type || null,
+            template_id: tpl.id || null,
+            subject: tpl.subject ?? "",
+            body_html: tpl.body_html ?? "",
+          };
+        })
+        .filter((r) => r.template_id)
+        .sort((a, b) => (a.position || 0) - (b.position || 0));
+      out.push({ id: s.id, name: s.name, active: s.active, num_steps: s.num_steps, steps: stepRows });
+    }
+    res.json({ sequences: out });
+  } catch (err) {
+    console.error("GET /api/sdr/sequences error:", err);
+    res.status(err.status || 500).json({ error: err.message || "Failed to load sequences" });
+  }
+});
+
+// SDR sequences — update a step's email template (admin only, audited). HTML body.
+app.put("/api/sdr/sequences/templates/:templateId", express.json({ limit: "1mb" }), async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  if (!process.env.APOLLO_API_KEY) return res.status(503).json({ error: "Apollo not configured" });
+  const { subject, body_html } = req.body || {};
+  if (subject === undefined && body_html === undefined) {
+    return res.status(400).json({ error: "Nothing to update — provide subject and/or body_html" });
+  }
+  try {
+    const result = await apolloClient.updateEmailerTemplate(req.params.templateId, { subject, body_html });
+    if (process.env.DATABASE_URL) {
+      await pool.query(
+        `INSERT INTO nurture_audit (sdr_user, action, target_kind, target_id, summary)
+         VALUES ($1, 'sequence.template.update', 'apollo_template', $2, $3)`,
+        [req.sdrUser?.username || req.sdrUser?.sub, req.params.templateId,
+         `subject:${subject !== undefined} body:${body_html !== undefined} (${(body_html || "").length} chars)`],
+      ).catch(() => {});
+    }
+    res.json({ ok: true, template: result.emailer_template || result });
+  } catch (err) {
+    console.error("PUT /api/sdr/sequences/templates error:", err);
+    res.status(err.status || 500).json({ error: err.message || "Update failed" });
+  }
+});
+
 // SDR mailboxes — sync from Apollo (admin only). Pulls live mailbox list and upserts.
 app.post("/api/sdr/mailboxes/sync", async (req, res) => {
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
@@ -1167,11 +1227,25 @@ app.post("/api/sdr/mailboxes/sync", async (req, res) => {
 async function logTrackEvent(token, kind, url) {
   if (!process.env.DATABASE_URL) return;
   try {
-    const { rows } = await pool.query(
-      `SELECT contact_email_snapshot, apollo_sequence_id, pipedrive_lead_id FROM sdr_drafts WHERE id = $1`,
-      [token],
-    );
-    const d = rows[0];
+    // Token is either a draft id (body-injected, legacy) or `c-<apolloContactId>`
+    // (template pixel — Apollo escapes body HTML so the pixel lives in the template
+    // keyed by {{contact.id}}). Resolve both to the draft for email + sequence.
+    let d;
+    if (typeof token === "string" && token.startsWith("c-")) {
+      const { rows } = await pool.query(
+        `SELECT d.contact_email_snapshot, d.apollo_sequence_id, d.pipedrive_lead_id
+         FROM sdr_sends s JOIN sdr_drafts d ON d.id = s.draft_id
+         WHERE s.apollo_contact_id = $1 ORDER BY s.sent_at DESC LIMIT 1`,
+        [token.slice(2)],
+      );
+      d = rows[0];
+    } else {
+      const { rows } = await pool.query(
+        `SELECT contact_email_snapshot, apollo_sequence_id, pipedrive_lead_id FROM sdr_drafts WHERE id = $1`,
+        [token],
+      );
+      d = rows[0];
+    }
     if (!d) return;
     const ev = {
       type: kind === "open" ? "email_opened" : "email_clicked",
@@ -1953,12 +2027,11 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         // The sequences' step-1 templates merge {{contact.swppp_draft_subject/body}},
         // so what was approved in the queue is exactly what Apollo sends.
         // Must succeed BEFORE enrollment — otherwise Apollo would send raw merge tags.
-        // Inject self-hosted open/click tracking (pixel + link-wrap) keyed by draft id.
-        const trackBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
-        const trackedBody = injectTracking(draft.body, draft.id, trackBase);
+        // NOTE: tracking pixel + styling live in the Apollo TEMPLATE (which renders),
+        // NOT here — Apollo HTML-escapes custom-field values, so the body stays plain.
         await apolloClient.updateContactCustomFields(apolloContactId, {
           [APOLLO_CF_DRAFT_SUBJECT]: draft.subject,
-          [APOLLO_CF_DRAFT_BODY]: trackedBody,
+          [APOLLO_CF_DRAFT_BODY]: draft.body,
         });
 
         // Enroll in sequence with the assigned mailbox as the sender
