@@ -21,6 +21,7 @@ import {
   Snowflake,
   Sparkles,
   Sprout,
+  Target,
   X,
   XCircle,
   Eye,
@@ -35,6 +36,7 @@ import {
   type SdrDraft,
   type SdrEngagementLead,
   type SdrEngagementSummary,
+  type SdrLead,
   type SdrMailbox,
   type SdrSequence,
   type SdrSequenceStep,
@@ -50,7 +52,7 @@ import ContactsView from "./nurture/ContactsView";
 import AutomationsView from "./nurture/AutomationsView";
 import PermitsTab from "./permits/PermitsTab";
 
-type SdrTab = "queue" | "engaged" | "dashboard" | "mailboxes" | "templates" | "sequences" | "permits";
+type SdrTab = "leads" | "queue" | "engaged" | "dashboard" | "mailboxes" | "templates" | "sequences" | "permits";
 type OutreachLane = "cold" | "nurture";
 type NurtureTab = "campaigns" | "lists" | "contacts" | "automations";
 
@@ -301,7 +303,7 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
 
 function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void }) {
   const [lane, setLane] = useState<OutreachLane>(() => getLane());
-  const [tab, setTab] = useState<SdrTab>("queue");
+  const [tab, setTab] = useState<SdrTab>("leads");
   const [nurtureTab, setNurtureTab] = useState<NurtureTab>("campaigns");
   const [drillListId, setDrillListId] = useState<number | null>(null);
 
@@ -383,6 +385,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
       {lane === "cold" ? (
         <>
           <div className="flex items-center gap-1 mb-6 border-b border-slate-200">
+            <TabButton current={tab} value="leads" onClick={setTab} icon={<Target className="h-4 w-4" />}>Leads</TabButton>
             <TabButton current={tab} value="queue" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Queue</TabButton>
             <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />}>Engaged</TabButton>
             <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
@@ -391,6 +394,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             <TabButton current={tab} value="sequences" onClick={setTab} icon={<ListChecks className="h-4 w-4" />}>Sequences</TabButton>
             <TabButton current={tab} value="permits" onClick={setTab} icon={<FileSearch className="h-4 w-4" />}>Permits</TabButton>
           </div>
+          {tab === "leads" && <LeadsView user={user} pushToast={push} onGenerated={() => setTab("queue")} />}
           {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
           {tab === "engaged" && <EngagedView />}
           {tab === "dashboard" && <DashboardView />}
@@ -469,6 +473,384 @@ function TabButton({
       {icon}
       {children}
     </button>
+  );
+}
+
+// --------------------------------------------------------------------------
+// Leads — the front door: spacious pipeline of qualifying Pipedrive leads
+// --------------------------------------------------------------------------
+
+const LEADS_RENDER_CAP = 200;
+
+type LeadStatusFilter = "all" | "fresh" | "contacted" | "sequenced";
+type LeadTriggerFilter = "all" | SdrTriggerType;
+
+const STAT_ACCENTS: Record<"green" | "amber" | "blue" | "slate", { ring: string; num: string; chip: string }> = {
+  green: { ring: "border-emerald-200", num: "text-emerald-600", chip: "bg-emerald-50" },
+  amber: { ring: "border-amber-200", num: "text-amber-600", chip: "bg-amber-50" },
+  blue: { ring: "border-sky-200", num: "text-sky-600", chip: "bg-sky-50" },
+  slate: { ring: "border-slate-200", num: "text-slate-700", chip: "bg-slate-50" },
+};
+
+function StatCard({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: number;
+  accent: keyof typeof STAT_ACCENTS;
+}) {
+  const a = STAT_ACCENTS[accent];
+  return (
+    <div className={cn("flex-1 min-w-[140px] rounded-2xl border bg-white px-5 py-4", a.ring)}>
+      <div className={cn("text-3xl font-bold tabular-nums", a.num)}>{value}</div>
+      <div className="mt-1 text-sm font-medium text-slate-500">{label}</div>
+    </div>
+  );
+}
+
+function LeadsView({
+  user,
+  pushToast,
+  onGenerated,
+}: {
+  user: SdrUser;
+  pushToast: (kind: "success" | "error", text: string) => void;
+  onGenerated?: () => void;
+}) {
+  const isAdmin = user.role === "admin";
+  const [leads, setLeads] = useState<SdrLead[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<LeadStatusFilter>("all");
+  const [triggerFilter, setTriggerFilter] = useState<LeadTriggerFilter>("all");
+  const [query, setQuery] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [genId, setGenId] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setError(null);
+    sdrApi
+      .listLeads()
+      .then((d) => setLeads(d.leads))
+      .catch((e) => {
+        setLeads(null);
+        setError((e as Error).message || "Failed to load leads");
+      });
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const counts = useMemo(() => {
+    const c = { fresh: 0, contacted: 0, sequenced: 0, total: 0 };
+    if (!leads) return c;
+    for (const l of leads) {
+      c.total++;
+      if (l.outreach_status === "clear") c.fresh++;
+      else if (l.outreach_status === "sequenced") c.sequenced++;
+      else c.contacted++; // contacted_recent | contacted_stale
+    }
+    return c;
+  }, [leads]);
+
+  const newestSync = useMemo(() => {
+    if (!leads || !leads.length) return null;
+    let max = 0;
+    for (const l of leads) {
+      if (l.synced_at) {
+        const t = new Date(l.synced_at).getTime();
+        if (t > max) max = t;
+      }
+    }
+    return max ? new Date(max).toISOString() : null;
+  }, [leads]);
+
+  const filtered = useMemo(() => {
+    if (!leads) return [];
+    const q = query.trim().toLowerCase();
+    return leads.filter((l) => {
+      if (statusFilter === "fresh" && l.outreach_status !== "clear") return false;
+      if (statusFilter === "sequenced" && l.outreach_status !== "sequenced") return false;
+      if (
+        statusFilter === "contacted" &&
+        l.outreach_status !== "contacted_recent" &&
+        l.outreach_status !== "contacted_stale"
+      )
+        return false;
+      if (triggerFilter !== "all" && l.trigger_type !== triggerFilter) return false;
+      if (q) {
+        const hay = `${l.lead_title ?? ""} ${l.person_name ?? ""} ${l.person_email ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [leads, statusFilter, triggerFilter, query]);
+
+  const capped = filtered.slice(0, LEADS_RENDER_CAP);
+
+  async function onRefresh() {
+    setSyncing(true);
+    try {
+      await sdrApi.syncLeads();
+      pushToast("success", "Resync started — leads update shortly.");
+    } catch (e) {
+      pushToast("error", `Resync failed: ${(e as Error).message}`);
+    } finally {
+      setTimeout(() => setSyncing(false), 4000);
+    }
+  }
+
+  async function onOutreach(lead: SdrLead) {
+    if (!lead.trigger_type) return;
+    setGenId(lead.pipedrive_lead_id);
+    try {
+      await sdrApi.generateDraftFromLead({
+        pipedrive_lead_id: lead.pipedrive_lead_id,
+        trigger_type: lead.trigger_type,
+        assigned_user_id: user.id,
+      });
+      pushToast("success", "Draft created — check the Queue tab.");
+      onGenerated?.();
+    } catch (e) {
+      pushToast("error", `Could not create draft: ${(e as Error).message}`);
+    } finally {
+      setGenId(null);
+    }
+  }
+
+  // ---- Loading ----
+  if (!leads && !error) {
+    return (
+      <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-16 text-center">
+        <Target className="h-8 w-8 text-slate-300 mx-auto mb-3 animate-pulse" />
+        <div className="text-base font-medium text-slate-500">Loading leads…</div>
+      </div>
+    );
+  }
+
+  // ---- Error ----
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-12 text-center">
+        <AlertCircle className="h-8 w-8 text-rose-400 mx-auto mb-3" />
+        <div className="text-base font-semibold text-rose-800">Couldn’t load leads</div>
+        <p className="mt-1 text-sm text-rose-600">{error}</p>
+        <button
+          onClick={load}
+          className="mt-4 inline-flex items-center gap-2 rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+        >
+          <RefreshCw className="h-4 w-4" /> Try again
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Summary header */}
+      <div className="flex flex-wrap items-stretch gap-4">
+        <StatCard label="Fresh" value={counts.fresh} accent="green" />
+        <StatCard label="Contacted" value={counts.contacted} accent="amber" />
+        <StatCard label="Sequenced" value={counts.sequenced} accent="blue" />
+        <StatCard label="Total leads" value={counts.total} accent="slate" />
+        <div className="flex flex-1 min-w-[180px] flex-col items-end justify-center gap-2">
+          <div className="text-sm text-slate-500">
+            Synced{" "}
+            <span className="font-medium text-slate-700">
+              {newestSync ? formatRelative(newestSync) : "—"}
+            </span>
+          </div>
+          {isAdmin && (
+            <button
+              onClick={onRefresh}
+              disabled={syncing}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50",
+                syncing && "opacity-60 cursor-not-allowed",
+              )}
+            >
+              <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
+              {syncing ? "Resyncing…" : "Refresh"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1" role="group" aria-label="Status filter">
+          {([
+            ["all", "All"],
+            ["fresh", "Fresh"],
+            ["contacted", "Contacted"],
+            ["sequenced", "Sequenced"],
+          ] as [LeadStatusFilter, string][]).map(([v, label]) => (
+            <button
+              key={v}
+              onClick={() => setStatusFilter(v)}
+              aria-pressed={statusFilter === v}
+              className={cn(
+                "rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-colors",
+                statusFilter === v ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <select
+          value={triggerFilter}
+          onChange={(e) => setTriggerFilter(e.target.value as LeadTriggerFilter)}
+          className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700"
+          aria-label="Trigger filter"
+        >
+          <option value="all">All triggers</option>
+          <option value="AGC">AGC</option>
+          <option value="LBA">LBA</option>
+          <option value="CM">CM</option>
+          <option value="PB">PB</option>
+        </select>
+
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search company, name, or email…"
+          className="flex-1 min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none"
+        />
+      </div>
+
+      <div className="text-sm text-slate-500">
+        Showing {capped.length} of {filtered.length}
+        {filtered.length !== counts.total ? ` (${counts.total} total)` : ""}
+        {filtered.length > LEADS_RENDER_CAP ? ` · capped at ${LEADS_RENDER_CAP}` : ""}
+      </div>
+
+      {/* Empty state */}
+      {filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-16 text-center">
+          <Target className="h-9 w-9 text-slate-300 mx-auto mb-3" />
+          <div className="text-base font-semibold text-slate-700">
+            {counts.total === 0 ? "No leads synced yet" : "No leads match these filters"}
+          </div>
+          <p className="mt-1 text-sm text-slate-500">
+            {counts.total === 0
+              ? isAdmin
+                ? "Hit Refresh to pull qualifying leads from Pipedrive."
+                : "Qualifying Pipedrive leads will appear here once synced."
+              : "Try clearing the search or switching the status / trigger filters."}
+          </p>
+          {counts.total > 0 && (
+            <button
+              onClick={() => {
+                setStatusFilter("all");
+                setTriggerFilter("all");
+                setQuery("");
+              }}
+              className="mt-4 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {capped.map((lead) => (
+            <LeadCard
+              key={lead.pipedrive_lead_id}
+              lead={lead}
+              busy={genId === lead.pipedrive_lead_id}
+              onOutreach={() => onOutreach(lead)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LeadCard({
+  lead,
+  busy,
+  onOutreach,
+}: {
+  lead: SdrLead;
+  busy: boolean;
+  onOutreach: () => void;
+}) {
+  const fresh = lead.outreach_status === "clear";
+  const hasTrigger = !!lead.trigger_type;
+
+  const contactLine =
+    typeof lead.days_since_outgoing === "number"
+      ? `Emailed ${lead.days_since_outgoing}d ago`
+      : "Never contacted";
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-slate-300 hover:bg-slate-50/50">
+      <div className="flex items-start gap-4">
+        {/* Left: identity */}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-base font-bold text-slate-900">
+            {lead.lead_title || "Untitled lead"}
+          </div>
+          <div className="mt-1 text-sm text-slate-500">
+            {lead.person_name || "Unknown contact"}
+            {lead.person_email ? <span className="text-slate-400"> · {lead.person_email}</span> : null}
+          </div>
+        </div>
+
+        {/* Middle: status */}
+        <div className="hidden flex-col items-start gap-2 sm:flex">
+          <div className="flex items-center gap-2">
+            <OutreachBadge status={lead.outreach_status} days={lead.days_since_outgoing} />
+            {lead.trigger_type && (
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset",
+                  TRIGGER_COLORS[lead.trigger_type],
+                )}
+              >
+                {lead.trigger_type}
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-slate-400">{contactLine}</div>
+        </div>
+
+        {/* Right: action */}
+        <div className="flex flex-col items-end">
+          <button
+            onClick={onOutreach}
+            disabled={!hasTrigger || busy}
+            title={
+              hasTrigger
+                ? undefined
+                : "Set a Trigger (AGC/LBA/CM/PB) on this lead in Pipedrive first."
+            }
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors",
+              !hasTrigger
+                ? "cursor-not-allowed bg-slate-100 text-slate-400"
+                : fresh
+                  ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                  : "border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50",
+              busy && "opacity-60",
+            )}
+          >
+            {busy ? "Creating…" : "Outreach"}
+            {!busy && <ChevronRight className="h-4 w-4" />}
+          </button>
+          {!hasTrigger && (
+            <span className="mt-1.5 max-w-[180px] text-right text-xs text-slate-400">
+              Needs a Trigger in Pipedrive
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

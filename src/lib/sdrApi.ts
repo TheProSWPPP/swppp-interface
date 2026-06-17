@@ -76,6 +76,24 @@ export interface SdrDraft {
 
 export type SdrOutreachStatus = "clear" | "contacted_recent" | "contacted_stale" | "sequenced";
 
+export interface SdrLead {
+  pipedrive_lead_id: string;
+  pipedrive_person_id: string | null;
+  person_name: string | null;
+  person_email: string | null;
+  last_outgoing_mail_time: string | null;
+  email_messages_count: number | null;
+  last_activity_date: string | null;
+  lowbid_flag: boolean | null;
+  sequence_started: boolean | null;
+  project_stage: string | null;
+  trigger_type: SdrTriggerType | null;
+  lead_title: string | null;
+  outreach_status: SdrOutreachStatus;
+  synced_at: string | null;
+  days_since_outgoing: number | null;
+}
+
 export interface SdrTemplateStep {
   day: number;
   body: string;
@@ -253,6 +271,16 @@ export const sdrApi = {
       `/api/sdr/drafts/${id}/approve-and-send`,
       { method: "POST", body: JSON.stringify(override ? { override: true } : {}) },
     ),
+
+  listLeads: (params?: { status?: string; q?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.q) qs.set("q", params.q);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return sdrFetch<{ leads: SdrLead[]; count: number }>(`/api/sdr/leads${suffix}`);
+  },
+
+  syncLeads: () => sdrFetch<{ started: boolean }>("/api/sdr/sync/leads", { method: "POST" }),
 
   generateDraftFromLead: (params: {
     pipedrive_lead_id: string;
