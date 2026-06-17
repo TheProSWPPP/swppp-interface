@@ -1096,31 +1096,116 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
 
 // SDR lead-state — mirror of Pipedrive outreach state. Read by the interface to show
 // who's already been contacted (dedup). Newest sync first; optional ?status= and ?q= filters.
+// Whitelist of sortable columns (guards against SQL injection via ?sort=).
+const LEAD_SORT_COLUMNS = {
+  lead_title: "s.lead_title",
+  project_stage: "s.project_stage",
+  outreach_status: "s.outreach_status",
+  trigger_type: "s.trigger_type",
+  last_contact: "s.last_outgoing_mail_time",
+  synced_at: "s.synced_at",
+};
+
 app.get("/api/sdr/leads", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   try {
     const params = [];
     const where = [];
+    const addFilter = (clause, value) => {
+      params.push(value);
+      where.push(clause.replace("$$", `$${params.length}`));
+    };
     if (req.query.status) {
-      params.push(req.query.status);
-      where.push(`outreach_status = $${params.length}`);
+      const st = String(req.query.status);
+      if (st === "fresh" || st === "clear") addFilter("s.outreach_status = $$", "clear");
+      else if (st === "contacted") where.push("s.outreach_status IN ('contacted_recent','contacted_stale')");
+      else addFilter("s.outreach_status = $$", st); // sequenced | exact value
     }
+    if (req.query.trigger) {
+      if (req.query.trigger === "none") where.push("s.trigger_type IS NULL");
+      else addFilter("s.trigger_type = $$", req.query.trigger);
+    }
+    if (req.query.stage) addFilter("s.project_stage = $$", req.query.stage);
     if (req.query.q) {
       params.push(`%${req.query.q}%`);
-      where.push(`(lead_title ILIKE $${params.length} OR person_name ILIKE $${params.length} OR person_email ILIKE $${params.length})`);
+      const p = `$${params.length}`;
+      where.push(`(s.lead_title ILIKE ${p} OR s.person_name ILIKE ${p} OR s.person_email ILIKE ${p})`);
     }
-    let sql = `
-      SELECT *,
-             CASE WHEN last_outgoing_mail_time IS NULL THEN NULL
-                  ELSE EXTRACT(DAY FROM (NOW() - last_outgoing_mail_time))::int END AS days_since_outgoing
-      FROM sdr_lead_state`;
-    if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
-    sql += ` ORDER BY synced_at DESC, last_outgoing_mail_time DESC NULLS LAST LIMIT 500`;
-    const { rows } = await pool.query(sql, params);
-    res.json({ leads: rows, count: rows.length });
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    // Pagination (1-based page; default 50/page, hard max 200).
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const offset = (page - 1) * limit;
+
+    // Sort (whitelisted column + direction).
+    const sortCol = LEAD_SORT_COLUMNS[req.query.sort] || "s.synced_at";
+    const sortDir = String(req.query.dir).toLowerCase() === "asc" ? "ASC" : "DESC";
+    // Nulls last on the chosen column, then a stable tiebreak.
+    const orderSql = `ORDER BY ${sortCol} ${sortDir} NULLS LAST, s.last_outgoing_mail_time DESC NULLS LAST`;
+
+    // "Outreached by": most-recent draft's assigned user for the lead.
+    const pageSql = `
+      SELECT s.*,
+             CASE WHEN s.last_outgoing_mail_time IS NULL THEN NULL
+                  ELSE EXTRACT(DAY FROM (NOW() - s.last_outgoing_mail_time))::int END AS days_since_outgoing,
+             ob.outreached_by,
+             ob.outreached_status,
+             COUNT(*) OVER() AS _total
+      FROM sdr_lead_state s
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(u.display_name, u.username) AS outreached_by, d.status AS outreached_status
+        FROM sdr_drafts d
+        LEFT JOIN sdr_users u ON u.id = d.assigned_user_id
+        WHERE d.pipedrive_lead_id = s.pipedrive_lead_id
+        ORDER BY d.created_at DESC
+        LIMIT 1
+      ) ob ON TRUE
+      ${whereSql}
+      ${orderSql}
+      LIMIT ${limit} OFFSET ${offset}`;
+
+    const { rows } = await pool.query(pageSql, params);
+    const total = rows.length ? Number(rows[0]._total) : 0;
+    for (const r of rows) delete r._total;
+
+    // Global facet counts (whole table) for the summary tiles.
+    const { rows: facetRows } = await pool.query(
+      `SELECT outreach_status, COUNT(*)::int n FROM sdr_lead_state GROUP BY 1`,
+    );
+    const byStatus = Object.fromEntries(facetRows.map((r) => [r.outreach_status, r.n]));
+    const grandTotal = facetRows.reduce((a, r) => a + r.n, 0);
+
+    res.json({
+      leads: rows,
+      count: rows.length,
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit),
+      facets: { byStatus, grandTotal },
+    });
   } catch (err) {
     console.error("GET /api/sdr/leads error:", err);
     res.status(500).json({ error: err.message || "Failed to load leads" });
+  }
+});
+
+// Distinct stage/trigger values for the Leads filter dropdowns.
+app.get("/api/sdr/leads/filters", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const { rows: stages } = await pool.query(
+      `SELECT project_stage AS v, COUNT(*)::int n FROM sdr_lead_state
+       WHERE project_stage IS NOT NULL AND project_stage <> '' GROUP BY 1 ORDER BY 2 DESC`,
+    );
+    const { rows: triggers } = await pool.query(
+      `SELECT COALESCE(trigger_type, 'none') AS v, COUNT(*)::int n FROM sdr_lead_state GROUP BY 1 ORDER BY 2 DESC`,
+    );
+    res.json({ stages, triggers });
+  } catch (err) {
+    console.error("GET /api/sdr/leads/filters error:", err);
+    res.status(500).json({ error: err.message || "Failed to load filters" });
   }
 });
 

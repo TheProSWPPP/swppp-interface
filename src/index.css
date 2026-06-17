@@ -1,1 +1,25 @@
 @import "tailwindcss";
+
+/* Pro SWPPP brand palette — deep brand blue (primary/accents) + construction
+   orange (primary CTAs). Mirrors proswppp.com. Used across the SDR console. */
+@theme {
+  --color-brand-50: #eef5fa;
+  --color-brand-100: #d5e6f1;
+  --color-brand-200: #abcce3;
+  --color-brand-300: #7aabcd;
+  --color-brand-400: #4a87b1;
+  --color-brand-500: #2e6c96;
+  --color-brand-600: #205b82;
+  --color-brand-700: #1a5276;
+  --color-brand-800: #143f5a;
+  --color-brand-900: #112f43;
+
+  --color-cta-50: #fef4ea;
+  --color-cta-100: #fbe1c5;
+  --color-cta-200: #f7c389;
+  --color-cta-300: #f2a24f;
+  --color-cta-400: #ed8826;
+  --color-cta-500: #e2701b;
+  --color-cta-600: #c75c12;
+  --color-cta-700: #a14910;
+}

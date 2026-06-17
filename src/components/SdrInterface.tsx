@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  ChevronsUpDown,
   ExternalLink,
   FileSearch,
   Flame,
@@ -37,6 +41,8 @@ import {
   type SdrEngagementLead,
   type SdrEngagementSummary,
   type SdrLead,
+  type SdrLeadsResponse,
+  type SdrLeadFilters,
   type SdrMailbox,
   type SdrSequence,
   type SdrSequenceStep,
@@ -80,8 +86,8 @@ const TRIGGER_COLORS: Record<SdrTriggerType, string> = {
 
 const STATUS_COLORS: Record<SdrDraft["status"], string> = {
   pending: "bg-slate-100 text-slate-700",
-  edited: "bg-indigo-100 text-indigo-700",
-  approved: "bg-indigo-100 text-indigo-700",
+  edited: "bg-brand-100 text-brand-700",
+  approved: "bg-brand-100 text-brand-700",
   sent: "bg-emerald-100 text-emerald-700",
   rejected: "bg-rose-100 text-rose-700",
   failed: "bg-rose-100 text-rose-700",
@@ -115,7 +121,7 @@ function OutreachBadge({ status, days }: { status?: string | null; days?: number
 }
 
 const SEND_STATUS_COLORS: Record<string, string> = {
-  enrolled: "bg-indigo-100 text-indigo-700",
+  enrolled: "bg-brand-100 text-brand-700",
   sent: "bg-emerald-100 text-emerald-700",
   replied: "bg-emerald-100 text-emerald-800",
   bounced: "bg-rose-100 text-rose-700",
@@ -249,7 +255,7 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
   return (
     <div className="max-w-xl mx-auto py-12">
       <div className="text-center mb-8">
-        <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-700 mb-3">
+        <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-100 text-brand-700 mb-3">
           <Sparkles className="h-6 w-6" />
         </div>
         <h2 className="text-2xl font-semibold text-slate-900">Who's working?</h2>
@@ -274,21 +280,21 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
               onClick={() => pick(u.username)}
               disabled={!!busy}
               className={cn(
-                "group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition-all duration-200 hover:border-indigo-300 hover:shadow-sm",
+                "group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition-all duration-200 hover:border-brand-300 hover:shadow-sm",
                 busy === u.username && "opacity-50",
               )}
             >
-              <div className="h-10 w-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+              <div className="h-10 w-10 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold">
                 {initials(u.display_name)}
               </div>
               <div className="flex-1">
                 <div className="text-sm font-semibold text-slate-900">{u.display_name}</div>
                 <div className="text-xs text-slate-500 flex items-center gap-1">
-                  {u.role === "admin" && <ShieldCheck className="h-3 w-3 text-indigo-600" />}
+                  {u.role === "admin" && <ShieldCheck className="h-3 w-3 text-brand-600" />}
                   {u.role}
                 </div>
               </div>
-              <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-indigo-500" />
+              <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-brand-500" />
             </button>
           ))}
         </div>
@@ -342,7 +348,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           <div className="text-right">
             <div className="text-sm font-medium text-slate-900">{user.display_name}</div>
             <div className="text-xs text-slate-500 flex items-center justify-end gap-1">
-              {user.role === "admin" && <ShieldCheck className="h-3 w-3 text-indigo-600" />}
+              {user.role === "admin" && <ShieldCheck className="h-3 w-3 text-brand-600" />}
               {user.role}
             </div>
           </div>
@@ -363,7 +369,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           aria-pressed={lane === "cold"}
           className={cn(
             "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
-            lane === "cold" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
+            lane === "cold" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
           )}
         >
           <Snowflake className="h-4 w-4" />
@@ -466,7 +472,7 @@ function TabButton({
       className={cn(
         "flex items-center gap-2 px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors",
         active
-          ? "border-indigo-600 text-indigo-600"
+          ? "border-brand-600 text-brand-600"
           : "border-transparent text-slate-500 hover:text-slate-900",
       )}
     >
@@ -479,8 +485,6 @@ function TabButton({
 // --------------------------------------------------------------------------
 // Leads — the front door: spacious pipeline of qualifying Pipedrive leads
 // --------------------------------------------------------------------------
-
-const LEADS_RENDER_CAP = 200;
 
 type LeadStatusFilter = "all" | "fresh" | "contacted" | "sequenced";
 type LeadTriggerFilter = "all" | SdrTriggerType;
@@ -510,6 +514,10 @@ function StatCard({
   );
 }
 
+const LEAD_PAGE_SIZE = 50;
+
+type LeadSortKey = "lead_title" | "project_stage" | "outreach_status" | "trigger_type" | "last_contact";
+
 function LeadsView({
   user,
   pushToast,
@@ -520,75 +528,78 @@ function LeadsView({
   onGenerated?: () => void;
 }) {
   const isAdmin = user.role === "admin";
-  const [leads, setLeads] = useState<SdrLead[] | null>(null);
+  const [resp, setResp] = useState<SdrLeadsResponse | null>(null);
+  const [filterOpts, setFilterOpts] = useState<SdrLeadFilters | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<LeadStatusFilter>("all");
   const [triggerFilter, setTriggerFilter] = useState<LeadTriggerFilter>("all");
+  const [stageFilter, setStageFilter] = useState<string>("all");
   const [query, setQuery] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const [sort, setSort] = useState<LeadSortKey>("last_contact");
+  const [dir, setDir] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState(1);
   const [syncing, setSyncing] = useState(false);
   const [genId, setGenId] = useState<string | null>(null);
+  const [confirmLead, setConfirmLead] = useState<SdrLead | null>(null);
+
+  // Debounce the search box so we don't hit the server on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(query.trim()), 350);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  // Reset to page 1 whenever a filter/sort changes.
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, triggerFilter, stageFilter, debouncedQ, sort, dir]);
 
   const load = useCallback(() => {
+    setLoading(true);
     setError(null);
     sdrApi
-      .listLeads()
-      .then((d) => setLeads(d.leads))
+      .listLeads({
+        status: statusFilter === "all" ? undefined : statusFilter,
+        trigger: triggerFilter === "all" ? undefined : triggerFilter,
+        stage: stageFilter === "all" ? undefined : stageFilter,
+        q: debouncedQ || undefined,
+        sort,
+        dir,
+        page,
+        limit: LEAD_PAGE_SIZE,
+      })
+      .then((d) => setResp(d))
       .catch((e) => {
-        setLeads(null);
+        setResp(null);
         setError((e as Error).message || "Failed to load leads");
-      });
-  }, []);
+      })
+      .finally(() => setLoading(false));
+  }, [statusFilter, triggerFilter, stageFilter, debouncedQ, sort, dir, page]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const counts = useMemo(() => {
-    const c = { fresh: 0, contacted: 0, sequenced: 0, total: 0 };
-    if (!leads) return c;
-    for (const l of leads) {
-      c.total++;
-      if (l.outreach_status === "clear") c.fresh++;
-      else if (l.outreach_status === "sequenced") c.sequenced++;
-      else c.contacted++; // contacted_recent | contacted_stale
+  useEffect(() => {
+    sdrApi.leadFilters().then(setFilterOpts).catch(() => setFilterOpts(null));
+  }, []);
+
+  const facets = resp?.facets.byStatus ?? {};
+  const counts = {
+    fresh: facets.clear ?? 0,
+    contacted: (facets.contacted_recent ?? 0) + (facets.contacted_stale ?? 0),
+    sequenced: facets.sequenced ?? 0,
+    total: resp?.facets.grandTotal ?? 0,
+  };
+
+  function toggleSort(key: LeadSortKey) {
+    if (sort === key) setDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSort(key);
+      setDir(key === "last_contact" ? "desc" : "asc");
     }
-    return c;
-  }, [leads]);
-
-  const newestSync = useMemo(() => {
-    if (!leads || !leads.length) return null;
-    let max = 0;
-    for (const l of leads) {
-      if (l.synced_at) {
-        const t = new Date(l.synced_at).getTime();
-        if (t > max) max = t;
-      }
-    }
-    return max ? new Date(max).toISOString() : null;
-  }, [leads]);
-
-  const filtered = useMemo(() => {
-    if (!leads) return [];
-    const q = query.trim().toLowerCase();
-    return leads.filter((l) => {
-      if (statusFilter === "fresh" && l.outreach_status !== "clear") return false;
-      if (statusFilter === "sequenced" && l.outreach_status !== "sequenced") return false;
-      if (
-        statusFilter === "contacted" &&
-        l.outreach_status !== "contacted_recent" &&
-        l.outreach_status !== "contacted_stale"
-      )
-        return false;
-      if (triggerFilter !== "all" && l.trigger_type !== triggerFilter) return false;
-      if (q) {
-        const hay = `${l.lead_title ?? ""} ${l.person_name ?? ""} ${l.person_email ?? ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [leads, statusFilter, triggerFilter, query]);
-
-  const capped = filtered.slice(0, LEADS_RENDER_CAP);
+  }
 
   async function onRefresh() {
     setSyncing(true);
@@ -602,8 +613,17 @@ function LeadsView({
     }
   }
 
-  async function onOutreach(lead: SdrLead) {
+  // Fresh leads outreach immediately; already-contacted/sequenced leads route
+  // through a confirmation that points the rep at the Pipedrive record first.
+  function requestOutreach(lead: SdrLead) {
     if (!lead.trigger_type) return;
+    if (lead.outreach_status === "clear") void doOutreach(lead);
+    else setConfirmLead(lead);
+  }
+
+  async function doOutreach(lead: SdrLead) {
+    if (!lead.trigger_type) return;
+    setConfirmLead(null);
     setGenId(lead.pipedrive_lead_id);
     try {
       await sdrApi.generateDraftFromLead({
@@ -620,32 +640,13 @@ function LeadsView({
     }
   }
 
-  // ---- Loading ----
-  if (!leads && !error) {
-    return (
-      <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-16 text-center">
-        <Target className="h-8 w-8 text-slate-300 mx-auto mb-3 animate-pulse" />
-        <div className="text-base font-medium text-slate-500">Loading leads…</div>
-      </div>
-    );
-  }
+  const leads = resp?.leads ?? [];
+  const total = resp?.total ?? 0;
+  const pages = resp?.pages ?? 1;
+  const firstRow = total === 0 ? 0 : (page - 1) * LEAD_PAGE_SIZE + 1;
+  const lastRow = Math.min(page * LEAD_PAGE_SIZE, total);
 
-  // ---- Error ----
-  if (error) {
-    return (
-      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-12 text-center">
-        <AlertCircle className="h-8 w-8 text-rose-400 mx-auto mb-3" />
-        <div className="text-base font-semibold text-rose-800">Couldn’t load leads</div>
-        <p className="mt-1 text-sm text-rose-600">{error}</p>
-        <button
-          onClick={load}
-          className="mt-4 inline-flex items-center gap-2 rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
-        >
-          <RefreshCw className="h-4 w-4" /> Try again
-        </button>
-      </div>
-    );
-  }
+  const filtersActive = statusFilter !== "all" || triggerFilter !== "all" || stageFilter !== "all" || !!debouncedQ;
 
   return (
     <div className="space-y-6">
@@ -659,7 +660,7 @@ function LeadsView({
           <div className="text-sm text-slate-500">
             Synced{" "}
             <span className="font-medium text-slate-700">
-              {newestSync ? formatRelative(newestSync) : "—"}
+              {resp?.leads[0]?.synced_at ? formatRelative(resp.leads[0].synced_at) : "—"}
             </span>
           </div>
           {isAdmin && (
@@ -693,7 +694,7 @@ function LeadsView({
               aria-pressed={statusFilter === v}
               className={cn(
                 "rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-colors",
-                statusFilter === v ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
+                statusFilter === v ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
               )}
             >
               {label}
@@ -714,64 +715,172 @@ function LeadsView({
           <option value="PB">PB</option>
         </select>
 
+        <select
+          value={stageFilter}
+          onChange={(e) => setStageFilter(e.target.value)}
+          className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 max-w-[220px]"
+          aria-label="Stage filter"
+        >
+          <option value="all">All stages</option>
+          {(filterOpts?.stages ?? []).map((s) => (
+            <option key={s.v} value={s.v}>
+              {s.v} ({s.n})
+            </option>
+          ))}
+        </select>
+
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search company, name, or email…"
-          className="flex-1 min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none"
+          className="flex-1 min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none"
         />
       </div>
 
-      <div className="text-sm text-slate-500">
-        Showing {capped.length} of {filtered.length}
-        {filtered.length !== counts.total ? ` (${counts.total} total)` : ""}
-        {filtered.length > LEADS_RENDER_CAP ? ` · capped at ${LEADS_RENDER_CAP}` : ""}
+      <div className="flex items-center justify-between text-sm text-slate-500">
+        <span>
+          {total === 0 ? "No leads" : `Showing ${firstRow}–${lastRow} of ${total.toLocaleString()}`}
+          {loading ? " · loading…" : ""}
+        </span>
+        {filtersActive && (
+          <button
+            onClick={() => {
+              setStatusFilter("all");
+              setTriggerFilter("all");
+              setStageFilter("all");
+              setQuery("");
+            }}
+            className="font-semibold text-brand-700 hover:text-brand-800"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
-      {/* Empty state */}
-      {filtered.length === 0 ? (
+      {/* Error */}
+      {error ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-12 text-center">
+          <AlertCircle className="h-8 w-8 text-rose-400 mx-auto mb-3" />
+          <div className="text-base font-semibold text-rose-800">Couldn’t load leads</div>
+          <p className="mt-1 text-sm text-rose-600">{error}</p>
+          <button
+            onClick={load}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+          >
+            <RefreshCw className="h-4 w-4" /> Try again
+          </button>
+        </div>
+      ) : total === 0 && !loading ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-16 text-center">
           <Target className="h-9 w-9 text-slate-300 mx-auto mb-3" />
           <div className="text-base font-semibold text-slate-700">
-            {counts.total === 0 ? "No leads synced yet" : "No leads match these filters"}
+            {filtersActive ? "No leads match these filters" : "No leads synced yet"}
           </div>
           <p className="mt-1 text-sm text-slate-500">
-            {counts.total === 0
-              ? isAdmin
+            {filtersActive
+              ? "Try clearing the search or switching filters."
+              : isAdmin
                 ? "Hit Refresh to pull qualifying leads from Pipedrive."
-                : "Qualifying Pipedrive leads will appear here once synced."
-              : "Try clearing the search or switching the status / trigger filters."}
+                : "Qualifying Pipedrive leads will appear here once synced."}
           </p>
-          {counts.total > 0 && (
-            <button
-              onClick={() => {
-                setStatusFilter("all");
-                setTriggerFilter("all");
-                setQuery("");
-              }}
-              className="mt-4 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              Clear filters
-            </button>
-          )}
         </div>
       ) : (
-        <div className="space-y-3">
-          {capped.map((lead) => (
-            <LeadCard
-              key={lead.pipedrive_lead_id}
-              lead={lead}
-              busy={genId === lead.pipedrive_lead_id}
-              onOutreach={() => onOutreach(lead)}
-            />
-          ))}
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[920px] border-collapse text-left">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <LeadTh label="Company / Project" sortKey="lead_title" sort={sort} dir={dir} onSort={toggleSort} />
+                  <th className="px-4 py-3">Contact</th>
+                  <LeadTh label="Stage" sortKey="project_stage" sort={sort} dir={dir} onSort={toggleSort} />
+                  <LeadTh label="Contact status" sortKey="outreach_status" sort={sort} dir={dir} onSort={toggleSort} />
+                  <LeadTh label="Trigger" sortKey="trigger_type" sort={sort} dir={dir} onSort={toggleSort} />
+                  <th className="px-4 py-3">Outreached by</th>
+                  <LeadTh label="Last contact" sortKey="last_contact" sort={sort} dir={dir} onSort={toggleSort} />
+                  <th className="px-4 py-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {leads.map((lead) => (
+                  <LeadRow
+                    key={lead.pipedrive_lead_id}
+                    lead={lead}
+                    busy={genId === lead.pipedrive_lead_id}
+                    onOutreach={() => requestOutreach(lead)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-sm">
+            <span className="text-slate-500">
+              Page {page} of {pages.toLocaleString()}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || loading}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              >
+                <ChevronLeft className="h-4 w-4" /> Prev
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(pages, p + 1))}
+                disabled={page >= pages || loading}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              >
+                Next <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         </div>
+      )}
+
+      {confirmLead && (
+        <OutreachConfirmModal
+          lead={confirmLead}
+          onCancel={() => setConfirmLead(null)}
+          onConfirm={() => doOutreach(confirmLead)}
+        />
       )}
     </div>
   );
 }
 
-function LeadCard({
+function LeadTh({
+  label,
+  sortKey,
+  sort,
+  dir,
+  onSort,
+}: {
+  label: string;
+  sortKey: LeadSortKey;
+  sort: LeadSortKey;
+  dir: "asc" | "desc";
+  onSort: (k: LeadSortKey) => void;
+}) {
+  const active = sort === sortKey;
+  return (
+    <th className="px-4 py-3">
+      <button
+        onClick={() => onSort(sortKey)}
+        className={cn("inline-flex items-center gap-1 hover:text-slate-800", active && "text-brand-700")}
+      >
+        {label}
+        {active ? (
+          dir === "asc" ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+        ) : (
+          <ChevronsUpDown className="h-3.5 w-3.5 text-slate-300" />
+        )}
+      </button>
+    </th>
+  );
+}
+
+function LeadRow({
   lead,
   busy,
   onOutreach,
@@ -782,82 +891,144 @@ function LeadCard({
 }) {
   const fresh = lead.outreach_status === "clear";
   const hasTrigger = !!lead.trigger_type;
-
-  const contactLine =
-    typeof lead.days_since_outgoing === "number"
-      ? `Emailed ${lead.days_since_outgoing}d ago`
-      : "Never contacted";
+  const contactedManually =
+    !lead.outreached_by && lead.outreach_status !== "clear" && lead.last_outgoing_mail_time;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-slate-300 hover:bg-slate-50/50">
-      <div className="flex items-start gap-4">
-        {/* Left: identity */}
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-base font-bold text-slate-900">
-            {lead.lead_title || "Untitled lead"}
-          </div>
-          <div className="mt-1 text-sm text-slate-500">
-            {lead.person_name || "Unknown contact"}
-            {lead.person_email ? <span className="text-slate-400"> · {lead.person_email}</span> : null}
-          </div>
-          <a
-            href={pipedriveLeadUrl(lead.pipedrive_lead_id)}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-indigo-600"
-          >
-            Open in Pipedrive
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
-
-        {/* Middle: status */}
-        <div className="hidden flex-col items-start gap-2 sm:flex">
-          <div className="flex items-center gap-2">
-            <OutreachBadge status={lead.outreach_status} days={lead.days_since_outgoing} />
-            {lead.trigger_type && (
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset",
-                  TRIGGER_COLORS[lead.trigger_type],
-                )}
-              >
-                {lead.trigger_type}
-              </span>
-            )}
-          </div>
-          <div className="text-xs text-slate-400">{contactLine}</div>
-        </div>
-
-        {/* Right: action */}
-        <div className="flex flex-col items-end">
-          <button
-            onClick={onOutreach}
-            disabled={!hasTrigger || busy}
-            title={
-              hasTrigger
-                ? undefined
-                : "Set a Trigger (AGC/LBA/CM/PB) on this lead in Pipedrive first."
-            }
+    <tr className="text-sm hover:bg-slate-50/70">
+      {/* Company / Project */}
+      <td className="px-4 py-3 align-top">
+        <div className="font-semibold text-slate-900">{lead.lead_title || "Untitled lead"}</div>
+        <a
+          href={pipedriveLeadUrl(lead.pipedrive_lead_id)}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-brand-600"
+        >
+          Pipedrive <ExternalLink className="h-3 w-3" />
+        </a>
+      </td>
+      {/* Contact */}
+      <td className="px-4 py-3 align-top">
+        <div className="text-slate-800">{lead.person_name || "—"}</div>
+        {lead.person_email && <div className="text-xs text-slate-400">{lead.person_email}</div>}
+      </td>
+      {/* Stage */}
+      <td className="px-4 py-3 align-top text-slate-600">{lead.project_stage || "—"}</td>
+      {/* Contact status */}
+      <td className="px-4 py-3 align-top">
+        <OutreachBadge status={lead.outreach_status} days={lead.days_since_outgoing} />
+      </td>
+      {/* Trigger */}
+      <td className="px-4 py-3 align-top">
+        {lead.trigger_type ? (
+          <span
             className={cn(
-              "inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors",
-              !hasTrigger
-                ? "cursor-not-allowed bg-slate-100 text-slate-400"
-                : fresh
-                  ? "bg-indigo-600 text-white hover:bg-indigo-700"
-                  : "border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50",
-              busy && "opacity-60",
+              "rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset",
+              TRIGGER_COLORS[lead.trigger_type],
             )}
           >
-            {busy ? "Creating…" : "Outreach"}
-            {!busy && <ChevronRight className="h-4 w-4" />}
-          </button>
-          {!hasTrigger && (
-            <span className="mt-1.5 max-w-[180px] text-right text-xs text-slate-400">
-              Needs a Trigger in Pipedrive
-            </span>
+            {lead.trigger_type}
+          </span>
+        ) : (
+          <span className="text-xs text-slate-400">none</span>
+        )}
+      </td>
+      {/* Outreached by */}
+      <td className="px-4 py-3 align-top text-slate-600">
+        {lead.outreached_by ? (
+          lead.outreached_by
+        ) : contactedManually ? (
+          <span className="text-slate-400">Pipedrive (manual)</span>
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+      </td>
+      {/* Last contact */}
+      <td className="px-4 py-3 align-top text-slate-600">
+        {typeof lead.days_since_outgoing === "number" ? `${lead.days_since_outgoing}d ago` : "Never"}
+      </td>
+      {/* Action */}
+      <td className="px-4 py-3 align-top text-right">
+        <button
+          onClick={onOutreach}
+          disabled={!hasTrigger || busy}
+          title={hasTrigger ? undefined : "Set a Trigger (AGC/LBA/CM/PB) on this lead in Pipedrive first."}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors",
+            !hasTrigger
+              ? "cursor-not-allowed bg-slate-100 text-slate-400"
+              : fresh
+                ? "bg-cta-500 text-white hover:bg-cta-600"
+                : "border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
+            busy && "opacity-60",
           )}
+        >
+          {busy ? "Creating…" : fresh ? "Outreach" : "Review"}
+          {!busy && <ChevronRight className="h-4 w-4" />}
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+// Double-confirm before outreaching a lead that's already been contacted /
+// sequenced — sends the rep to verify the Pipedrive record first.
+function OutreachConfirmModal({
+  lead,
+  onCancel,
+  onConfirm,
+}: {
+  lead: SdrLead;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const days = lead.days_since_outgoing;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onCancel}>
+      <div
+        className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-amber-100">
+            <AlertTriangle className="h-5 w-5 text-amber-600" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Are you sure?</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              <span className="font-semibold">{lead.lead_title || "This lead"}</span> is already marked as{" "}
+              <span className="font-semibold">
+                {lead.outreach_status === "sequenced" ? "in an Apollo sequence" : "outreached"}
+              </span>
+              {typeof days === "number" ? ` (last emailed ${days}d ago)` : ""}. Check the lead on Pipedrive before
+              sending again.
+            </p>
+          </div>
+        </div>
+
+        <a
+          href={pipedriveLeadUrl(lead.pipedrive_lead_id)}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-100"
+        >
+          Check lead on Pipedrive <ExternalLink className="h-4 w-4" />
+        </a>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="rounded-lg bg-cta-500 px-4 py-2 text-sm font-semibold text-white hover:bg-cta-600"
+          >
+            Outreach anyway
+          </button>
         </div>
       </div>
     </div>
@@ -1034,7 +1205,7 @@ function QueueView({
             onClick={() => setStatusFilter("open")}
             className={cn(
               "rounded-xl px-3 py-1.5 text-sm font-semibold",
-              statusFilter === "open" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+              statusFilter === "open" ? "bg-brand-100 text-brand-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200",
             )}
           >
             Open
@@ -1043,7 +1214,7 @@ function QueueView({
             onClick={() => setStatusFilter("all")}
             className={cn(
               "rounded-xl px-3 py-1.5 text-sm font-semibold",
-              statusFilter === "all" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+              statusFilter === "all" ? "bg-brand-100 text-brand-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200",
             )}
           >
             All
@@ -1170,7 +1341,7 @@ function DraftRow({
           rel="noreferrer"
           onClick={(e) => e.stopPropagation()}
           title="Open lead in Pipedrive"
-          className="flex items-center gap-1 text-xs text-slate-400 hover:text-indigo-600 flex-shrink-0"
+          className="flex items-center gap-1 text-xs text-slate-400 hover:text-brand-600 flex-shrink-0"
         >
           <ExternalLink className="h-3.5 w-3.5" />
           Pipedrive
@@ -1186,7 +1357,7 @@ function DraftRow({
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               disabled={!canSend || busy}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
             />
           </div>
           <div>
@@ -1196,7 +1367,7 @@ function DraftRow({
               onChange={(e) => setBody(e.target.value)}
               disabled={!canSend || busy}
               rows={12}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
             />
           </div>
           <div className="text-xs text-slate-500 space-y-1">
@@ -1238,9 +1409,9 @@ function DraftRow({
           )}
 
           {canSend && confirming === "approve" && (
-            <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 flex items-center gap-3">
-              <Send className="h-4 w-4 text-indigo-600 flex-shrink-0" />
-              <div className="flex-1 text-sm text-indigo-900">
+            <div className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 flex items-center gap-3">
+              <Send className="h-4 w-4 text-brand-600 flex-shrink-0" />
+              <div className="flex-1 text-sm text-brand-900">
                 Enrolls <span className="font-semibold">{draft.contact_email_snapshot}</span> in the Apollo sequence and
                 sends the first email from <span className="font-semibold">{mailbox?.email || "the assigned mailbox"}</span>.
               </div>
@@ -1254,7 +1425,7 @@ function DraftRow({
               <button
                 onClick={() => { setConfirming(null); onApprove(); }}
                 disabled={busy}
-                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+                className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50"
               >
                 Confirm send
               </button>
@@ -1352,7 +1523,7 @@ function DraftRow({
                       ? "Save edits first"
                       : "Enroll in Apollo sequence + send first email"
                   }
-                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50 flex items-center gap-2"
+                  className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50 flex items-center gap-2"
                 >
                   <Send className="h-4 w-4" />
                   Approve & send
@@ -1478,7 +1649,7 @@ function EngagedView() {
                   target="_blank"
                   rel="noreferrer"
                   title="Open lead in Pipedrive"
-                  className="text-slate-400 hover:text-indigo-600 flex-shrink-0"
+                  className="text-slate-400 hover:text-brand-600 flex-shrink-0"
                 >
                   <ExternalLink className="h-4 w-4" />
                 </a>
@@ -1635,7 +1806,7 @@ function StatTile({
   tone: "indigo" | "emerald" | "slate" | "rose";
 }) {
   const tones: Record<string, string> = {
-    indigo: "bg-indigo-50 text-indigo-700",
+    indigo: "bg-brand-50 text-brand-700",
     emerald: "bg-emerald-50 text-emerald-700",
     slate: "bg-slate-50 text-slate-700",
     rose: "bg-rose-50 text-rose-700",
@@ -2065,7 +2236,7 @@ function RichTextEditor({
             rows={10}
             className={cn(
               "w-full rounded-b-lg border border-slate-200 px-3 py-2 text-xs font-mono text-slate-800",
-              "focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400",
+              "focus:outline-none focus:ring-2 focus:ring-brand-200 focus:border-brand-400",
             )}
           />
         </div>
@@ -2077,7 +2248,7 @@ function RichTextEditor({
           suppressContentEditableWarning
           className={cn(
             "min-h-[180px] w-full overflow-auto border border-slate-200 px-3 py-2 text-sm text-slate-800",
-            "focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400",
+            "focus:outline-none focus:ring-2 focus:ring-brand-200 focus:border-brand-400",
             showSource ? "rounded-b-lg" : "rounded-b-lg",
             disabled
               ? "rounded-lg bg-slate-50 text-slate-500 cursor-not-allowed opacity-70"
@@ -2172,7 +2343,7 @@ function SequenceStepEditor({
           disabled={readOnly || saving}
           className={cn(
             "mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800",
-            "focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400",
+            "focus:outline-none focus:ring-2 focus:ring-brand-200 focus:border-brand-400",
             (readOnly || saving) && "bg-slate-50 text-slate-500 cursor-not-allowed",
           )}
         />
@@ -2200,7 +2371,7 @@ function SequenceStepEditor({
               "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors",
               !dirty || saving
                 ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                : "bg-indigo-600 text-white hover:bg-indigo-700",
+                : "bg-brand-600 text-white hover:bg-brand-700",
             )}
           >
             {saving && <RefreshCw className="h-4 w-4 animate-spin" />}

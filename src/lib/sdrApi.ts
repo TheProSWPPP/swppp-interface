@@ -92,6 +92,34 @@ export interface SdrLead {
   outreach_status: SdrOutreachStatus;
   synced_at: string | null;
   days_since_outgoing: number | null;
+  outreached_by: string | null;
+  outreached_status: string | null;
+}
+
+export interface SdrLeadsResponse {
+  leads: SdrLead[];
+  count: number;
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+  facets: { byStatus: Record<string, number>; grandTotal: number };
+}
+
+export interface SdrLeadFilters {
+  stages: { v: string; n: number }[];
+  triggers: { v: string; n: number }[];
+}
+
+export interface SdrLeadsQuery {
+  status?: string;
+  trigger?: string;
+  stage?: string;
+  q?: string;
+  sort?: string;
+  dir?: "asc" | "desc";
+  page?: number;
+  limit?: number;
 }
 
 export interface SdrTemplateStep {
@@ -272,13 +300,21 @@ export const sdrApi = {
       { method: "POST", body: JSON.stringify(override ? { override: true } : {}) },
     ),
 
-  listLeads: (params?: { status?: string; q?: string }) => {
+  listLeads: (params?: SdrLeadsQuery) => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
+    if (params?.trigger) qs.set("trigger", params.trigger);
+    if (params?.stage) qs.set("stage", params.stage);
     if (params?.q) qs.set("q", params.q);
+    if (params?.sort) qs.set("sort", params.sort);
+    if (params?.dir) qs.set("dir", params.dir);
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return sdrFetch<{ leads: SdrLead[]; count: number }>(`/api/sdr/leads${suffix}`);
+    return sdrFetch<SdrLeadsResponse>(`/api/sdr/leads${suffix}`);
   },
+
+  leadFilters: () => sdrFetch<SdrLeadFilters>("/api/sdr/leads/filters"),
 
   syncLeads: () => sdrFetch<{ started: boolean }>("/api/sdr/sync/leads", { method: "POST" }),
 
