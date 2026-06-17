@@ -22,6 +22,7 @@ import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
+import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
 const { Pool } = pg;
 
@@ -421,7 +422,8 @@ app.use((req, res, next) => {
     (req.path === "/api/seo-ideas/seeds" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/seo-ideas/existing-articles" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/sdr/events/ingest" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
-    (req.path === "/api/sdr/drafts/generate" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET)
+    (req.path === "/api/sdr/drafts/generate" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
+    (req.path.startsWith("/api/sdr/track/") && req.method === "GET")
   ) {
     return next();
   }
@@ -1129,6 +1131,54 @@ app.post("/api/sdr/mailboxes/sync", async (req, res) => {
     console.error("POST /api/sdr/mailboxes/sync error:", err);
     res.status(500).json({ error: err.message || "Apollo sync failed" });
   }
+});
+
+// SDR — self-hosted open/click tracking (PUBLIC, hit by the email recipient).
+// Keyed by draft id. We resolve the draft → contact email + sequence, then feed an
+// event into /api/sdr/events/ingest (reusing its dedup + side effects). Per-lead
+// opens/clicks without Apollo's Professional webhook.
+async function logTrackEvent(token, kind, url) {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    const { rows } = await pool.query(
+      `SELECT contact_email_snapshot, apollo_sequence_id, pipedrive_lead_id FROM sdr_drafts WHERE id = $1`,
+      [token],
+    );
+    const d = rows[0];
+    if (!d) return;
+    const ev = {
+      type: kind === "open" ? "email_opened" : "email_clicked",
+      sequence_id: d.apollo_sequence_id,
+      email: d.contact_email_snapshot,
+      created_at: new Date().toISOString(),
+      id: trackEventId(kind, token, url),
+      source: "self_tracking",
+      clicked_url: url || undefined,
+    };
+    await fetch(`http://127.0.0.1:${port}/api/sdr/events/ingest?callback_secret=${encodeURIComponent(N8N_CALLBACK_SECRET)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ev),
+    });
+  } catch (e) {
+    console.error("logTrackEvent failed:", e.message);
+  }
+}
+
+app.get("/api/sdr/track/open/:token", (req, res) => {
+  // Respond with the pixel immediately; log async so the image never blocks.
+  res.set("Content-Type", "image/gif")
+    .set("Cache-Control", "no-store, no-cache, must-revalidate, private")
+    .set("Pragma", "no-cache")
+    .send(TRANSPARENT_GIF);
+  logTrackEvent(String(req.params.token).replace(/\.gif$/i, ""), "open").catch(() => {});
+});
+
+app.get("/api/sdr/track/click/:token", (req, res) => {
+  const dest = req.query.u;
+  if (!dest || !/^https?:\/\//i.test(String(dest))) return res.status(400).send("Invalid redirect target");
+  res.redirect(302, String(dest));
+  logTrackEvent(String(req.params.token), "click", String(dest)).catch(() => {});
 });
 
 // SDR — Apollo webhook ingest. n8n forwards Apollo events here with
@@ -1876,9 +1926,12 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         // The sequences' step-1 templates merge {{contact.swppp_draft_subject/body}},
         // so what was approved in the queue is exactly what Apollo sends.
         // Must succeed BEFORE enrollment — otherwise Apollo would send raw merge tags.
+        // Inject self-hosted open/click tracking (pixel + link-wrap) keyed by draft id.
+        const trackBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
+        const trackedBody = injectTracking(draft.body, draft.id, trackBase);
         await apolloClient.updateContactCustomFields(apolloContactId, {
           [APOLLO_CF_DRAFT_SUBJECT]: draft.subject,
-          [APOLLO_CF_DRAFT_BODY]: draft.body,
+          [APOLLO_CF_DRAFT_BODY]: trackedBody,
         });
 
         // Enroll in sequence with the assigned mailbox as the sender
