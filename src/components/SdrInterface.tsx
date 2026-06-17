@@ -387,7 +387,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           <div className="flex items-center gap-1 mb-6 border-b border-slate-200">
             <TabButton current={tab} value="leads" onClick={setTab} icon={<Target className="h-4 w-4" />}>Leads</TabButton>
             <TabButton current={tab} value="queue" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Queue</TabButton>
-            <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />}>Engaged</TabButton>
+            <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />}>Priority</TabButton>
             <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
             <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
             <TabButton current={tab} value="templates" onClick={setTab} icon={<SettingsIcon className="h-4 w-4" />}>Templates</TabButton>
@@ -915,6 +915,17 @@ function QueueView({
     return drafts;
   }, [drafts, statusFilter]);
 
+  const counts = useMemo(() => {
+    const c = { open: 0, pending: 0, sent: 0, failed: 0 };
+    for (const d of drafts || []) {
+      if (["pending", "approved", "edited"].includes(d.status)) c.open++;
+      if (d.status === "pending") c.pending++;
+      if (d.status === "sent") c.sent++;
+      if (d.status === "failed") c.failed++;
+    }
+    return c;
+  }, [drafts]);
+
   async function onApprove(id: string) {
     const send = async (override: boolean) => {
       const result = await sdrApi.approveAndSendDraft(id, override);
@@ -1009,6 +1020,14 @@ function QueueView({
 
   return (
     <div>
+      {drafts && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <StatTile label="Open" value={counts.open} icon={<Inbox className="h-4 w-4" />} tone="indigo" />
+          <StatTile label="Awaiting review" value={counts.pending} icon={<ListChecks className="h-4 w-4" />} tone="slate" />
+          <StatTile label="Sent" value={counts.sent} icon={<Send className="h-4 w-4" />} tone="emerald" />
+          <StatTile label="Failed" value={counts.failed} icon={<XCircle className="h-4 w-4" />} tone="rose" />
+        </div>
+      )}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <button
