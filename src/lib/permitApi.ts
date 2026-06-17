@@ -9,6 +9,7 @@ export type PermitFacility = {
   original_issue_date: string | null;
   score: number;
   status: string;
+  compliance_flags?: { pain?: number; vioLast4Q?: number; cv?: number; sv?: number } | null;
 };
 
 export type PoolResponse = { rows: PermitFacility[]; total: number; page: number; pageSize: number };
@@ -31,6 +32,25 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
   return r.json() as Promise<T>;
+}
+
+export interface PermitSettings { active: boolean; daily_enroll_cap: number; }
+export interface PermitMailbox { id: string; email: string; display_name: string | null; permit_enabled: boolean; }
+
+export async function getPermitSettings(): Promise<{ settings: PermitSettings; mailboxes: PermitMailbox[] }> {
+  return j<{ settings: PermitSettings; mailboxes: PermitMailbox[] }>(`/api/permits/settings`);
+}
+export async function patchPermitSettings(body: Partial<PermitSettings>): Promise<{ settings: PermitSettings }> {
+  return j<{ settings: PermitSettings }>(`/api/permits/settings`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+export async function patchPermitMailbox(id: string, permit_enabled: boolean): Promise<{ mailbox: PermitMailbox }> {
+  return j<{ mailbox: PermitMailbox }>(`/api/permits/mailboxes/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ permit_enabled }),
+  });
 }
 
 export const permitApi = {

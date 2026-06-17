@@ -20,6 +20,8 @@ import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
+import { runPermitIngest } from "./scripts/permit-ingest.mjs";
+import { runEchoRefresh } from "./scripts/echo-ingest.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
@@ -859,6 +861,16 @@ async function initDB() {
       )
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_permit_enrichment_channel ON permit_enrichment(channel)`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS permit_engine_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        active BOOLEAN NOT NULL DEFAULT FALSE,
+        daily_enroll_cap INT NOT NULL DEFAULT 50,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT permit_engine_settings_singleton CHECK (id = 1)
+      )`);
+    await pool.query(`INSERT INTO permit_engine_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+    await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS permit_enabled BOOLEAN NOT NULL DEFAULT FALSE`);
     console.log("SDR tables (sdr_users, sdr_mailboxes, sdr_drafts, sdr_sends, sdr_engagement_events, sdr_migrations) verified/created.");
 
     // Automation Roadmap — shared task list (team posts work, Derek tracks/edits/comments)
@@ -933,6 +945,21 @@ if (process.env.DATABASE_URL && process.env.APOLLO_API_KEY) {
       .catch((e) => console.error("[engagement-poll] failed:", e.message));
   setTimeout(runEngPoll, 60_000);
   setInterval(runEngPoll, 2 * 60 * 1000);
+}
+
+// Permit engine monthly refresh: EPA re-pull + ECHO compliance refresh.
+// Gated by env opt-in AND the master switch so it never runs unexpectedly.
+if (process.env.DATABASE_URL && process.env.PERMIT_REFRESH_ENABLED === "true") {
+  const runPermitRefresh = async () => {
+    try {
+      const s = await pool.query(`SELECT active FROM permit_engine_settings WHERE id = 1`);
+      if (!s.rows[0]?.active) { console.log("[permit-refresh] skipped — engine inactive"); return; }
+      const ing = await runPermitIngest(pool);
+      const echo = await runEchoRefresh(pool, { delayMs: 250 });
+      console.log(`[permit-refresh] ingest=${JSON.stringify(ing)} echo=${JSON.stringify(echo)}`);
+    } catch (e) { console.error("[permit-refresh] failed:", e.message); }
+  };
+  setInterval(runPermitRefresh, 30 * 24 * 60 * 60 * 1000); // ~monthly
 }
 
 // Fallback in-memory store if no DB is connected (for local dev)

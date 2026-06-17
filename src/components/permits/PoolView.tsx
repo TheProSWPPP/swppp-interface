@@ -93,7 +93,12 @@ export default function PoolView({ pushToast }: { pushToast?: (m: string, k?: "s
                 <td className="p-2 text-slate-500">{r.external_permit_nmbr}</td>
                 <td className="p-2 text-slate-500">{r.city || "—"}</td>
                 <td className="p-2 text-right text-slate-500">{r.expiration_date || "—"}</td>
-                <td className="p-2 text-right font-semibold text-slate-700">{r.score}</td>
+                <td className="p-2 text-right font-semibold text-slate-700">
+                  {r.score}
+                  {(r.compliance_flags?.pain ?? 0) >= 12 && (
+                    <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700">⚠ in violation</span>
+                  )}
+                </td>
               </tr>
             ))}
             {!rows.length && !loading && (
