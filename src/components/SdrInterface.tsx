@@ -1378,8 +1378,14 @@ function LeadRow({
         {stageLabel && (
           <div className="mt-1 text-xs font-medium text-brand-700">
             {seqLabel ? `${seqLabel} · ` : ""}
-            {stageLabel}
-            {lead.send_sent_at ? ` · ${formatRelative(lead.send_sent_at)}` : ""}
+            {typeof lead.send_current_step === "number" && lead.send_total_steps
+              ? `Step ${lead.send_current_step}/${lead.send_total_steps}`
+              : stageLabel}
+            {lead.send_next_at
+              ? ` · next ${formatRelative(lead.send_next_at)}`
+              : lead.send_sent_at
+                ? ` · ${formatRelative(lead.send_sent_at)}`
+                : ""}
           </div>
         )}
       </td>

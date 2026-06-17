@@ -715,6 +715,11 @@ async function initDB() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    // Apollo sequence step tracking (added 2026-06-17). Idempotent.
+    await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS current_step INT`);
+    await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS total_steps INT`);
+    await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS next_send_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS step_status TEXT`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_lead ON sdr_sends(pipedrive_lead_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_sequence ON sdr_sends(apollo_sequence_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_status ON sdr_sends(status)`);
@@ -1160,6 +1165,9 @@ app.get("/api/sdr/leads", async (req, res) => {
              snd.send_status,
              snd.send_sequence_id,
              snd.sent_at AS send_sent_at,
+             snd.current_step AS send_current_step,
+             snd.total_steps AS send_total_steps,
+             snd.next_send_at AS send_next_at,
              COUNT(*) OVER() AS _total
       FROM sdr_lead_state s
       LEFT JOIN LATERAL (
@@ -1171,7 +1179,8 @@ app.get("/api/sdr/leads", async (req, res) => {
         LIMIT 1
       ) ob ON TRUE
       LEFT JOIN LATERAL (
-        SELECT status AS send_status, apollo_sequence_id AS send_sequence_id, sent_at
+        SELECT status AS send_status, apollo_sequence_id AS send_sequence_id, sent_at,
+               current_step, total_steps, next_send_at
         FROM sdr_sends
         WHERE pipedrive_lead_id = s.pipedrive_lead_id
         ORDER BY sent_at DESC NULLS LAST

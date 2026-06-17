@@ -99,6 +99,9 @@ export interface SdrLead {
   send_status: string | null;
   send_sequence_id: string | null;
   send_sent_at: string | null;
+  send_current_step: number | null;
+  send_total_steps: number | null;
+  send_next_at: string | null;
 }
 
 export interface SdrLeadDetail {
