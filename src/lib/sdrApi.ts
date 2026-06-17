@@ -86,6 +86,22 @@ export interface SdrTemplate {
   default_subject: string;
 }
 
+export interface SdrSequenceStep {
+  position: number | null;
+  step_type: string | null;
+  template_id: string;
+  subject: string;
+  body_html: string;
+}
+
+export interface SdrSequence {
+  id: string;
+  name: string;
+  active: boolean;
+  num_steps: number;
+  steps: SdrSequenceStep[];
+}
+
 export interface SdrEngagementLead {
   draft_id: string;
   pipedrive_lead_id: string;
@@ -202,6 +218,14 @@ export const sdrApi = {
   getDraft: (id: string) => sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}`),
 
   engagementSummary: () => sdrFetch<SdrEngagementSummary>("/api/sdr/engagement/summary"),
+
+  listSequences: () => sdrFetch<{ sequences: SdrSequence[] }>("/api/sdr/sequences"),
+
+  updateSequenceTemplate: (templateId: string, fields: { subject?: string; body_html?: string }) =>
+    sdrFetch<{ ok: boolean }>("/api/sdr/sequences/templates/" + templateId, {
+      method: "PUT",
+      body: JSON.stringify(fields),
+    }),
 
   refreshDraft: (id: string) =>
     sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}/refresh`, { method: "POST" }),

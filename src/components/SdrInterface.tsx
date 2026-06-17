@@ -9,6 +9,7 @@ import {
   Flame,
   Inbox,
   LayoutGrid,
+  ListChecks,
   LogOut,
   Mail,
   MousePointerClick,
@@ -35,6 +36,8 @@ import {
   type SdrEngagementLead,
   type SdrEngagementSummary,
   type SdrMailbox,
+  type SdrSequence,
+  type SdrSequenceStep,
   type SdrTemplate,
   type SdrTriggerType,
   type SdrUser,
@@ -47,7 +50,7 @@ import ContactsView from "./nurture/ContactsView";
 import AutomationsView from "./nurture/AutomationsView";
 import PermitsTab from "./permits/PermitsTab";
 
-type SdrTab = "queue" | "engaged" | "dashboard" | "mailboxes" | "templates" | "permits";
+type SdrTab = "queue" | "engaged" | "dashboard" | "mailboxes" | "templates" | "sequences" | "permits";
 type OutreachLane = "cold" | "nurture";
 type NurtureTab = "campaigns" | "lists" | "contacts" | "automations";
 
@@ -385,6 +388,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
             <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
             <TabButton current={tab} value="templates" onClick={setTab} icon={<SettingsIcon className="h-4 w-4" />}>Templates</TabButton>
+            <TabButton current={tab} value="sequences" onClick={setTab} icon={<ListChecks className="h-4 w-4" />}>Sequences</TabButton>
             <TabButton current={tab} value="permits" onClick={setTab} icon={<FileSearch className="h-4 w-4" />}>Permits</TabButton>
           </div>
           {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
@@ -392,6 +396,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {tab === "dashboard" && <DashboardView />}
           {tab === "mailboxes" && <MailboxesView user={user} />}
           {tab === "templates" && <TemplatesView />}
+          {tab === "sequences" && <SequencesView user={user} pushToast={push} />}
           {tab === "permits" && <PermitsTab pushToast={(m, k) => push(k ?? "success", m)} />}
         </>
       ) : (
@@ -1383,5 +1388,245 @@ function TemplatesView() {
         </div>
       ))}
     </div>
+  );
+}
+
+// --------------------------------------------------------------------------
+// Sequences — live Apollo sequence HTML editor (admin-only edit, instant save)
+// --------------------------------------------------------------------------
+
+function SequencesView({
+  user,
+  pushToast,
+}: {
+  user: SdrUser;
+  pushToast: (kind: "success" | "error", text: string) => void;
+}) {
+  const isAdmin = user.role === "admin";
+  const [sequences, setSequences] = useState<SdrSequence[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    sdrApi
+      .listSequences()
+      .then((d) => {
+        if (!cancelled) setSequences(d.sequences);
+      })
+      .catch((e) => {
+        if (!cancelled) setError((e as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (error)
+    return (
+      <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
+    );
+  if (!sequences) return <div className="text-center text-slate-400 py-12">Loading…</div>;
+  if (sequences.length === 0)
+    return (
+      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
+        No Apollo sequences found.
+      </div>
+    );
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        These are <span className="font-semibold">LIVE Apollo sequences</span> that email real prospects. Edits
+        save straight to Apollo — there is no separate publish step.
+        {!isAdmin && <span className="block mt-1 font-semibold">Admins only can edit sequences.</span>}
+      </div>
+      {sequences.map((seq) => (
+        <SequenceCard key={seq.id} seq={seq} isAdmin={isAdmin} pushToast={pushToast} />
+      ))}
+    </div>
+  );
+}
+
+function SequenceCard({
+  seq,
+  isAdmin,
+  pushToast,
+}: {
+  seq: SdrSequence;
+  isAdmin: boolean;
+  pushToast: (kind: "success" | "error", text: string) => void;
+}) {
+  const sortedSteps = useMemo(
+    () =>
+      [...seq.steps].sort((a, b) => {
+        const pa = a.position ?? Number.MAX_SAFE_INTEGER;
+        const pb = b.position ?? Number.MAX_SAFE_INTEGER;
+        return pa - pb;
+      }),
+    [seq.steps],
+  );
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 flex-wrap">
+        <span className="text-sm font-semibold text-slate-900">{seq.name}</span>
+        <span
+          className={cn(
+            "text-xs font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset",
+            seq.active
+              ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+              : "bg-slate-100 text-slate-500 ring-slate-200",
+          )}
+        >
+          {seq.active ? "Active" : "Inactive"}
+        </span>
+        <span className="text-xs text-slate-500">
+          — {seq.num_steps} step{seq.num_steps === 1 ? "" : "s"}
+        </span>
+      </div>
+      <ul className="divide-y divide-slate-100">
+        {sortedSteps.map((step, i) => (
+          <SequenceStepEditor
+            key={step.template_id || i}
+            seqName={seq.name}
+            step={step}
+            stepNumber={i + 1}
+            isAdmin={isAdmin}
+            pushToast={pushToast}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SequenceStepEditor({
+  seqName,
+  step,
+  stepNumber,
+  isAdmin,
+  pushToast,
+}: {
+  seqName: string;
+  step: SdrSequenceStep;
+  stepNumber: number;
+  isAdmin: boolean;
+  pushToast: (kind: "success" | "error", text: string) => void;
+}) {
+  // Loaded baseline — updated after a successful save so dirty resets.
+  const [baseline, setBaseline] = useState({ subject: step.subject, body_html: step.body_html });
+  const [subject, setSubject] = useState(step.subject);
+  const [bodyHtml, setBodyHtml] = useState(step.body_html);
+  const [saving, setSaving] = useState(false);
+
+  const dirty = subject !== baseline.subject || bodyHtml !== baseline.body_html;
+  const readOnly = !isAdmin;
+
+  const handleSave = async () => {
+    if (!isAdmin || !dirty || saving) return;
+
+    if (
+      !window.confirm(
+        "⚠️ You're editing a LIVE Apollo sequence that sends to real prospects. Continue?",
+      )
+    )
+      return;
+
+    const typed = window.prompt(
+      'Type SAVE to push this change to the live sequence "' + seqName + '":',
+    );
+    if (typed !== "SAVE") {
+      pushToast("error", "Save cancelled — type SAVE to confirm.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await sdrApi.updateSequenceTemplate(step.template_id, {
+        subject,
+        body_html: bodyHtml,
+      });
+      setBaseline({ subject, body_html: bodyHtml });
+      pushToast("success", "Sequence step saved to Apollo");
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 403) {
+        pushToast("error", "Forbidden — admins only can edit sequences.");
+      } else {
+        pushToast("error", err.message);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <li className="px-4 py-4 space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+          Step {stepNumber}
+        </span>
+        {step.step_type && (
+          <span className="text-[10px] text-slate-400 font-mono">{step.step_type}</span>
+        )}
+        {dirty && !readOnly && (
+          <span className="text-[10px] font-semibold text-amber-600">unsaved changes</span>
+        )}
+      </div>
+
+      <label className="block">
+        <span className="text-xs font-medium text-slate-500">Subject</span>
+        <input
+          type="text"
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          disabled={readOnly || saving}
+          className={cn(
+            "mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800",
+            "focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400",
+            (readOnly || saving) && "bg-slate-50 text-slate-500 cursor-not-allowed",
+          )}
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-xs font-medium text-slate-500">Body (HTML source)</span>
+        <textarea
+          value={bodyHtml}
+          onChange={(e) => setBodyHtml(e.target.value)}
+          disabled={readOnly || saving}
+          rows={10}
+          className={cn(
+            "mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono text-slate-800",
+            "focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400",
+            (readOnly || saving) && "bg-slate-50 text-slate-500 cursor-not-allowed",
+          )}
+        />
+      </label>
+
+      <p className="text-[11px] text-slate-400">
+        Keep merge fields intact:{" "}
+        <span className="font-mono text-slate-500">{"{{contact.swppp_draft_body}}"}</span> and{" "}
+        <span className="font-mono text-slate-500">{"{{contact.swppp_track}}"}</span> — do not delete them.
+      </p>
+
+      {!readOnly && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleSave}
+            disabled={!dirty || saving}
+            className={cn(
+              "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors",
+              !dirty || saving
+                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                : "bg-indigo-600 text-white hover:bg-indigo-700",
+            )}
+          >
+            {saving && <RefreshCw className="h-4 w-4 animate-spin" />}
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      )}
+    </li>
   );
 }
