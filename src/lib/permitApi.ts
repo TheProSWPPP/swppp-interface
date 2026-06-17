@@ -110,13 +110,13 @@ export interface OperatorDetail {
   outreach: OutreachEvent[];
 }
 
-export interface PermitSettings { active: boolean; daily_enroll_cap: number; }
-export interface PermitMailbox { id: string; email: string; display_name: string | null; permit_enabled: boolean; }
+export interface PermitSettings { active: boolean; }
+export interface PermitMailbox { id: string; email: string; display_name: string | null; permit_enabled: boolean; daily_send_limit?: number; }
 
 export async function getPermitSettings(): Promise<{ settings: PermitSettings; mailboxes: PermitMailbox[] }> {
   return j<{ settings: PermitSettings; mailboxes: PermitMailbox[] }>(`/api/permits/settings`);
 }
-export async function patchPermitSettings(body: Partial<PermitSettings>): Promise<{ settings: PermitSettings }> {
+export async function patchPermitSettings(body: { active: boolean }): Promise<{ settings: PermitSettings }> {
   return j<{ settings: PermitSettings }>(`/api/permits/settings`, {
     method: "PATCH",
     body: JSON.stringify(body),

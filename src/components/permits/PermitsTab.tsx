@@ -18,8 +18,8 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
     try {
       const { settings: s } = await patchPermitSettings({ active: !settings.active });
       setSettings(s);
-      pushToast?.(`Permit engine ${s.active ? "ACTIVATED" : "deactivated"}`, s.active ? "success" : "error");
-    } catch { pushToast?.("Failed to update engine", "error"); }
+      pushToast?.(`Permit email sending ${s.active ? "ON" : "OFF"}`, s.active ? "success" : "error");
+    } catch { pushToast?.("Failed to update setting", "error"); }
   };
 
   const btn = (v: "leads" | "email", label: string, icon: React.ReactNode) => (
@@ -33,22 +33,18 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
   return (
     <div className="space-y-4">
       {settings && (
-        <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-3">
+        <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm">
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={settings.active} onChange={toggleActive} />
-            <span className="font-medium text-sm">Permit engine {settings.active ? "ACTIVE" : "OFF"}</span>
+            <span className="font-medium">Permit email sending {settings.active ? "ON" : "OFF"}</span>
           </label>
-          <div className="mt-2 flex items-center gap-2 text-sm">
-            <span className="text-slate-600">Daily enroll cap</span>
-            <input type="number" min={0} max={500} value={settings.daily_enroll_cap}
-              onChange={async (e) => {
-                const v = parseInt(e.target.value, 10) || 0;
-                const { settings: s } = await patchPermitSettings({ daily_enroll_cap: v });
-                setSettings(s);
-              }} className="w-20 rounded border border-slate-300 px-1 py-0.5 text-sm" />
-          </div>
-          <details className="mt-2 text-sm">
-            <summary className="cursor-pointer text-slate-600">Mailboxes ({mailboxes.filter((m) => m.permit_enabled).length} enabled)</summary>
+          <p className="mt-1 text-xs text-slate-500">
+            Off = no emails sent. Pulling contacts (enrichment) and the direct-mail CSV work either way.
+          </p>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-slate-600">
+              Sending mailboxes ({mailboxes.filter((m) => m.permit_enabled).length} enabled · shares the daily limit with regular outreach)
+            </summary>
             {mailboxes.map((m) => (
               <label key={m.id} className="flex items-center gap-2 py-0.5 cursor-pointer">
                 <input type="checkbox" checked={m.permit_enabled}
@@ -57,8 +53,12 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
                     setMailboxes((xs) => xs.map((x) => x.id === mailbox.id ? { ...x, permit_enabled: mailbox.permit_enabled } : x));
                   }} />
                 <span>{m.email}</span>
+                <span className="text-xs text-slate-400">{m.daily_send_limit ?? "—"}/day shared</span>
               </label>
             ))}
+            <p className="mt-1 text-xs text-slate-400">
+              Permit emails draw from each mailbox's daily cap (set in SDR → Mailboxes) — not a separate quota.
+            </p>
           </details>
         </div>
       )}
