@@ -25,6 +25,7 @@ import {
   Snowflake,
   Sparkles,
   Sprout,
+  StickyNote,
   Target,
   X,
   XCircle,
@@ -339,22 +340,22 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   return (
     <div>
       <ToastStack toasts={toasts} dismiss={dismiss} />
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-5 rounded-2xl bg-gradient-to-r from-brand-800 to-brand-600 px-6 py-5 text-white shadow-sm">
         <div>
-          <div className="text-xs uppercase tracking-wide font-semibold text-slate-400">SDR</div>
-          <h2 className="text-2xl font-semibold text-slate-900">Outreach console</h2>
+          <div className="text-xs uppercase tracking-[0.2em] font-bold text-brand-100">Pro SWPPP · SDR</div>
+          <h2 className="text-2xl font-bold text-white">Outreach console</h2>
         </div>
         <div className="flex items-center gap-3">
           <div className="text-right">
-            <div className="text-sm font-medium text-slate-900">{user.display_name}</div>
-            <div className="text-xs text-slate-500 flex items-center justify-end gap-1">
-              {user.role === "admin" && <ShieldCheck className="h-3 w-3 text-brand-600" />}
+            <div className="text-sm font-semibold text-white">{user.display_name}</div>
+            <div className="text-xs text-brand-100 flex items-center justify-end gap-1">
+              {user.role === "admin" && <ShieldCheck className="h-3 w-3 text-brand-100" />}
               {user.role}
             </div>
           </div>
           <button
             onClick={onSignOut}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 flex items-center gap-2"
+            className="rounded-xl border border-white/30 bg-white/10 px-3 py-2 text-sm font-medium text-white hover:bg-white/20 flex items-center gap-2"
           >
             <LogOut className="h-4 w-4" />
             Switch user
@@ -390,7 +391,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
 
       {lane === "cold" ? (
         <>
-          <div className="flex items-center gap-1 mb-6 border-b border-slate-200">
+          <div className="flex flex-wrap items-center gap-1 mb-6 rounded-xl border border-slate-200 bg-slate-50 p-1.5">
             <TabButton current={tab} value="leads" onClick={setTab} icon={<Target className="h-4 w-4" />}>Leads</TabButton>
             <TabButton current={tab} value="queue" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Queue</TabButton>
             <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />}>Priority</TabButton>
@@ -470,10 +471,10 @@ function TabButton({
     <button
       onClick={() => onClick(value)}
       className={cn(
-        "flex items-center gap-2 px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors",
+        "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors",
         active
-          ? "border-brand-600 text-brand-600"
-          : "border-transparent text-slate-500 hover:text-slate-900",
+          ? "bg-brand-600 text-white shadow-sm"
+          : "text-slate-500 hover:bg-slate-100 hover:text-slate-900",
       )}
     >
       {icon}
@@ -516,7 +517,39 @@ function StatCard({
 
 const LEAD_PAGE_SIZE = 50;
 
-type LeadSortKey = "lead_title" | "project_stage" | "outreach_status" | "trigger_type" | "last_contact";
+type LeadSortKey =
+  | "lead_title"
+  | "project_stage"
+  | "outreach_status"
+  | "trigger_type"
+  | "last_contact"
+  | "bid_date"
+  | "start_date";
+
+// Apollo sequence id → trigger label, for showing which sequence a lead is in.
+const SEQUENCE_LABEL: Record<string, string> = {
+  "6a2ac17c71c0fc000cecf469": "AGC",
+  "6a2ac17eef87e000180cb54a": "LBA",
+  "6a2ac18173bec0001018e927": "CM",
+  "6a2ac184ac17ea000ce1b28f": "PB",
+};
+
+// Apollo enrollment status → human label for the sequence-stage chip.
+const SEND_STAGE_LABEL: Record<string, string> = {
+  enrolled: "In sequence",
+  sent: "Email sent",
+  replied: "Replied",
+  bounced: "Bounced",
+  unsubscribed: "Unsubscribed",
+  failed: "Send failed",
+};
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
+}
 
 function LeadsView({
   user,
@@ -543,6 +576,7 @@ function LeadsView({
   const [syncing, setSyncing] = useState(false);
   const [genId, setGenId] = useState<string | null>(null);
   const [confirmLead, setConfirmLead] = useState<SdrLead | null>(null);
+  const [noteLead, setNoteLead] = useState<SdrLead | null>(null);
 
   // Debounce the search box so we don't hit the server on every keystroke.
   useEffect(() => {
@@ -787,16 +821,18 @@ function LeadsView({
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[920px] border-collapse text-left">
+            <table className="w-full min-w-[1180px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <LeadTh label="Company / Project" sortKey="lead_title" sort={sort} dir={dir} onSort={toggleSort} />
                   <th className="px-4 py-3">Contact</th>
                   <LeadTh label="Stage" sortKey="project_stage" sort={sort} dir={dir} onSort={toggleSort} />
+                  <LeadTh label="Bid date" sortKey="bid_date" sort={sort} dir={dir} onSort={toggleSort} />
+                  <LeadTh label="Start date" sortKey="start_date" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Contact status" sortKey="outreach_status" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Trigger" sortKey="trigger_type" sort={sort} dir={dir} onSort={toggleSort} />
                   <th className="px-4 py-3">Outreached by</th>
-                  <LeadTh label="Last contact" sortKey="last_contact" sort={sort} dir={dir} onSort={toggleSort} />
+                  <LeadTh label="Contact last emailed" sortKey="last_contact" sort={sort} dir={dir} onSort={toggleSort} />
                   <th className="px-4 py-3 text-right">Action</th>
                 </tr>
               </thead>
@@ -807,6 +843,7 @@ function LeadsView({
                     lead={lead}
                     busy={genId === lead.pipedrive_lead_id}
                     onOutreach={() => requestOutreach(lead)}
+                    onNote={() => setNoteLead(lead)}
                   />
                 ))}
               </tbody>
@@ -845,6 +882,89 @@ function LeadsView({
           onConfirm={() => doOutreach(confirmLead)}
         />
       )}
+
+      {noteLead && (
+        <PipedriveNoteModal
+          lead={noteLead}
+          onClose={() => setNoteLead(null)}
+          onSaved={() => {
+            pushToast("success", "Note added to Pipedrive.");
+            setNoteLead(null);
+          }}
+          onError={(msg) => pushToast("error", msg)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Add a note to a lead in Pipedrive from the interface (two-way sync).
+function PipedriveNoteModal({
+  lead,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  lead: SdrLead;
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [content, setContent] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    const text = content.trim();
+    if (!text) return;
+    setSaving(true);
+    try {
+      await sdrApi.addLeadNote(lead.pipedrive_lead_id, text);
+      onSaved();
+    } catch (e) {
+      onError(`Could not add note: ${(e as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-50">
+            <StickyNote className="h-5 w-5 text-brand-700" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Add note to Pipedrive</h3>
+            <p className="text-xs text-slate-500">{lead.lead_title || `Lead #${lead.pipedrive_lead_id}`}</p>
+          </div>
+        </div>
+
+        <textarea
+          autoFocus
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          rows={5}
+          placeholder="Write a note — it'll be added to this lead in Pipedrive, tagged with your name."
+          className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none"
+        />
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={saving || !content.trim()}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Add note"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -884,15 +1004,19 @@ function LeadRow({
   lead,
   busy,
   onOutreach,
+  onNote,
 }: {
   lead: SdrLead;
   busy: boolean;
   onOutreach: () => void;
+  onNote: () => void;
 }) {
   const fresh = lead.outreach_status === "clear";
   const hasTrigger = !!lead.trigger_type;
   const contactedManually =
     !lead.outreached_by && lead.outreach_status !== "clear" && lead.last_outgoing_mail_time;
+  const stageLabel = lead.send_status ? SEND_STAGE_LABEL[lead.send_status] || lead.send_status : null;
+  const seqLabel = lead.send_sequence_id ? SEQUENCE_LABEL[lead.send_sequence_id] : null;
 
   return (
     <tr className="text-sm hover:bg-slate-50/70">
@@ -915,9 +1039,20 @@ function LeadRow({
       </td>
       {/* Stage */}
       <td className="px-4 py-3 align-top text-slate-600">{lead.project_stage || "—"}</td>
-      {/* Contact status */}
+      {/* Bid date */}
+      <td className="px-4 py-3 align-top whitespace-nowrap text-slate-600">{formatDate(lead.bid_date)}</td>
+      {/* Start date */}
+      <td className="px-4 py-3 align-top whitespace-nowrap text-slate-600">{formatDate(lead.start_date)}</td>
+      {/* Contact status (+ sequence stage when enrolled via our system) */}
       <td className="px-4 py-3 align-top">
         <OutreachBadge status={lead.outreach_status} days={lead.days_since_outgoing} />
+        {stageLabel && (
+          <div className="mt-1 text-xs font-medium text-brand-700">
+            {seqLabel ? `${seqLabel} · ` : ""}
+            {stageLabel}
+            {lead.send_sent_at ? ` · ${formatRelative(lead.send_sent_at)}` : ""}
+          </div>
+        )}
       </td>
       {/* Trigger */}
       <td className="px-4 py-3 align-top">
@@ -944,29 +1079,41 @@ function LeadRow({
           <span className="text-slate-300">—</span>
         )}
       </td>
-      {/* Last contact */}
-      <td className="px-4 py-3 align-top text-slate-600">
+      {/* Contact last emailed (person-level signal from Pipedrive) */}
+      <td
+        className="px-4 py-3 align-top text-slate-600"
+        title="Last time this CONTACT was emailed in Pipedrive — across any project, not just this lead. Used for dedup."
+      >
         {typeof lead.days_since_outgoing === "number" ? `${lead.days_since_outgoing}d ago` : "Never"}
       </td>
       {/* Action */}
       <td className="px-4 py-3 align-top text-right">
-        <button
-          onClick={onOutreach}
-          disabled={!hasTrigger || busy}
-          title={hasTrigger ? undefined : "Set a Trigger (AGC/LBA/CM/PB) on this lead in Pipedrive first."}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors",
-            !hasTrigger
-              ? "cursor-not-allowed bg-slate-100 text-slate-400"
-              : fresh
-                ? "bg-cta-500 text-white hover:bg-cta-600"
-                : "border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
-            busy && "opacity-60",
-          )}
-        >
-          {busy ? "Creating…" : fresh ? "Outreach" : "Review"}
-          {!busy && <ChevronRight className="h-4 w-4" />}
-        </button>
+        <div className="inline-flex items-center gap-1.5">
+          <button
+            onClick={onNote}
+            title="Add a note to this lead in Pipedrive"
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 hover:text-brand-700"
+          >
+            <StickyNote className="h-4 w-4" />
+          </button>
+          <button
+            onClick={onOutreach}
+            disabled={!hasTrigger || busy}
+            title={hasTrigger ? undefined : "Set a Trigger (AGC/LBA/CM/PB) on this lead in Pipedrive first."}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors",
+              !hasTrigger
+                ? "cursor-not-allowed bg-slate-100 text-slate-400"
+                : fresh
+                  ? "bg-cta-500 text-white hover:bg-cta-600"
+                  : "border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
+              busy && "opacity-60",
+            )}
+          >
+            {busy ? "Creating…" : fresh ? "Outreach" : "Review"}
+            {!busy && <ChevronRight className="h-4 w-4" />}
+          </button>
+        </div>
       </td>
     </tr>
   );

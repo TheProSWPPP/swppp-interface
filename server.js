@@ -778,6 +778,9 @@ async function initDB() {
         synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    // Bid/Start dates from Pipedrive (added 2026-06-17). Idempotent for existing tables.
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS bid_date DATE`);
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS start_date DATE`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_status ON sdr_lead_state(outreach_status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_person ON sdr_lead_state(pipedrive_person_id)`);
 
@@ -1103,6 +1106,8 @@ const LEAD_SORT_COLUMNS = {
   outreach_status: "s.outreach_status",
   trigger_type: "s.trigger_type",
   last_contact: "s.last_outgoing_mail_time",
+  bid_date: "s.bid_date",
+  start_date: "s.start_date",
   synced_at: "s.synced_at",
 };
 
@@ -1145,12 +1150,16 @@ app.get("/api/sdr/leads", async (req, res) => {
     const orderSql = `ORDER BY ${sortCol} ${sortDir} NULLS LAST, s.last_outgoing_mail_time DESC NULLS LAST`;
 
     // "Outreached by": most-recent draft's assigned user for the lead.
+    // "Sequence stage": most-recent Apollo enrollment send (status + when).
     const pageSql = `
       SELECT s.*,
              CASE WHEN s.last_outgoing_mail_time IS NULL THEN NULL
-                  ELSE EXTRACT(DAY FROM (NOW() - s.last_outgoing_mail_time))::int END AS days_since_outgoing,
+                  ELSE FLOOR(EXTRACT(EPOCH FROM (NOW() - s.last_outgoing_mail_time)) / 86400)::int END AS days_since_outgoing,
              ob.outreached_by,
              ob.outreached_status,
+             snd.send_status,
+             snd.send_sequence_id,
+             snd.sent_at AS send_sent_at,
              COUNT(*) OVER() AS _total
       FROM sdr_lead_state s
       LEFT JOIN LATERAL (
@@ -1161,6 +1170,13 @@ app.get("/api/sdr/leads", async (req, res) => {
         ORDER BY d.created_at DESC
         LIMIT 1
       ) ob ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT status AS send_status, apollo_sequence_id AS send_sequence_id, sent_at
+        FROM sdr_sends
+        WHERE pipedrive_lead_id = s.pipedrive_lead_id
+        ORDER BY sent_at DESC NULLS LAST
+        LIMIT 1
+      ) snd ON TRUE
       ${whereSql}
       ${orderSql}
       LIMIT ${limit} OFFSET ${offset}`;
@@ -1206,6 +1222,25 @@ app.get("/api/sdr/leads/filters", async (req, res) => {
   } catch (err) {
     console.error("GET /api/sdr/leads/filters error:", err);
     res.status(500).json({ error: err.message || "Failed to load filters" });
+  }
+});
+
+// Write-back: add a note to a lead in Pipedrive from the interface (two-way sync).
+// Single, user-initiated note — not a bulk action.
+app.post("/api/sdr/leads/:leadId/note", async (req, res) => {
+  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
+  const { leadId } = req.params;
+  const content = String(req.body?.content || "").trim();
+  if (!content) return res.status(400).json({ error: "content required" });
+  try {
+    const who = req.sdrUser?.username || "interface";
+    // Tag the note with who added it from the SDR console for traceability.
+    const body = `${content}\n\n— added by ${who} via SDR console`;
+    const note = await pipedriveClient.addNote({ leadId, content: body });
+    res.json({ ok: true, note_id: note?.id ?? null });
+  } catch (err) {
+    console.error("POST /api/sdr/leads/:leadId/note error:", err);
+    res.status(500).json({ error: err.message || "Failed to add note" });
   }
 });
 

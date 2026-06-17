@@ -94,6 +94,11 @@ export interface SdrLead {
   days_since_outgoing: number | null;
   outreached_by: string | null;
   outreached_status: string | null;
+  bid_date: string | null;
+  start_date: string | null;
+  send_status: string | null;
+  send_sequence_id: string | null;
+  send_sent_at: string | null;
 }
 
 export interface SdrLeadsResponse {
@@ -315,6 +320,12 @@ export const sdrApi = {
   },
 
   leadFilters: () => sdrFetch<SdrLeadFilters>("/api/sdr/leads/filters"),
+
+  addLeadNote: (leadId: string, content: string) =>
+    sdrFetch<{ ok: boolean; note_id: number | null }>(`/api/sdr/leads/${leadId}/note`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    }),
 
   syncLeads: () => sdrFetch<{ started: boolean }>("/api/sdr/sync/leads", { method: "POST" }),
 
