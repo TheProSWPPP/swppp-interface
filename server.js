@@ -21,6 +21,7 @@ import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplate
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
 import { syncLeadState } from "./lib/pipedriveSync.js";
+import { pollEngagement } from "./lib/apolloEngagementPoll.js";
 
 const { Pool } = pg;
 
@@ -921,6 +922,17 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
   setInterval(runSync, 6 * 60 * 60 * 1000);
 }
 
+// Apollo engagement poll: per-lead replies + bounces fed into /api/sdr/events/ingest.
+// Every ~2 min (in-process cron, not n8n). First run 60s after boot.
+if (process.env.DATABASE_URL && process.env.APOLLO_API_KEY) {
+  const runEngPoll = () =>
+    pollEngagement(pool, { baseUrl: `http://127.0.0.1:${port}`, callbackSecret: N8N_CALLBACK_SECRET })
+      .then((r) => { if (r && (r.emitted || r.skipped)) console.log("[engagement-poll]", JSON.stringify(r)); })
+      .catch((e) => console.error("[engagement-poll] failed:", e.message));
+  setTimeout(runEngPoll, 60_000);
+  setInterval(runEngPoll, 2 * 60 * 1000);
+}
+
 // Fallback in-memory store if no DB is connected (for local dev)
 let memoryProjects = [];
 let memoryArchive = [];
@@ -1063,6 +1075,23 @@ app.post("/api/sdr/sync/leads", async (req, res) => {
     .then((r) => console.log("[sync] on-demand sdr_lead_state:", JSON.stringify(r)))
     .catch((e) => console.error("[sync] on-demand failed:", e.message));
   res.status(202).json({ started: true, note: "Sync running in background; poll GET /api/sdr/leads for updated state." });
+});
+
+// SDR engagement — on-demand Apollo replies/bounces poll (admin only). Returns scan counts.
+app.post("/api/sdr/engagement/poll", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const result = await pollEngagement(pool, {
+      baseUrl: `http://127.0.0.1:${port}`,
+      callbackSecret: N8N_CALLBACK_SECRET,
+      force: true,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error("POST /api/sdr/engagement/poll error:", err);
+    res.status(500).json({ error: err.message || "Poll failed" });
+  }
 });
 
 // SDR mailboxes — sync from Apollo (admin only). Pulls live mailbox list and upserts.
