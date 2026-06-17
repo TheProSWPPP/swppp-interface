@@ -1500,6 +1500,184 @@ function SequenceCard({
   );
 }
 
+// Re-append the tracking pixel <img> if the visual editor stripped it on edit.
+// The pixel is a trailing, display:none <img> pointing at /api/sdr/track/open/...
+// If the original had one and the edited HTML lost it, put the original back.
+function preservePixel(originalHtml: string, editedHtml: string): string {
+  const pixelRe = /<img\b[^>]*\/api\/sdr\/track\/open\/[^>]*>/i;
+  const origMatch = originalHtml.match(pixelRe);
+  if (!origMatch) return editedHtml; // nothing to preserve
+  if (pixelRe.test(editedHtml)) return editedHtml; // pixel survived
+  // Re-append the original pixel (and the styled marker comment if it was present).
+  const marker = /<!--\s*swppp-styled\s*-->/i.test(originalHtml) ? "<!--swppp-styled-->" : "";
+  return editedHtml + marker + origMatch[0];
+}
+
+const RTE_COLORS: { label: string; value: string }[] = [
+  { label: "Brand blue", value: "#1a5276" },
+  { label: "Black", value: "#1f2937" },
+  { label: "Slate", value: "#64748b" },
+  { label: "Red", value: "#b91c1c" },
+  { label: "Green", value: "#15803d" },
+];
+
+const RTE_FONTS = ["Georgia", "Arial", "Times New Roman"];
+
+function RichTextEditor({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (html: string) => void;
+  disabled?: boolean;
+}) {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const [showSource, setShowSource] = useState(false);
+  // Keep the last known original HTML (with pixel) so preservePixel can restore it.
+  const originalRef = useRef(value);
+
+  // Imperatively sync innerHTML only when the incoming value differs from the
+  // live DOM — never on every render (that would move the caret).
+  useEffect(() => {
+    originalRef.current = value;
+    const el = editorRef.current;
+    if (el && !showSource && el.innerHTML !== value) {
+      el.innerHTML = value;
+    }
+  }, [value, showSource]);
+
+  const exec = (command: string, arg?: string) => {
+    if (disabled) return;
+    const el = editorRef.current;
+    if (el) el.focus();
+    document.execCommand(command, false, arg);
+    if (el) onChange(preservePixel(originalRef.current, el.innerHTML));
+  };
+
+  const handleInput = () => {
+    const el = editorRef.current;
+    if (el) onChange(preservePixel(originalRef.current, el.innerHTML));
+  };
+
+  const btn =
+    "px-2 py-1 rounded text-xs font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed";
+
+  return (
+    <div className="mt-1">
+      {!disabled && !showSource && (
+        <div className="flex flex-wrap items-center gap-1 rounded-t-lg border border-b-0 border-slate-200 bg-slate-50 px-2 py-1.5">
+          <button type="button" className={cn(btn, "font-bold")} title="Bold" onClick={() => exec("bold")}>
+            B
+          </button>
+          <button type="button" className={cn(btn, "italic")} title="Italic" onClick={() => exec("italic")}>
+            I
+          </button>
+          <button type="button" className={cn(btn, "underline")} title="Underline" onClick={() => exec("underline")}>
+            U
+          </button>
+
+          <span className="mx-1 h-4 w-px bg-slate-300" />
+
+          {RTE_COLORS.map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              title={`Text color — ${c.label}`}
+              onClick={() => exec("foreColor", c.value)}
+              className="h-5 w-5 rounded border border-slate-300"
+              style={{ backgroundColor: c.value }}
+            />
+          ))}
+
+          <span className="mx-1 h-4 w-px bg-slate-300" />
+
+          <select
+            title="Font family"
+            defaultValue={RTE_FONTS[0]}
+            onChange={(e) => exec("fontName", e.target.value)}
+            className="rounded border border-slate-200 bg-white px-1.5 py-1 text-xs text-slate-700"
+          >
+            {RTE_FONTS.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+
+          <span className="mx-1 h-4 w-px bg-slate-300" />
+
+          <button type="button" className={btn} title="Bulleted list" onClick={() => exec("insertUnorderedList")}>
+            • List
+          </button>
+          <button
+            type="button"
+            className={btn}
+            title="Insert link"
+            onClick={() => {
+              const url = window.prompt("Link URL:");
+              if (url) exec("createLink", url);
+            }}
+          >
+            Link
+          </button>
+
+          <span className="mx-1 h-4 w-px bg-slate-300" />
+
+          <button
+            type="button"
+            className={cn(btn, "font-mono")}
+            title="Toggle HTML source"
+            onClick={() => setShowSource(true)}
+          >
+            {"</> Source"}
+          </button>
+        </div>
+      )}
+
+      {showSource && !disabled ? (
+        <div>
+          <div className="flex items-center justify-between rounded-t-lg border border-b-0 border-slate-200 bg-slate-50 px-2 py-1.5">
+            <span className="text-[11px] font-semibold text-slate-500">HTML source</span>
+            <button
+              type="button"
+              className={cn(btn, "font-mono")}
+              title="Back to visual editor"
+              onClick={() => setShowSource(false)}
+            >
+              Visual
+            </button>
+          </div>
+          <textarea
+            value={value}
+            onChange={(e) => onChange(preservePixel(originalRef.current, e.target.value))}
+            rows={10}
+            className={cn(
+              "w-full rounded-b-lg border border-slate-200 px-3 py-2 text-xs font-mono text-slate-800",
+              "focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400",
+            )}
+          />
+        </div>
+      ) : (
+        <div
+          ref={editorRef}
+          contentEditable={!disabled}
+          onInput={handleInput}
+          suppressContentEditableWarning
+          className={cn(
+            "min-h-[180px] w-full overflow-auto border border-slate-200 px-3 py-2 text-sm text-slate-800",
+            "focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400",
+            showSource ? "rounded-b-lg" : "rounded-b-lg",
+            disabled
+              ? "rounded-lg bg-slate-50 text-slate-500 cursor-not-allowed opacity-70"
+              : "bg-white",
+          )}
+        />
+      )}
+    </div>
+  );
+}
+
 function SequenceStepEditor({
   seqName,
   step,
@@ -1590,24 +1768,16 @@ function SequenceStepEditor({
       </label>
 
       <label className="block">
-        <span className="text-xs font-medium text-slate-500">Body (HTML source)</span>
-        <textarea
-          value={bodyHtml}
-          onChange={(e) => setBodyHtml(e.target.value)}
-          disabled={readOnly || saving}
-          rows={10}
-          className={cn(
-            "mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono text-slate-800",
-            "focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400",
-            (readOnly || saving) && "bg-slate-50 text-slate-500 cursor-not-allowed",
-          )}
-        />
+        <span className="text-xs font-medium text-slate-500">Body</span>
+        <RichTextEditor value={bodyHtml} onChange={setBodyHtml} disabled={!isAdmin || saving} />
       </label>
 
       <p className="text-[11px] text-slate-400">
-        Keep merge fields intact:{" "}
+        Keep the{" "}
+        <span className="font-mono text-slate-500">{"{{...}}"}</span> merge fields and the tracking pixel — they
+        power personalization &amp; open tracking. Merge fields:{" "}
         <span className="font-mono text-slate-500">{"{{contact.swppp_draft_body}}"}</span> and{" "}
-        <span className="font-mono text-slate-500">{"{{contact.swppp_track}}"}</span> — do not delete them.
+        <span className="font-mono text-slate-500">{"{{contact.swppp_track}}"}</span>.
       </p>
 
       {!readOnly && (
