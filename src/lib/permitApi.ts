@@ -9,6 +9,7 @@ export type PermitFacility = {
   original_issue_date: string | null;
   score: number;
   status: string;
+  compliance_flags?: { pain?: number; vioLast4Q?: number; cv?: number; sv?: number } | null;
 };
 
 export type PoolResponse = { rows: PermitFacility[]; total: number; page: number; pageSize: number };
