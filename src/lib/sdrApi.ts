@@ -101,6 +101,23 @@ export interface SdrLead {
   send_sent_at: string | null;
 }
 
+export interface SdrLeadDetail {
+  lead: SdrLead;
+  drafts: {
+    id: string;
+    trigger_type: SdrTriggerType;
+    status: string;
+    subject: string | null;
+    created_at: string;
+    sent_at: string | null;
+    assigned_to: string | null;
+  }[];
+  sends: { id: string; apollo_sequence_id: string | null; status: string; sent_at: string | null }[];
+  events: { event_type: string; occurred_at: string; mailbox_email: string | null }[];
+  pd_lead: Record<string, unknown> | null;
+  pd_person: Record<string, unknown> | null;
+}
+
 export interface SdrLeadsResponse {
   leads: SdrLead[];
   count: number;
@@ -320,6 +337,8 @@ export const sdrApi = {
   },
 
   leadFilters: () => sdrFetch<SdrLeadFilters>("/api/sdr/leads/filters"),
+
+  leadDetail: (leadId: string) => sdrFetch<SdrLeadDetail>(`/api/sdr/leads/${leadId}/detail`),
 
   addLeadNote: (leadId: string, content: string) =>
     sdrFetch<{ ok: boolean; note_id: number | null }>(`/api/sdr/leads/${leadId}/note`, {

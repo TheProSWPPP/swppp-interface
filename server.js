@@ -1244,6 +1244,64 @@ app.post("/api/sdr/leads/:leadId/note", async (req, res) => {
   }
 });
 
+// Full per-lead detail for the drawer: mirror row + live Pipedrive lead/person
+// + our drafts/sends + engagement events. Aggregated server-side so the drawer
+// is one round-trip.
+app.get("/api/sdr/leads/:leadId/detail", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  const { leadId } = req.params;
+  try {
+    const { rows: leadRows } = await pool.query(
+      `SELECT *,
+              CASE WHEN last_outgoing_mail_time IS NULL THEN NULL
+                   ELSE FLOOR(EXTRACT(EPOCH FROM (NOW() - last_outgoing_mail_time)) / 86400)::int END AS days_since_outgoing
+       FROM sdr_lead_state WHERE pipedrive_lead_id = $1`,
+      [leadId],
+    );
+    const lead = leadRows[0] || null;
+    if (!lead) return res.status(404).json({ error: "Lead not found in mirror" });
+
+    const [{ rows: drafts }, { rows: sends }, { rows: events }] = await Promise.all([
+      pool.query(
+        `SELECT d.id, d.trigger_type, d.status, d.subject, d.created_at, d.sent_at, d.assigned_user_id,
+                COALESCE(u.display_name, u.username) AS assigned_to
+         FROM sdr_drafts d LEFT JOIN sdr_users u ON u.id = d.assigned_user_id
+         WHERE d.pipedrive_lead_id = $1 ORDER BY d.created_at DESC`,
+        [leadId],
+      ),
+      pool.query(
+        `SELECT id, apollo_sequence_id, status, sent_at FROM sdr_sends
+         WHERE pipedrive_lead_id = $1 ORDER BY sent_at DESC NULLS LAST`,
+        [leadId],
+      ),
+      pool.query(
+        `SELECT event_type, occurred_at, mailbox_email FROM sdr_engagement_events
+         WHERE pipedrive_lead_id = $1 ORDER BY occurred_at DESC LIMIT 50`,
+        [leadId],
+      ),
+    ]);
+
+    // Live Pipedrive lead + person (best-effort; drawer still renders if PD is down).
+    let pdLead = null;
+    let pdPerson = null;
+    if (process.env.PIPEDRIVE_API_TOKEN) {
+      try {
+        pdLead = await pipedriveClient.getLead(leadId);
+        if (pdLead?.person_id?.value || lead.pipedrive_person_id) {
+          pdPerson = await pipedriveClient.getPerson(pdLead?.person_id?.value || lead.pipedrive_person_id);
+        }
+      } catch (e) {
+        console.warn("[detail] Pipedrive fetch failed:", e.message);
+      }
+    }
+
+    res.json({ lead, drafts, sends, events, pd_lead: pdLead, pd_person: pdPerson });
+  } catch (err) {
+    console.error("GET /api/sdr/leads/:leadId/detail error:", err);
+    res.status(500).json({ error: err.message || "Failed to load detail" });
+  }
+});
+
 // SDR lead-state — trigger an on-demand Pipedrive sync (admin only).
 app.post("/api/sdr/sync/leads", async (req, res) => {
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });

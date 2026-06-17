@@ -42,6 +42,7 @@ import {
   type SdrEngagementLead,
   type SdrEngagementSummary,
   type SdrLead,
+  type SdrLeadDetail,
   type SdrLeadsResponse,
   type SdrLeadFilters,
   type SdrMailbox,
@@ -577,6 +578,7 @@ function LeadsView({
   const [genId, setGenId] = useState<string | null>(null);
   const [confirmLead, setConfirmLead] = useState<SdrLead | null>(null);
   const [noteLead, setNoteLead] = useState<SdrLead | null>(null);
+  const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
 
   // Debounce the search box so we don't hit the server on every keystroke.
   useEffect(() => {
@@ -844,6 +846,7 @@ function LeadsView({
                     busy={genId === lead.pipedrive_lead_id}
                     onOutreach={() => requestOutreach(lead)}
                     onNote={() => setNoteLead(lead)}
+                    onOpen={() => setDetailLeadId(lead.pipedrive_lead_id)}
                   />
                 ))}
               </tbody>
@@ -894,6 +897,170 @@ function LeadsView({
           onError={(msg) => pushToast("error", msg)}
         />
       )}
+
+      {detailLeadId && (
+        <LeadDetailDrawer
+          leadId={detailLeadId}
+          onClose={() => setDetailLeadId(null)}
+          onNote={(lead) => setNoteLead(lead)}
+          onOutreach={(lead) => requestOutreach(lead)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Right slide-out with the full picture for one lead: identity, Pipedrive deep
+// link, our outreach timeline (drafts/sends/engagement), and quick actions.
+function LeadDetailDrawer({
+  leadId,
+  onClose,
+  onNote,
+  onOutreach,
+}: {
+  leadId: string;
+  onClose: () => void;
+  onNote: (lead: SdrLead) => void;
+  onOutreach: (lead: SdrLead) => void;
+}) {
+  const [detail, setDetail] = useState<SdrLeadDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDetail(null);
+    setError(null);
+    sdrApi
+      .leadDetail(leadId)
+      .then((d) => { if (!cancelled) setDetail(d); })
+      .catch((e) => { if (!cancelled) setError((e as Error).message); });
+    return () => { cancelled = true; };
+  }, [leadId]);
+
+  // Merge sends + engagement events into one timeline, newest first.
+  const timeline = useMemo(() => {
+    if (!detail) return [];
+    const items: { kind: string; label: string; at: string | null; tone: string }[] = [];
+    for (const d of detail.drafts) {
+      items.push({ kind: "draft", label: `Draft ${d.status}${d.assigned_to ? ` · ${d.assigned_to}` : ""}`, at: d.created_at, tone: "slate" });
+    }
+    for (const s of detail.sends) {
+      const seq = s.apollo_sequence_id ? SEQUENCE_LABEL[s.apollo_sequence_id] : null;
+      items.push({ kind: "send", label: `${seq ? seq + " · " : ""}${SEND_STAGE_LABEL[s.status] || s.status}`, at: s.sent_at, tone: "brand" });
+    }
+    for (const e of detail.events) {
+      items.push({ kind: "event", label: e.event_type + (e.mailbox_email ? ` · ${e.mailbox_email}` : ""), at: e.occurred_at, tone: "emerald" });
+    }
+    return items.sort((a, b) => (new Date(b.at || 0).getTime()) - (new Date(a.at || 0).getTime()));
+  }, [detail]);
+
+  const lead = detail?.lead;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={onClose}>
+      <div
+        className="flex h-full w-full max-w-[480px] flex-col bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 bg-gradient-to-r from-brand-800 to-brand-600 px-5 py-4 text-white">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-100">Lead detail</div>
+            <h3 className="truncate text-lg font-bold">{lead?.lead_title || "Loading…"}</h3>
+            <a
+              href={pipedriveLeadUrl(leadId)}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-brand-100 hover:text-white"
+            >
+              Open in Pipedrive <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-white/80 hover:bg-white/15 hover:text-white">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {error ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
+          ) : !detail ? (
+            <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
+          ) : (
+            <div className="space-y-5">
+              {/* Snapshot */}
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <DrawerField label="Contact" value={lead?.person_name} />
+                <DrawerField label="Email" value={lead?.person_email} />
+                <DrawerField label="Stage" value={lead?.project_stage} />
+                <DrawerField label="Trigger" value={lead?.trigger_type} />
+                <DrawerField label="Bid date" value={formatDate(lead?.bid_date ?? null)} />
+                <DrawerField label="Start date" value={formatDate(lead?.start_date ?? null)} />
+                <DrawerField label="Contact status" value={lead?.outreach_status} />
+                <DrawerField
+                  label="Contact last emailed"
+                  value={typeof lead?.days_since_outgoing === "number" ? `${lead.days_since_outgoing}d ago` : "Never"}
+                />
+              </dl>
+
+              {/* Timeline */}
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Activity timeline</div>
+                {timeline.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+                    No outreach activity yet.
+                  </div>
+                ) : (
+                  <ul className="space-y-2">
+                    {timeline.map((t, i) => (
+                      <li key={i} className="flex items-center gap-3 rounded-xl border border-slate-100 px-3 py-2">
+                        <span
+                          className={cn(
+                            "h-2 w-2 flex-shrink-0 rounded-full",
+                            t.tone === "brand" ? "bg-brand-500" : t.tone === "emerald" ? "bg-emerald-500" : "bg-slate-300",
+                          )}
+                        />
+                        <span className="flex-1 text-sm text-slate-700">{t.label}</span>
+                        <span className="text-xs text-slate-400">{formatRelative(t.at)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Actions footer */}
+        {lead && (
+          <div className="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
+            <button
+              onClick={() => onNote(lead)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <StickyNote className="h-4 w-4" /> Note
+            </button>
+            {lead.trigger_type && (
+              <button
+                onClick={() => { onOutreach(lead); onClose(); }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-cta-500 px-3 py-2 text-sm font-semibold text-white hover:bg-cta-600"
+              >
+                Outreach <ChevronRight className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DrawerField({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div>
+      <dt className="text-xs font-medium text-slate-400">{label}</dt>
+      <dd className="mt-0.5 truncate text-sm font-medium text-slate-800">{value || "—"}</dd>
     </div>
   );
 }
@@ -1005,11 +1172,13 @@ function LeadRow({
   busy,
   onOutreach,
   onNote,
+  onOpen,
 }: {
   lead: SdrLead;
   busy: boolean;
   onOutreach: () => void;
   onNote: () => void;
+  onOpen: () => void;
 }) {
   const fresh = lead.outreach_status === "clear";
   const hasTrigger = !!lead.trigger_type;
@@ -1017,9 +1186,10 @@ function LeadRow({
     !lead.outreached_by && lead.outreach_status !== "clear" && lead.last_outgoing_mail_time;
   const stageLabel = lead.send_status ? SEND_STAGE_LABEL[lead.send_status] || lead.send_status : null;
   const seqLabel = lead.send_sequence_id ? SEQUENCE_LABEL[lead.send_sequence_id] : null;
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
 
   return (
-    <tr className="text-sm hover:bg-slate-50/70">
+    <tr className="cursor-pointer text-sm hover:bg-brand-50/40" onClick={onOpen}>
       {/* Company / Project */}
       <td className="px-4 py-3 align-top">
         <div className="font-semibold text-slate-900">{lead.lead_title || "Untitled lead"}</div>
@@ -1027,6 +1197,7 @@ function LeadRow({
           href={pipedriveLeadUrl(lead.pipedrive_lead_id)}
           target="_blank"
           rel="noreferrer"
+          onClick={stop}
           className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-brand-600"
         >
           Pipedrive <ExternalLink className="h-3 w-3" />
@@ -1090,14 +1261,14 @@ function LeadRow({
       <td className="px-4 py-3 align-top text-right">
         <div className="inline-flex items-center gap-1.5">
           <button
-            onClick={onNote}
+            onClick={(e) => { stop(e); onNote(); }}
             title="Add a note to this lead in Pipedrive"
             className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 hover:text-brand-700"
           >
             <StickyNote className="h-4 w-4" />
           </button>
           <button
-            onClick={onOutreach}
+            onClick={(e) => { stop(e); onOutreach(); }}
             disabled={!hasTrigger || busy}
             title={hasTrigger ? undefined : "Set a Trigger (AGC/LBA/CM/PB) on this lead in Pipedrive first."}
             className={cn(
