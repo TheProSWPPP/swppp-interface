@@ -859,6 +859,16 @@ async function initDB() {
       )
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_permit_enrichment_channel ON permit_enrichment(channel)`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS permit_engine_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        active BOOLEAN NOT NULL DEFAULT FALSE,
+        daily_enroll_cap INT NOT NULL DEFAULT 50,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT permit_engine_settings_singleton CHECK (id = 1)
+      )`);
+    await pool.query(`INSERT INTO permit_engine_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+    await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS permit_enabled BOOLEAN NOT NULL DEFAULT FALSE`);
     console.log("SDR tables (sdr_users, sdr_mailboxes, sdr_drafts, sdr_sends, sdr_engagement_events, sdr_migrations) verified/created.");
 
     // Automation Roadmap — shared task list (team posts work, Derek tracks/edits/comments)
