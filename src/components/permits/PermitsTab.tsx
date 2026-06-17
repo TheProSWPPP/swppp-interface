@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Building2, Mail } from "lucide-react";
 import OperatorWorkspace from "./OperatorWorkspace";
 import MsgpCopyView from "./MsgpCopyView";
+import PermitsGuide from "./PermitsGuide";
 import { getPermitSettings, patchPermitSettings, patchPermitMailbox, type PermitSettings, type PermitMailbox } from "../../lib/permitApi";
 
 export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: "success" | "error") => void }) {
@@ -32,6 +33,7 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
 
   return (
     <div className="space-y-4">
+      <PermitsGuide />
       {settings && (
         <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm">
           <label className="flex items-center gap-2 cursor-pointer">
