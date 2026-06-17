@@ -30,10 +30,18 @@ export async function runEchoRefresh(pool, { limit = 0, delayMs = 250, log = () 
       WHERE f.state = 'TX'
       ORDER BY f.score DESC ${lim}`
   );
-  let done = 0, withPain = 0;
+  let done = 0, withPain = 0, skipped = 0;
   for (const row of rows) {
-    const json = await fetchEcho(row.external_permit_nmbr);
-    const counts = json ? parseEchoSummary(json) : { sv: 0, cv: 0, vioLast4Q: 0, insp: 0, penalties: 0, found: false };
+    const counts = parseEchoSummary(await fetchEcho(row.external_permit_nmbr));
+    // ECHO error or fetch failure (incl. throttling): leave the existing row UNTOUCHED.
+    // Overwriting with zeros would silently wipe real violation data + reset the score.
+    if (counts.error) {
+      skipped++;
+      if (skipped >= 10) { log(`  aborting: ${skipped} consecutive ECHO errors (likely throttled — 300/hr, 1500/day)`); break; }
+      if (delayMs) await new Promise((res) => setTimeout(res, delayMs));
+      continue;
+    }
+    skipped = 0;
     const pain = compliancePain(counts);
     if (pain > 0) withPain++;
     const score = scoreFacility({
@@ -56,7 +64,7 @@ export async function runEchoRefresh(pool, { limit = 0, delayMs = 250, log = () 
        FROM (SELECT operator_key, MAX(score) AS mx FROM permit_facilities GROUP BY operator_key) s
       WHERE o.operator_key = s.operator_key`
   );
-  return { processed: done, withPain };
+  return { processed: done, withPain, skipped };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
