@@ -1302,6 +1302,60 @@ app.get("/api/sdr/leads/:leadId/detail", async (req, res) => {
   }
 });
 
+// Pipedrive "Project Stage" custom-field hash (mirrors lib/pipedriveSync F.STAGE).
+const PD_STAGE_FIELD = "7c1852c27664d1118f75660223a6af9e99d10f2c";
+// Stage → derived trigger (mirrors STAGE_TRIGGER in lib/pipedriveSync).
+const STAGE_TRIGGER_MAP = { AGC: "AGC", LBA: "LBA", CM: "CM", PB: "PB", OB: "PB", "PRE-BID": "PB" };
+
+// Write-back: set a lead's Project Stage in Pipedrive from the interface, and
+// re-derive the trigger. Updates the mirror immediately so the UI reflects it.
+app.patch("/api/sdr/leads/:leadId", async (req, res) => {
+  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
+  const { leadId } = req.params;
+  const stage = req.body?.project_stage != null ? String(req.body.project_stage).trim() : null;
+  if (!stage) return res.status(400).json({ error: "project_stage required" });
+  try {
+    await pipedriveClient.updateLead(leadId, { [PD_STAGE_FIELD]: stage });
+    const trigger = STAGE_TRIGGER_MAP[stage.toUpperCase()] || null;
+    if (process.env.DATABASE_URL) {
+      await pool.query(
+        `UPDATE sdr_lead_state SET project_stage = $1, trigger_type = $2 WHERE pipedrive_lead_id = $3`,
+        [stage, trigger, leadId],
+      );
+    }
+    res.json({ ok: true, project_stage: stage, trigger_type: trigger });
+  } catch (err) {
+    console.error("PATCH /api/sdr/leads/:leadId error:", err);
+    res.status(500).json({ error: err.message || "Failed to update lead" });
+  }
+});
+
+// Write-back: log an activity (call/task/meeting) on a lead in Pipedrive.
+app.post("/api/sdr/leads/:leadId/activity", async (req, res) => {
+  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
+  const { leadId } = req.params;
+  const subject = String(req.body?.subject || "").trim();
+  const type = String(req.body?.type || "call").trim();
+  const dueDate = req.body?.due_date ? String(req.body.due_date) : null;
+  const done = !!req.body?.done;
+  if (!subject) return res.status(400).json({ error: "subject required" });
+  try {
+    const who = req.sdrUser?.username || "interface";
+    const act = await pipedriveClient.addActivity({
+      leadId,
+      subject,
+      type,
+      dueDate,
+      done,
+      note: `Logged by ${who} via SDR console`,
+    });
+    res.json({ ok: true, activity_id: act?.id ?? null });
+  } catch (err) {
+    console.error("POST /api/sdr/leads/:leadId/activity error:", err);
+    res.status(500).json({ error: err.message || "Failed to log activity" });
+  }
+});
+
 // SDR lead-state — trigger an on-demand Pipedrive sync (admin only).
 app.post("/api/sdr/sync/leads", async (req, res) => {
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });

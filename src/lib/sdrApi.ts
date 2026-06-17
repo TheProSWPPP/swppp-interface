@@ -340,6 +340,21 @@ export const sdrApi = {
 
   leadDetail: (leadId: string) => sdrFetch<SdrLeadDetail>(`/api/sdr/leads/${leadId}/detail`),
 
+  updateLeadStage: (leadId: string, projectStage: string) =>
+    sdrFetch<{ ok: boolean; project_stage: string; trigger_type: string | null }>(`/api/sdr/leads/${leadId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ project_stage: projectStage }),
+    }),
+
+  logActivity: (
+    leadId: string,
+    a: { subject: string; type: string; due_date?: string | null; done?: boolean },
+  ) =>
+    sdrFetch<{ ok: boolean; activity_id: number | null }>(`/api/sdr/leads/${leadId}/activity`, {
+      method: "POST",
+      body: JSON.stringify(a),
+    }),
+
   addLeadNote: (leadId: string, content: string) =>
     sdrFetch<{ ok: boolean; note_id: number | null }>(`/api/sdr/leads/${leadId}/note`, {
       method: "POST",

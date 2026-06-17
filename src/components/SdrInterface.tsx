@@ -17,6 +17,7 @@ import {
   LogOut,
   Mail,
   MousePointerClick,
+  Phone,
   RefreshCw,
   Reply,
   Send,
@@ -901,9 +902,12 @@ function LeadsView({
       {detailLeadId && (
         <LeadDetailDrawer
           leadId={detailLeadId}
+          stages={filterOpts?.stages ?? []}
           onClose={() => setDetailLeadId(null)}
           onNote={(lead) => setNoteLead(lead)}
           onOutreach={(lead) => requestOutreach(lead)}
+          onChanged={load}
+          pushToast={pushToast}
         />
       )}
     </div>
@@ -914,17 +918,27 @@ function LeadsView({
 // link, our outreach timeline (drafts/sends/engagement), and quick actions.
 function LeadDetailDrawer({
   leadId,
+  stages,
   onClose,
   onNote,
   onOutreach,
+  onChanged,
+  pushToast,
 }: {
   leadId: string;
+  stages: { v: string; n: number }[];
   onClose: () => void;
   onNote: (lead: SdrLead) => void;
   onOutreach: (lead: SdrLead) => void;
+  onChanged: () => void;
+  pushToast: (kind: "success" | "error", text: string) => void;
 }) {
   const [detail, setDetail] = useState<SdrLeadDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [stageEdit, setStageEdit] = useState<string>("");
+  const [savingStage, setSavingStage] = useState(false);
+  const [showActivity, setShowActivity] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -932,10 +946,27 @@ function LeadDetailDrawer({
     setError(null);
     sdrApi
       .leadDetail(leadId)
-      .then((d) => { if (!cancelled) setDetail(d); })
+      .then((d) => { if (!cancelled) { setDetail(d); setStageEdit(d.lead?.project_stage || ""); } })
       .catch((e) => { if (!cancelled) setError((e as Error).message); });
     return () => { cancelled = true; };
-  }, [leadId]);
+  }, [leadId, reloadKey]);
+
+  const reload = () => setReloadKey((k) => k + 1);
+
+  async function saveStage() {
+    if (!stageEdit || stageEdit === detail?.lead?.project_stage) return;
+    setSavingStage(true);
+    try {
+      const r = await sdrApi.updateLeadStage(leadId, stageEdit);
+      pushToast("success", `Stage updated to ${r.project_stage} in Pipedrive${r.trigger_type ? ` (trigger ${r.trigger_type})` : ""}.`);
+      reload();
+      onChanged();
+    } catch (e) {
+      pushToast("error", `Couldn't update stage: ${(e as Error).message}`);
+    } finally {
+      setSavingStage(false);
+    }
+  }
 
   // Merge sends + engagement events into one timeline, newest first.
   const timeline = useMemo(() => {
@@ -993,16 +1024,46 @@ function LeadDetailDrawer({
               <dl className="grid grid-cols-2 gap-3 text-sm">
                 <DrawerField label="Contact" value={lead?.person_name} />
                 <DrawerField label="Email" value={lead?.person_email} />
-                <DrawerField label="Stage" value={lead?.project_stage} />
                 <DrawerField label="Trigger" value={lead?.trigger_type} />
+                <DrawerField label="Contact status" value={lead?.outreach_status} />
                 <DrawerField label="Bid date" value={formatDate(lead?.bid_date ?? null)} />
                 <DrawerField label="Start date" value={formatDate(lead?.start_date ?? null)} />
-                <DrawerField label="Contact status" value={lead?.outreach_status} />
                 <DrawerField
                   label="Contact last emailed"
                   value={typeof lead?.days_since_outgoing === "number" ? `${lead.days_since_outgoing}d ago` : "Never"}
                 />
+                {lead?.send_sequence_id && (
+                  <DrawerField
+                    label="Sequence"
+                    value={`${SEQUENCE_LABEL[lead.send_sequence_id] || ""} · ${lead.send_status ? SEND_STAGE_LABEL[lead.send_status] || lead.send_status : ""}`}
+                  />
+                )}
               </dl>
+
+              {/* Editable stage (writes back to Pipedrive, re-derives trigger) */}
+              <div className="rounded-xl border border-slate-200 p-3">
+                <div className="text-xs font-medium text-slate-400">Project stage</div>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <select
+                    value={stageEdit}
+                    onChange={(e) => setStageEdit(e.target.value)}
+                    className="flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-800"
+                  >
+                    {!stages.some((s) => s.v === stageEdit) && stageEdit && <option value={stageEdit}>{stageEdit}</option>}
+                    {stages.map((s) => (
+                      <option key={s.v} value={s.v}>{s.v}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={saveStage}
+                    disabled={savingStage || !stageEdit || stageEdit === lead?.project_stage}
+                    className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40"
+                  >
+                    {savingStage ? "Saving…" : "Save"}
+                  </button>
+                </div>
+                <p className="mt-1.5 text-xs text-slate-400">Updates Pipedrive and re-derives the outreach trigger.</p>
+              </div>
 
               {/* Timeline */}
               <div>
@@ -1034,20 +1095,37 @@ function LeadDetailDrawer({
 
         {/* Actions footer */}
         {lead && (
-          <div className="flex items-center gap-2 border-t border-slate-200 px-5 py-3">
-            <button
-              onClick={() => onNote(lead)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              <StickyNote className="h-4 w-4" /> Note
-            </button>
-            {lead.trigger_type && (
-              <button
-                onClick={() => { onOutreach(lead); onClose(); }}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-cta-500 px-3 py-2 text-sm font-semibold text-white hover:bg-cta-600"
-              >
-                Outreach <ChevronRight className="h-4 w-4" />
-              </button>
+          <div className="border-t border-slate-200 px-5 py-3">
+            {showActivity ? (
+              <ActivityForm
+                leadId={leadId}
+                onCancel={() => setShowActivity(false)}
+                onDone={() => { setShowActivity(false); reload(); pushToast("success", "Activity logged in Pipedrive."); }}
+                onError={(m) => pushToast("error", m)}
+              />
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => onNote(lead)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <StickyNote className="h-4 w-4" /> Note
+                </button>
+                <button
+                  onClick={() => setShowActivity(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <Phone className="h-4 w-4" /> Log activity
+                </button>
+                {lead.trigger_type && (
+                  <button
+                    onClick={() => { onOutreach(lead); onClose(); }}
+                    className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-cta-500 px-3 py-2 text-sm font-semibold text-white hover:bg-cta-600"
+                  >
+                    Outreach <ChevronRight className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -1061,6 +1139,86 @@ function DrawerField({ label, value }: { label: string; value?: string | null })
     <div>
       <dt className="text-xs font-medium text-slate-400">{label}</dt>
       <dd className="mt-0.5 truncate text-sm font-medium text-slate-800">{value || "—"}</dd>
+    </div>
+  );
+}
+
+function ActivityForm({
+  leadId,
+  onCancel,
+  onDone,
+  onError,
+}: {
+  leadId: string;
+  onCancel: () => void;
+  onDone: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [type, setType] = useState("call");
+  const [subject, setSubject] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [done, setDone] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (!subject.trim()) return;
+    setSaving(true);
+    try {
+      await sdrApi.logActivity(leadId, { subject: subject.trim(), type, due_date: dueDate || null, done });
+      onDone();
+    } catch (e) {
+      onError(`Couldn't log activity: ${(e as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <select
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-800"
+        >
+          <option value="call">Call</option>
+          <option value="task">Task</option>
+          <option value="meeting">Meeting</option>
+          <option value="email">Email</option>
+        </select>
+        <input
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          placeholder="Subject (e.g. Called re: SWPPP scope)"
+          className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+        />
+      </div>
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-1.5 text-xs text-slate-500">
+          Due
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm"
+          />
+        </label>
+        <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+          <input type="checkbox" checked={done} onChange={(e) => setDone(e.target.checked)} /> Mark done
+        </label>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={onCancel} className="rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={saving || !subject.trim()}
+            className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-40"
+          >
+            {saving ? "Logging…" : "Log to Pipedrive"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
