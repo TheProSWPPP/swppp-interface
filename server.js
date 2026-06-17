@@ -1342,23 +1342,24 @@ app.patch("/api/sdr/leads/:leadId", async (req, res) => {
       if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
       await pipedriveClient.updateLead(leadId, { [PD_STAGE_FIELD]: stage });
     }
-    // Effective trigger = override (if set) else stage-derived (if stage given) else keep existing.
-    const derived = stage ? STAGE_TRIGGER_MAP[stage.toUpperCase()] || null : null;
-    const sets = [];
-    const params = [];
-    if (stage) { params.push(stage); sets.push(`project_stage = $${params.length}`); }
-    if (hasTriggerField) { params.push(override); sets.push(`trigger_override = $${params.length}`); }
-    // trigger_type: override wins; else stage-derived; else leave as-is.
-    if (hasTriggerField || stage) {
-      params.push(override);
-      params.push(derived);
-      sets.push(`trigger_type = COALESCE($${params.length - 1}, ${stage ? `$${params.length}` : "trigger_type"})`);
-    }
-    params.push(leadId);
+    // Single typed UPDATE handles every case: stage-only keeps the override;
+    // override set wins; override="" reverts trigger_type to stage-derived from
+    // the row's own project_stage. Explicit ::casts avoid NULL type inference.
+    // $1 stage(or null), $2 hasTriggerField(bool), $3 override(or null), $4 leadId.
     const { rows } = await pool.query(
-      `UPDATE sdr_lead_state SET ${sets.join(", ")} WHERE pipedrive_lead_id = $${params.length}
+      `UPDATE sdr_lead_state SET
+         project_stage = COALESCE($1::text, project_stage),
+         trigger_override = CASE WHEN $2::bool THEN $3::text ELSE trigger_override END,
+         trigger_type = COALESCE(
+           CASE WHEN $2::bool THEN $3::text ELSE trigger_override END,
+           CASE upper(COALESCE($1::text, project_stage))
+             WHEN 'AGC' THEN 'AGC' WHEN 'LBA' THEN 'LBA' WHEN 'CM' THEN 'CM'
+             WHEN 'PB' THEN 'PB' WHEN 'OB' THEN 'PB' WHEN 'PRE-BID' THEN 'PB'
+             ELSE NULL END
+         )
+       WHERE pipedrive_lead_id = $4
        RETURNING project_stage, trigger_type, trigger_override`,
-      params,
+      [stage, hasTriggerField, override, leadId],
     );
     res.json({ ok: true, ...(rows[0] || {}) });
   } catch (err) {
