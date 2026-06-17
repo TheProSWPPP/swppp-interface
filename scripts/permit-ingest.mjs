@@ -20,21 +20,17 @@ async function fetchChunk(start) {
   throw new Error(`EPA fetch failed after retries at start=${start}`);
 }
 
-async function main() {
-  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not set (use Railway public URL)");
-  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-
+export async function runPermitIngest(pool, { log = () => {} } = {}) {
   let start = 0, rawTotal = 0;
   const facilities = [];
   for (;;) {
     const chunk = await fetchChunk(start);
     rawTotal += chunk.length;
     for (const row of chunk) if (isActiveNoi(row)) facilities.push(shapeFacility(row));
-    process.stdout.write(`  fetched ${rawTotal} raw, kept ${facilities.length} active NOI\r`);
+    log(`  fetched ${rawTotal} raw, kept ${facilities.length} active NOI`);
     if (chunk.length < CHUNK) break;
     start += CHUNK;
   }
-  console.log(`\nEPA: ${rawTotal} raw records, ${facilities.length} active NOI to upsert.`);
 
   // operator facility counts (for score + rollup)
   const counts = {};
@@ -56,9 +52,8 @@ async function main() {
       [f.external_permit_nmbr, f.master_permit, f.state, f.operator_name, f.operator_key, f.coverage_type,
        f.effective_date, f.expiration_date, f.original_issue_date, score]
     );
-    if (++n % 500 === 0) process.stdout.write(`  upserted ${n}/${facilities.length}\r`);
+    n++;
   }
-  console.log(`\nUpserted ${n} facilities.`);
 
   // roll up operators
   for (const key of Object.keys(counts)) {
@@ -73,10 +68,13 @@ async function main() {
       [key]
     );
   }
-  const { rows } = await pool.query(
-    `SELECT COUNT(*) AS facilities, COUNT(DISTINCT operator_key) AS operators FROM permit_facilities`
-  );
-  console.log(`Done. facilities=${rows[0].facilities}, operators=${rows[0].operators}`);
-  await pool.end();
+  return { raw: rawTotal, facilities: n, operators: Object.keys(counts).filter(Boolean).length };
 }
-main().catch((e) => { console.error(e); process.exit(1); });
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not set (use Railway public URL)");
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  runPermitIngest(pool, { log: (m) => process.stdout.write(m + "\r") })
+    .then((r) => { console.log(`\nDone: ${JSON.stringify(r)}`); return pool.end(); })
+    .catch((e) => { console.error(e); process.exit(1); });
+}
