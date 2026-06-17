@@ -53,6 +53,18 @@ export async function patchPermitMailbox(id: string, permit_enabled: boolean): P
   });
 }
 
+export interface MsgpTemplate { subject: string; body_html: string; apollo_sequence_id: string | null; updated_at?: string; }
+
+export async function getMsgpTemplate(): Promise<{ template: MsgpTemplate }> {
+  return j<{ template: MsgpTemplate }>(`/api/permits/msgp-template`);
+}
+export async function putMsgpTemplate(subject: string, body_html: string): Promise<{ template: MsgpTemplate }> {
+  return j<{ template: MsgpTemplate }>(`/api/permits/msgp-template`, { method: "PUT", body: JSON.stringify({ subject, body_html }) });
+}
+export async function createMsgpSequence(): Promise<{ apollo_sequence_id: string }> {
+  return j<{ apollo_sequence_id: string }>(`/api/permits/msgp-sequence/create`, { method: "POST", body: "{}" });
+}
+
 export const permitApi = {
   getPool: (params: { page?: number; pageSize?: number; city?: string; search?: string; status?: string } = {}) => {
     const q = new URLSearchParams();
