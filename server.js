@@ -893,6 +893,18 @@ async function initDB() {
     );
     console.log("SDR tables (sdr_users, sdr_mailboxes, sdr_drafts, sdr_sends, sdr_engagement_events, sdr_migrations) verified/created.");
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS permit_outreach (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        operator_key TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'mail' CHECK (channel IN ('mail','email')),
+        status TEXT NOT NULL DEFAULT 'exported' CHECK (status IN ('exported','mailed','emailed','replied','skipped')),
+        batch_id TEXT,
+        note TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_permit_outreach_opkey ON permit_outreach(operator_key)`);
+
     // Automation Roadmap — shared task list (team posts work, Derek tracks/edits/comments)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS automation_tasks (
