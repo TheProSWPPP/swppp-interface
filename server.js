@@ -871,6 +871,26 @@ async function initDB() {
       )`);
     await pool.query(`INSERT INTO permit_engine_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
     await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS permit_enabled BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS permit_msgp_template (
+        id INT PRIMARY KEY DEFAULT 1,
+        subject TEXT NOT NULL DEFAULT '',
+        body_html TEXT NOT NULL DEFAULT '',
+        apollo_sequence_id TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT permit_msgp_template_singleton CHECK (id = 1)
+      )`);
+    await pool.query(
+      `INSERT INTO permit_msgp_template (id, subject, body_html) VALUES (1, $1, $2) ON CONFLICT (id) DO NOTHING`,
+      [
+        "Action needed: your TXR050000 stormwater permit expires Aug 13",
+        `<p>Hi {{first_name}},</p>
+<p>Our records show your facility's Texas industrial stormwater permit (TXR050000) is set to expire on <strong>August 13, 2026</strong>. Every operator on this permit renews on the same cycle this year, so the window fills up fast.</p>
+<p>Pro SWPPP helps operators like {{operator}} renew without the scramble — updated SWPPP, filings handled, done before the deadline.</p>
+<p>Want us to handle {{operator}}'s renewal? Just reply and we'll take it from here.</p>
+<p>— The Pro SWPPP Team</p>`,
+      ]
+    );
     console.log("SDR tables (sdr_users, sdr_mailboxes, sdr_drafts, sdr_sends, sdr_engagement_events, sdr_migrations) verified/created.");
 
     // Automation Roadmap — shared task list (team posts work, Derek tracks/edits/comments)

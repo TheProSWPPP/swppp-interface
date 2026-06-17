@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { FileSearch, Sparkles } from "lucide-react";
+import { FileSearch, Sparkles, Mail } from "lucide-react";
 import PoolView from "./PoolView";
 import EnrichmentView from "./EnrichmentView";
+import MsgpCopyView from "./MsgpCopyView";
 import { getPermitSettings, patchPermitSettings, patchPermitMailbox, type PermitSettings, type PermitMailbox } from "../../lib/permitApi";
 
 export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: "success" | "error") => void }) {
-  const [sub, setSub] = useState<"pool" | "enrichment">("pool");
+  const [sub, setSub] = useState<"pool" | "enrichment" | "msgp">("pool");
   const [settings, setSettings] = useState<PermitSettings | null>(null);
   const [mailboxes, setMailboxes] = useState<PermitMailbox[]>([]);
 
@@ -22,7 +23,7 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
     } catch { pushToast?.("Failed to update engine", "error"); }
   };
 
-  const btn = (v: "pool" | "enrichment", label: string, icon: React.ReactNode) => (
+  const btn = (v: "pool" | "enrichment" | "msgp", label: string, icon: React.ReactNode) => (
     <button onClick={() => setSub(v)}
       className={"flex items-center gap-1 text-sm font-semibold px-3 py-1.5 rounded-lg " +
         (sub === v ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
@@ -64,8 +65,9 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
       <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
         {btn("pool", "Pool", <FileSearch className="h-4 w-4" />)}
         {btn("enrichment", "Enrichment", <Sparkles className="h-4 w-4" />)}
+        {btn("msgp", "Email Copy", <Mail className="h-4 w-4" />)}
       </div>
-      {sub === "pool" ? <PoolView pushToast={pushToast} /> : <EnrichmentView pushToast={pushToast} />}
+      {sub === "pool" ? <PoolView pushToast={pushToast} /> : sub === "enrichment" ? <EnrichmentView pushToast={pushToast} /> : <MsgpCopyView pushToast={pushToast} />}
     </div>
   );
 }
