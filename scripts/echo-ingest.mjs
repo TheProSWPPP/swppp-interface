@@ -1,6 +1,7 @@
 // Pull EPA ECHO CWA compliance per permit, fold "compliance pain" into score.
 // Usage: DATABASE_URL=<railway-public-url> node scripts/echo-ingest.mjs [limit]
 import pg from "pg";
+import { pathToFileURL } from "node:url";
 import { parseEchoSummary, compliancePain } from "../lib/echoCompliance.js";
 import { scoreFacility } from "../lib/permitScoring.js";
 
@@ -58,7 +59,7 @@ export async function runEchoRefresh(pool, { limit = 0, delayMs = 250, log = () 
   return { processed: done, withPain };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not set (use Railway public URL)");
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
   const limit = parseInt(process.argv[2] || "0", 10);
