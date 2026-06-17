@@ -34,6 +34,25 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+export interface PermitSettings { active: boolean; daily_enroll_cap: number; }
+export interface PermitMailbox { id: string; email: string; display_name: string | null; permit_enabled: boolean; }
+
+export async function getPermitSettings(): Promise<{ settings: PermitSettings; mailboxes: PermitMailbox[] }> {
+  return j<{ settings: PermitSettings; mailboxes: PermitMailbox[] }>(`/api/permits/settings`);
+}
+export async function patchPermitSettings(body: Partial<PermitSettings>): Promise<{ settings: PermitSettings }> {
+  return j<{ settings: PermitSettings }>(`/api/permits/settings`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+export async function patchPermitMailbox(id: string, permit_enabled: boolean): Promise<{ mailbox: PermitMailbox }> {
+  return j<{ mailbox: PermitMailbox }>(`/api/permits/mailboxes/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ permit_enabled }),
+  });
+}
+
 export const permitApi = {
   getPool: (params: { page?: number; pageSize?: number; city?: string; search?: string; status?: string } = {}) => {
     const q = new URLSearchParams();
