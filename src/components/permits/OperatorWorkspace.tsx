@@ -8,10 +8,11 @@ import {
 } from "../../lib/permitApi";
 import OperatorDrawer from "./OperatorDrawer";
 
-type Stage = "all" | "pool" | "promoted" | "enriched" | "mailed";
+type FunnelStage = "pool" | "promoted" | "enriched" | "mailed";
+type Stage = "all" | FunnelStage;
 type Compliance = "all" | "violation" | "snc";
 
-const STAGE_LABELS: { key: Stage; label: string }[] = [
+const STAGE_LABELS: { key: FunnelStage; label: string }[] = [
   { key: "pool", label: "Pool" },
   { key: "promoted", label: "Promoted" },
   { key: "enriched", label: "Enriched" },
