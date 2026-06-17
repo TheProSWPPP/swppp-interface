@@ -1526,6 +1526,9 @@ const pdSequenceStartedKey = "48c4bb758e8642d6372c7fff9df3c0ea716170f1";
 // step-1 template (created via API 2026-06-11; override via env if recreated)
 const APOLLO_CF_DRAFT_SUBJECT = process.env.APOLLO_CF_DRAFT_SUBJECT || "6a2adb32a2b9130020474786";
 const APOLLO_CF_DRAFT_BODY = process.env.APOLLO_CF_DRAFT_BODY || "6a2adb32bfaa320020f80f97";
+// swppp_track carries the draft id into the open-pixel ({{contact.swppp_track}} in the
+// template) — Apollo escapes body HTML so the pixel must live in the template.
+const APOLLO_CF_TRACK = process.env.APOLLO_CF_TRACK || "6a32559593e27d000c4ee92f";
 
 // SDR drafts — list (owner-scoped; admin sees all)
 app.get("/api/sdr/drafts", async (req, res) => {
@@ -2032,6 +2035,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         await apolloClient.updateContactCustomFields(apolloContactId, {
           [APOLLO_CF_DRAFT_SUBJECT]: draft.subject,
           [APOLLO_CF_DRAFT_BODY]: draft.body,
+          [APOLLO_CF_TRACK]: draft.id, // open-pixel token, rendered via {{contact.swppp_track}}
         });
 
         // Enroll in sequence with the assigned mailbox as the sender
