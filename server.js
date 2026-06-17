@@ -786,6 +786,9 @@ async function initDB() {
     // Bid/Start dates from Pipedrive (added 2026-06-17). Idempotent for existing tables.
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS bid_date DATE`);
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS start_date DATE`);
+    // Manual trigger override (Postgres-only, NOT a Pipedrive field — per the
+    // "track SDR state in Postgres" rule). Wins over stage-derivation in the sync.
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS trigger_override TEXT`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_status ON sdr_lead_state(outreach_status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_person ON sdr_lead_state(pipedrive_person_id)`);
 
@@ -1316,23 +1319,48 @@ const PD_STAGE_FIELD = "7c1852c27664d1118f75660223a6af9e99d10f2c";
 // Stage → derived trigger (mirrors STAGE_TRIGGER in lib/pipedriveSync).
 const STAGE_TRIGGER_MAP = { AGC: "AGC", LBA: "LBA", CM: "CM", PB: "PB", OB: "PB", "PRE-BID": "PB" };
 
-// Write-back: set a lead's Project Stage in Pipedrive from the interface, and
-// re-derive the trigger. Updates the mirror immediately so the UI reflects it.
+const VALID_TRIGGERS = ["AGC", "LBA", "CM", "PB"];
+
+// Write-back: set a lead's Project Stage in Pipedrive (and re-derive trigger),
+// and/or set a manual trigger_override (Postgres-only, no Pipedrive field).
+// Body: { project_stage?, trigger_override? } — trigger_override "" or "clear"
+// removes the override and reverts to stage-derived.
 app.patch("/api/sdr/leads/:leadId", async (req, res) => {
-  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
   const { leadId } = req.params;
   const stage = req.body?.project_stage != null ? String(req.body.project_stage).trim() : null;
-  if (!stage) return res.status(400).json({ error: "project_stage required" });
+  const hasTriggerField = Object.prototype.hasOwnProperty.call(req.body || {}, "trigger_override");
+  const rawOverride = hasTriggerField ? String(req.body.trigger_override || "").trim().toUpperCase() : null;
+  const override = rawOverride && rawOverride !== "CLEAR" ? rawOverride : null;
+  if (hasTriggerField && override && !VALID_TRIGGERS.includes(override)) {
+    return res.status(400).json({ error: "trigger_override must be AGC/LBA/CM/PB or empty" });
+  }
+  if (!stage && !hasTriggerField) return res.status(400).json({ error: "project_stage or trigger_override required" });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   try {
-    await pipedriveClient.updateLead(leadId, { [PD_STAGE_FIELD]: stage });
-    const trigger = STAGE_TRIGGER_MAP[stage.toUpperCase()] || null;
-    if (process.env.DATABASE_URL) {
-      await pool.query(
-        `UPDATE sdr_lead_state SET project_stage = $1, trigger_type = $2 WHERE pipedrive_lead_id = $3`,
-        [stage, trigger, leadId],
-      );
+    // Stage write-back hits Pipedrive; trigger_override is Postgres-only.
+    if (stage) {
+      if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
+      await pipedriveClient.updateLead(leadId, { [PD_STAGE_FIELD]: stage });
     }
-    res.json({ ok: true, project_stage: stage, trigger_type: trigger });
+    // Effective trigger = override (if set) else stage-derived (if stage given) else keep existing.
+    const derived = stage ? STAGE_TRIGGER_MAP[stage.toUpperCase()] || null : null;
+    const sets = [];
+    const params = [];
+    if (stage) { params.push(stage); sets.push(`project_stage = $${params.length}`); }
+    if (hasTriggerField) { params.push(override); sets.push(`trigger_override = $${params.length}`); }
+    // trigger_type: override wins; else stage-derived; else leave as-is.
+    if (hasTriggerField || stage) {
+      params.push(override);
+      params.push(derived);
+      sets.push(`trigger_type = COALESCE($${params.length - 1}, ${stage ? `$${params.length}` : "trigger_type"})`);
+    }
+    params.push(leadId);
+    const { rows } = await pool.query(
+      `UPDATE sdr_lead_state SET ${sets.join(", ")} WHERE pipedrive_lead_id = $${params.length}
+       RETURNING project_stage, trigger_type, trigger_override`,
+      params,
+    );
+    res.json({ ok: true, ...(rows[0] || {}) });
   } catch (err) {
     console.error("PATCH /api/sdr/leads/:leadId error:", err);
     res.status(500).json({ error: err.message || "Failed to update lead" });

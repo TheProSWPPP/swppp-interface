@@ -96,6 +96,7 @@ export interface SdrLead {
   outreached_status: string | null;
   bid_date: string | null;
   start_date: string | null;
+  trigger_override: string | null;
   send_status: string | null;
   send_sequence_id: string | null;
   send_sent_at: string | null;
@@ -347,6 +348,13 @@ export const sdrApi = {
     sdrFetch<{ ok: boolean; project_stage: string; trigger_type: string | null }>(`/api/sdr/leads/${leadId}`, {
       method: "PATCH",
       body: JSON.stringify({ project_stage: projectStage }),
+    }),
+
+  // Manual trigger override (Postgres-only; "" or "clear" reverts to stage-derived).
+  setLeadTrigger: (leadId: string, triggerOverride: string) =>
+    sdrFetch<{ ok: boolean; trigger_type: string | null; trigger_override: string | null }>(`/api/sdr/leads/${leadId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ trigger_override: triggerOverride }),
     }),
 
   logActivity: (

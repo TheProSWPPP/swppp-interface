@@ -405,7 +405,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           </div>
           {tab === "leads" && <LeadsView user={user} pushToast={push} onGenerated={() => setTab("queue")} />}
           {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
-          {tab === "engaged" && <EngagedView />}
+          {tab === "engaged" && <EngagedView pushToast={push} />}
           {tab === "dashboard" && <DashboardView />}
           {tab === "mailboxes" && <MailboxesView user={user} />}
           {tab === "templates" && <TemplatesView />}
@@ -902,9 +902,7 @@ function LeadsView({
       {detailLeadId && (
         <LeadDetailDrawer
           leadId={detailLeadId}
-          stages={filterOpts?.stages ?? []}
           onClose={() => setDetailLeadId(null)}
-          onNote={(lead) => setNoteLead(lead)}
           onOutreach={(lead) => requestOutreach(lead)}
           onChanged={load}
           pushToast={pushToast}
@@ -918,26 +916,25 @@ function LeadsView({
 // link, our outreach timeline (drafts/sends/engagement), and quick actions.
 function LeadDetailDrawer({
   leadId,
-  stages,
   onClose,
-  onNote,
   onOutreach,
   onChanged,
   pushToast,
 }: {
   leadId: string;
-  stages: { v: string; n: number }[];
   onClose: () => void;
-  onNote: (lead: SdrLead) => void;
-  onOutreach: (lead: SdrLead) => void;
-  onChanged: () => void;
+  onOutreach?: (lead: SdrLead) => void;
+  onChanged?: () => void;
   pushToast: (kind: "success" | "error", text: string) => void;
 }) {
   const [detail, setDetail] = useState<SdrLeadDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [stages, setStages] = useState<{ v: string; n: number }[]>([]);
+  const [noteOpen, setNoteOpen] = useState(false);
   const [stageEdit, setStageEdit] = useState<string>("");
   const [savingStage, setSavingStage] = useState(false);
+  const [savingTrigger, setSavingTrigger] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
 
   useEffect(() => {
@@ -951,7 +948,11 @@ function LeadDetailDrawer({
     return () => { cancelled = true; };
   }, [leadId, reloadKey]);
 
-  const reload = () => setReloadKey((k) => k + 1);
+  useEffect(() => {
+    sdrApi.leadFilters().then((f) => setStages(f.stages)).catch(() => setStages([]));
+  }, []);
+
+  const reload = () => { setReloadKey((k) => k + 1); onChanged?.(); };
 
   async function saveStage() {
     if (!stageEdit || stageEdit === detail?.lead?.project_stage) return;
@@ -960,11 +961,24 @@ function LeadDetailDrawer({
       const r = await sdrApi.updateLeadStage(leadId, stageEdit);
       pushToast("success", `Stage updated to ${r.project_stage} in Pipedrive${r.trigger_type ? ` (trigger ${r.trigger_type})` : ""}.`);
       reload();
-      onChanged();
     } catch (e) {
       pushToast("error", `Couldn't update stage: ${(e as Error).message}`);
     } finally {
       setSavingStage(false);
+    }
+  }
+
+  // Trigger override — Postgres-only, no Pipedrive write. "" reverts to stage-derived.
+  async function setTrigger(value: string) {
+    setSavingTrigger(true);
+    try {
+      const r = await sdrApi.setLeadTrigger(leadId, value);
+      pushToast("success", value ? `Trigger set to ${r.trigger_type}.` : "Trigger reverted to stage-derived.");
+      reload();
+    } catch (e) {
+      pushToast("error", `Couldn't set trigger: ${(e as Error).message}`);
+    } finally {
+      setSavingTrigger(false);
     }
   }
 
@@ -1065,6 +1079,34 @@ function LeadDetailDrawer({
                 <p className="mt-1.5 text-xs text-slate-400">Updates Pipedrive and re-derives the outreach trigger.</p>
               </div>
 
+              {/* Trigger override (Postgres-only — does not touch Pipedrive) */}
+              <div className="rounded-xl border border-slate-200 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-400">Outreach trigger</span>
+                  {lead?.trigger_override && (
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+                      manual override
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <select
+                    value={lead?.trigger_override || ""}
+                    disabled={savingTrigger}
+                    onChange={(e) => setTrigger(e.target.value)}
+                    className="flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-800"
+                  >
+                    <option value="">Auto (from stage{lead?.trigger_type && !lead?.trigger_override ? `: ${lead.trigger_type}` : ""})</option>
+                    {(["AGC", "LBA", "CM", "PB"] as const).map((t) => (
+                      <option key={t} value={t}>{t} — {TRIGGER_LABELS[t]}</option>
+                    ))}
+                  </select>
+                </div>
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Manual override (stored here, not in Pipedrive). Wins over the stage-derived trigger.
+                </p>
+              </div>
+
               {/* Timeline */}
               <div>
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Activity timeline</div>
@@ -1106,7 +1148,7 @@ function LeadDetailDrawer({
             ) : (
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={() => onNote(lead)}
+                  onClick={() => setNoteOpen(true)}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
                   <StickyNote className="h-4 w-4" /> Note
@@ -1117,7 +1159,7 @@ function LeadDetailDrawer({
                 >
                   <Phone className="h-4 w-4" /> Log activity
                 </button>
-                {lead.trigger_type && (
+                {onOutreach && lead.trigger_type && (
                   <button
                     onClick={() => { onOutreach(lead); onClose(); }}
                     className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-cta-500 px-3 py-2 text-sm font-semibold text-white hover:bg-cta-600"
@@ -1130,6 +1172,15 @@ function LeadDetailDrawer({
           </div>
         )}
       </div>
+
+      {noteOpen && lead && (
+        <PipedriveNoteModal
+          lead={lead}
+          onClose={() => setNoteOpen(false)}
+          onSaved={() => { setNoteOpen(false); pushToast("success", "Note added to Pipedrive."); }}
+          onError={(msg) => pushToast("error", msg)}
+        />
+      )}
     </div>
   );
 }
@@ -2027,9 +2078,10 @@ function isHot(l: SdrEngagementLead): boolean {
   return l.replies > 0 || l.clicks > 0 || l.opens >= 3;
 }
 
-function EngagedView() {
+function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", text: string) => void }) {
   const [summary, setSummary] = useState<SdrEngagementSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     sdrApi
@@ -2088,7 +2140,8 @@ function EngagedView() {
             {summary.leads.map((l) => (
               <li
                 key={l.draft_id}
-                className={cn("px-4 py-3 flex items-center gap-3", isHot(l) && "bg-amber-50/50")}
+                onClick={() => setDetailLeadId(l.pipedrive_lead_id)}
+                className={cn("px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-brand-50/40", isHot(l) && "bg-amber-50/50")}
               >
                 {isHot(l) ? (
                   <Flame className="h-4 w-4 text-amber-500 flex-shrink-0" />
@@ -2130,6 +2183,7 @@ function EngagedView() {
                   href={pipedriveLeadUrl(l.pipedrive_lead_id)}
                   target="_blank"
                   rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
                   title="Open lead in Pipedrive"
                   className="text-slate-400 hover:text-brand-600 flex-shrink-0"
                 >
@@ -2139,6 +2193,15 @@ function EngagedView() {
             ))}
           </ul>
         </div>
+      )}
+
+      {detailLeadId && (
+        <LeadDetailDrawer
+          leadId={detailLeadId}
+          onClose={() => setDetailLeadId(null)}
+          onChanged={load}
+          pushToast={pushToast}
+        />
       )}
     </div>
   );
