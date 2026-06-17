@@ -2009,6 +2009,44 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
       apolloSequenceId: apollo_sequence_id || null,
     });
 
+    // Live freshness re-check at the moment of outreach. buildDraftFromLead just
+    // fetched the person, so `person_last_outgoing` is live (no extra API call).
+    // Mark the mirror with the fresh signal so a stale bulk-sync can't let an
+    // already-contacted lead slip through, and block recently-contacted ones.
+    if (payload.person_last_outgoing) {
+      const lastOut = payload.person_last_outgoing;
+      const ms = new Date(lastOut.replace(" ", "T") + (/[zZ]|[+-]\d\d:?\d\d$/.test(lastOut) ? "" : "Z")).getTime();
+      const daysAgo = Number.isNaN(ms) ? null : Math.floor((Date.now() - ms) / 86400000);
+      const freshStatus = daysAgo === null ? "clear" : daysAgo <= 60 ? "contacted_recent" : "contacted_stale";
+      if (process.env.DATABASE_URL) {
+        await pool.query(
+          `UPDATE sdr_lead_state
+             SET last_outgoing_mail_time = $1,
+                 outreach_status = CASE WHEN sequence_started IS NOT NULL THEN 'sequenced' ELSE $2 END,
+                 synced_at = NOW()
+           WHERE pipedrive_lead_id = $3`,
+          [lastOut, freshStatus, payload.pipedrive_lead_id],
+        );
+      }
+      // Recently emailed → block unless an admin explicitly overrides.
+      if (freshStatus === "contacted_recent") {
+        if (req.body?.override === true) {
+          if (req.sdrUser && req.sdrUser.role !== "admin") {
+            return res.status(403).json({ error: "Admin override required to outreach an already-contacted lead" });
+          }
+          console.log(`[dedup] generate override by ${req.sdrUser?.username || "n8n"}: ${payload.pipedrive_lead_id} emailed ${daysAgo}d ago`);
+        } else {
+          return res.status(409).json({
+            code: "already_outreached",
+            lastOutgoing: lastOut,
+            daysAgo,
+            personName: payload.person_name,
+            message: `${payload.person_name || "This lead"} was already emailed ${daysAgo}d ago in Pipedrive (live check). Confirm to outreach anyway.`,
+          });
+        }
+      }
+    }
+
     // Idempotency — same lead + trigger with an open draft
     const dup = await pool.query(
       `SELECT id, status FROM sdr_drafts

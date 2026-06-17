@@ -379,6 +379,7 @@ export const sdrApi = {
     trigger_type: SdrTriggerType;
     apollo_sequence_id?: string;
     assigned_user_id?: string;
+    override?: boolean;
   }) =>
     sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/generate`, {
       method: "POST",

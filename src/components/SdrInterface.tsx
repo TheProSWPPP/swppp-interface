@@ -658,7 +658,7 @@ function LeadsView({
     else setConfirmLead(lead);
   }
 
-  async function doOutreach(lead: SdrLead) {
+  async function doOutreach(lead: SdrLead, override = false) {
     if (!lead.trigger_type) return;
     setConfirmLead(null);
     setGenId(lead.pipedrive_lead_id);
@@ -667,11 +667,27 @@ function LeadsView({
         pipedrive_lead_id: lead.pipedrive_lead_id,
         trigger_type: lead.trigger_type,
         assigned_user_id: user.id,
+        override,
       });
       pushToast("success", "Draft created — check the Queue tab.");
       onGenerated?.();
     } catch (e) {
-      pushToast("error", `Could not create draft: ${(e as Error).message}`);
+      const err = e as Error & { status?: number; data?: { code?: string; daysAgo?: number; personName?: string } };
+      // Live freshness check caught an already-contacted lead the mirror missed.
+      if (err.status === 409 && err.data?.code === "already_outreached") {
+        const who = err.data.personName || lead.lead_title || "This lead";
+        const days = err.data.daysAgo ?? "?";
+        load(); // refresh — the mirror was just marked contacted
+        if (user.role !== "admin") {
+          pushToast("error", `Blocked — ${who} was already emailed ${days}d ago in Pipedrive. Admin override required.`);
+        } else if (window.confirm(`⚠️ ${who} was already emailed ${days} days ago in Pipedrive (live check).\n\nOutreach anyway? This will email them again.`)) {
+          await doOutreach(lead, true);
+        } else {
+          pushToast("error", "Cancelled — lead already contacted in Pipedrive.");
+        }
+      } else {
+        pushToast("error", `Could not create draft: ${err.message}`);
+      }
     } finally {
       setGenId(null);
     }
@@ -883,7 +899,7 @@ function LeadsView({
         <OutreachConfirmModal
           lead={confirmLead}
           onCancel={() => setConfirmLead(null)}
-          onConfirm={() => doOutreach(confirmLead)}
+          onConfirm={() => doOutreach(confirmLead, true)}
         />
       )}
 
