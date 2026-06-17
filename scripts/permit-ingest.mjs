@@ -1,6 +1,7 @@
 // Ingest active TXR050000 NOI permittees from EPA Envirofacts into Postgres.
 // Usage: DATABASE_URL=<railway-public-url> node scripts/permit-ingest.mjs
 import pg from "pg";
+import { pathToFileURL } from "node:url";
 import { isActiveNoi, shapeFacility, operatorKey } from "../lib/permitIngest.js";
 import { scoreFacility } from "../lib/permitScoring.js";
 
@@ -71,7 +72,7 @@ export async function runPermitIngest(pool, { log = () => {} } = {}) {
   return { raw: rawTotal, facilities: n, operators: Object.keys(counts).filter(Boolean).length };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not set (use Railway public URL)");
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
   runPermitIngest(pool, { log: (m) => process.stdout.write(m + "\r") })
