@@ -58,9 +58,11 @@ function PainChip({ pain }: { pain?: number }) {
 }
 
 function deriveComplianceTier(maxPain: number): ComplianceTier {
-  if (maxPain >= 12) return "snc";
-  if (maxPain >= 8) return "violation";
-  if (maxPain >= 4) return "inspected";
+  // Must match backend pain tiering exactly (bulk compliance model):
+  // current violation = +12, SNC adds +6 (so SNC totals >= 18), inspected-only = +2
+  if (maxPain >= 18) return "snc";
+  if (maxPain >= 12) return "violation";
+  if (maxPain > 0) return "inspected";
   return "clean";
 }
 
