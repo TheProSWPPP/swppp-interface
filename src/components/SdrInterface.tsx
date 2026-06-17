@@ -800,6 +800,16 @@ function LeadCard({
             {lead.person_name || "Unknown contact"}
             {lead.person_email ? <span className="text-slate-400"> · {lead.person_email}</span> : null}
           </div>
+          <a
+            href={pipedriveLeadUrl(lead.pipedrive_lead_id)}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-indigo-600"
+          >
+            Open in Pipedrive
+            <ExternalLink className="h-3 w-3" />
+          </a>
         </div>
 
         {/* Middle: status */}
