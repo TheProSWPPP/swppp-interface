@@ -802,6 +802,8 @@ async function initDB() {
     // Manual trigger override (Postgres-only, NOT a Pipedrive field — per the
     // "track SDR state in Postgres" rule). Wins over stage-derivation in the sync.
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS trigger_override TEXT`);
+    // Pipedrive lead owner name — who's working a manually-contacted lead.
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS owner_name TEXT`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_status ON sdr_lead_state(outreach_status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_person ON sdr_lead_state(pipedrive_person_id)`);
 

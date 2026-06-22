@@ -101,6 +101,7 @@ export interface SdrLead {
   bid_date: string | null;
   start_date: string | null;
   trigger_override: string | null;
+  owner_name: string | null;
   send_status: string | null;
   send_sequence_id: string | null;
   send_sent_at: string | null;

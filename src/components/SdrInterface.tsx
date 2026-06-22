@@ -310,11 +310,32 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
 // Signed-in container with tabs
 // --------------------------------------------------------------------------
 
+// Read a ?lead=<id> param out of the hash (e.g. #/sdr?lead=abc) — used by the
+// Pipedrive note backlink to open a specific lead's detail.
+function readLeadParam(): string | null {
+  const q = window.location.hash.split("?")[1];
+  if (!q) return null;
+  return new URLSearchParams(q).get("lead");
+}
+
 function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void }) {
   const [lane, setLane] = useState<OutreachLane>(() => getLane());
   const [tab, setTab] = useState<SdrTab>("leads");
   const [nurtureTab, setNurtureTab] = useState<NurtureTab>("campaigns");
   const [drillListId, setDrillListId] = useState<number | null>(null);
+  // Deep-link from Pipedrive: open this lead's drawer at the console level.
+  const [deepLeadId, setDeepLeadId] = useState<string | null>(() => readLeadParam());
+  useEffect(() => {
+    const onHash = () => setDeepLeadId(readLeadParam());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  function closeDeepLead() {
+    setDeepLeadId(null);
+    // strip ?lead= from the URL so it doesn't reopen on refresh
+    const base = window.location.hash.split("?")[0] || "#/sdr";
+    window.history.replaceState(null, "", base);
+  }
 
   // Mailbox lookup shared by Queue (resolve UUID → email in draft detail)
   const [mailboxById, setMailboxById] = useState<Record<string, SdrMailbox>>({});
@@ -445,6 +466,15 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {nurtureTab === "contacts" && <ContactsView listId={drillListId} pushToast={push} />}
           {nurtureTab === "automations" && <AutomationsView />}
         </>
+      )}
+
+      {/* Deep-link from Pipedrive (#/sdr?lead=<id>) → open that lead's detail */}
+      {deepLeadId && (
+        <LeadDetailDrawer
+          leadId={deepLeadId}
+          onClose={closeDeepLead}
+          pushToast={push}
+        />
       )}
     </div>
   );
@@ -1510,12 +1540,18 @@ function LeadRow({
           <span className="text-xs text-slate-400">none</span>
         )}
       </td>
-      {/* Outreached by */}
+      {/* Outreached by — our rep if we sent it, else the Pipedrive lead owner */}
       <td className="px-4 py-3 align-top text-slate-600">
         {lead.outreached_by ? (
           lead.outreached_by
+        ) : contactedManually && lead.owner_name ? (
+          <span title="Pipedrive lead owner">
+            {lead.owner_name} <span className="text-xs text-slate-400">· Pipedrive</span>
+          </span>
         ) : contactedManually ? (
           <span className="text-slate-400">Pipedrive (manual)</span>
+        ) : lead.owner_name ? (
+          <span className="text-slate-400">{lead.owner_name}</span>
         ) : (
           <span className="text-slate-300">—</span>
         )}
