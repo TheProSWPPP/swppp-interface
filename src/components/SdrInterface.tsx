@@ -371,7 +371,11 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
     const load = () =>
       sdrApi
         .engagementSummary()
-        .then((s) => { if (!stop) setHotCount(s.leads.filter(isHot).length); })
+        .then((s) => {
+          if (stop) return;
+          const dismissed = loadDismissed();
+          setHotCount(s.leads.filter((l) => isHot(l) && !dismissed.has(l.draft_id)).length);
+        })
         .catch(() => {});
     load();
     const iv = setInterval(load, 60_000);
@@ -2228,10 +2232,45 @@ function isHot(l: SdrEngagementLead): boolean {
   return l.replies > 0 || l.clicks > 0 || l.opens >= 3;
 }
 
+// Priority "notifications" the rep has dismissed. Persisted client-side (per browser) so a
+// dismissed lead stays hidden from the Priority list AND the tab badge across reloads.
+const PRIORITY_DISMISS_KEY = "sdr.priority.dismissed";
+function loadDismissed(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(PRIORITY_DISMISS_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+function saveDismissed(s: Set<string>) {
+  try {
+    localStorage.setItem(PRIORITY_DISMISS_KEY, JSON.stringify([...s]));
+  } catch {
+    /* localStorage unavailable — dismissals just won't persist */
+  }
+}
+
 function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", text: string) => void }) {
   const [summary, setSummary] = useState<SdrEngagementSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
+
+  function dismiss(id: string) {
+    setDismissed((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      saveDismissed(next);
+      return next;
+    });
+  }
+  function restoreDismissed() {
+    setDismissed(() => {
+      const empty = new Set<string>();
+      saveDismissed(empty);
+      return empty;
+    });
+  }
 
   const load = useCallback(() => {
     sdrApi
@@ -2250,7 +2289,9 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
     return <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>;
   if (!summary) return <div className="text-center text-slate-400 py-12">Loading…</div>;
 
-  const hot = summary.leads.filter(isHot);
+  const visible = summary.leads.filter((l) => !dismissed.has(l.draft_id));
+  const hiddenCount = summary.leads.length - visible.length;
+  const hot = visible.filter(isHot);
 
   return (
     <div>
@@ -2284,10 +2325,26 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
         <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <div className="text-sm font-semibold text-slate-900">Prioritized by engagement</div>
-            <div className="text-xs text-slate-400">Replies ×10 · Clicks ×5 · Opens ×1 · recent activity weighs more</div>
+            <div className="flex items-center gap-3">
+              {hiddenCount > 0 && (
+                <button
+                  onClick={restoreDismissed}
+                  className="text-xs font-medium text-slate-400 hover:text-brand-600"
+                  title="Restore dismissed priority items"
+                >
+                  {hiddenCount} dismissed · restore
+                </button>
+              )}
+              <div className="text-xs text-slate-400">Replies ×10 · Clicks ×5 · Opens ×1 · recent activity weighs more</div>
+            </div>
           </div>
+          {visible.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-slate-500">
+              All caught up — nothing in the priority list right now.
+            </div>
+          ) : (
           <ul className="divide-y divide-slate-100">
-            {summary.leads.map((l) => (
+            {visible.map((l) => (
               <li
                 key={l.draft_id}
                 onClick={() => setDetailLeadId(l.pipedrive_lead_id)}
@@ -2339,9 +2396,17 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
                 >
                   <ExternalLink className="h-4 w-4" />
                 </a>
+                <button
+                  onClick={(e) => { e.stopPropagation(); dismiss(l.draft_id); }}
+                  title="Dismiss from priority"
+                  className="text-slate-300 hover:text-rose-500 flex-shrink-0"
+                >
+                  <XCircle className="h-4 w-4" />
+                </button>
               </li>
             ))}
           </ul>
+          )}
         </div>
       )}
 
@@ -2553,6 +2618,18 @@ function MailboxesView({ user }: { user: SdrUser }) {
     }
   }
 
+  async function toggleActive(m: SdrMailbox) {
+    // optimistic flip, then reconcile
+    setMailboxes((prev) => prev?.map((x) => (x.id === m.id ? { ...x, active: !m.active } : x)) ?? prev);
+    try {
+      await sdrApi.setMailboxActive(m.id, !m.active);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      await load();
+    }
+  }
+
   if (error)
     return <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>;
 
@@ -2577,21 +2654,48 @@ function MailboxesView({ user }: { user: SdrUser }) {
       {mailboxes && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {mailboxes.map((m) => (
-            <div key={m.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div
+              key={m.id}
+              className={cn(
+                "rounded-2xl border bg-white p-4",
+                m.active ? "border-slate-200" : "border-slate-200 bg-slate-50 opacity-60",
+              )}
+            >
               <div className="flex items-center justify-between mb-2">
                 <div className="font-semibold text-slate-900 text-sm">{m.email}</div>
-                <span
-                  className={cn(
-                    "text-xs font-semibold px-2 py-0.5 rounded-full",
-                    m.warmup_status === "warming"
-                      ? "bg-amber-100 text-amber-700"
-                      : m.warmup_status === "ready"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-slate-100 text-slate-600",
+                <div className="flex items-center gap-2">
+                  {!m.active && (
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+                      Disabled
+                    </span>
                   )}
-                >
-                  {m.warmup_status}
-                </span>
+                  <span
+                    className={cn(
+                      "text-xs font-semibold px-2 py-0.5 rounded-full",
+                      m.warmup_status === "warming"
+                        ? "bg-amber-100 text-amber-700"
+                        : m.warmup_status === "ready"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-slate-100 text-slate-600",
+                    )}
+                  >
+                    {m.warmup_status}
+                  </span>
+                  {user.role === "admin" && (
+                    <button
+                      onClick={() => toggleActive(m)}
+                      title={m.active ? "Disable this sender" : "Enable this sender"}
+                      className={cn(
+                        "text-xs font-semibold px-2 py-0.5 rounded-full border transition-colors",
+                        m.active
+                          ? "border-slate-200 text-slate-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200"
+                          : "border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100",
+                      )}
+                    >
+                      {m.active ? "Disable" : "Enable"}
+                    </button>
+                  )}
+                </div>
               </div>
               {/* Today's send usage vs the warmup-ramped cap */}
               <div className="mb-2 rounded-lg bg-slate-50 px-3 py-2">

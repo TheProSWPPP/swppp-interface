@@ -285,6 +285,12 @@ export const sdrApi = {
       { method: "POST" },
     ),
 
+  setMailboxActive: (id: string, active: boolean) =>
+    sdrFetch<{ mailbox: { id: string; email: string; active: boolean } }>(
+      `/api/sdr/mailboxes/${id}`,
+      { method: "PATCH", body: JSON.stringify({ active }) },
+    ),
+
   listTemplates: () =>
     sdrFetch<{ templates: Record<SdrTriggerType, SdrTemplate> }>("/api/sdr/templates"),
 

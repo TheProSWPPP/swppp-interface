@@ -1168,6 +1168,31 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
   }
 });
 
+// SDR mailbox — enable/disable a sender (admin only). A disabled mailbox is skipped by
+// draft generation and the auto-outreach rotation (and can't be sent from).
+app.patch("/api/sdr/mailboxes/:id", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const { active } = req.body || {};
+  if (typeof active !== "boolean") return res.status(400).json({ error: "active (boolean) required" });
+  try {
+    const { rows } = await pool.query(
+      `UPDATE sdr_mailboxes SET active = $1, updated_at = NOW() WHERE id = $2 RETURNING id, email, active`,
+      [active, req.params.id],
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Mailbox not found" });
+    await pool.query(
+      `INSERT INTO nurture_audit (sdr_user, action, target_kind, target_id, summary)
+       VALUES ($1, 'mailbox.toggle', 'sdr_mailbox', $2, $3)`,
+      [req.sdrUser?.username || req.sdrUser?.sub, req.params.id, active ? "enabled" : "disabled"],
+    ).catch(() => {});
+    res.json({ mailbox: rows[0] });
+  } catch (err) {
+    console.error("PATCH /api/sdr/mailboxes/:id error:", err);
+    res.status(500).json({ error: "Failed to update mailbox" });
+  }
+});
+
 // SDR lead-state — mirror of Pipedrive outreach state. Read by the interface to show
 // who's already been contacted (dedup). Newest sync first; optional ?status= and ?q= filters.
 // Whitelist of sortable columns (guards against SQL injection via ?sort=).
