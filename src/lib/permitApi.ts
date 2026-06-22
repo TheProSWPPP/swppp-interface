@@ -142,6 +142,73 @@ export async function createMsgpSequence(): Promise<{ apollo_sequence_id: string
   return j<{ apollo_sequence_id: string }>(`/api/permits/msgp-sequence/create`, { method: "POST", body: "{}" });
 }
 
+// ── Permit email draft queue ────────────────────────────────────────────────
+
+export interface PermitDraft {
+  id: string;
+  operator_key: string;
+  operator_name: string | null;
+  contact_name: string | null;
+  email: string;
+  subject: string;
+  body: string;
+  apollo_sequence_id: string | null;
+  assigned_mailbox_id: string | null;
+  assigned_email: string | null;
+  status: "pending" | "approved" | "sent" | "rejected";
+  reject_reason: string | null;
+  error_message: string | null;
+  approved_at: string | null;
+  sent_at: string | null;
+  created_at: string;
+}
+
+export interface PermitDraftsResponse {
+  drafts: PermitDraft[];
+  counts: { pending: number; sent: number; rejected: number };
+}
+
+export interface GenerateDraftsResult {
+  created: number;
+  eligible: number;
+  mailboxesEnabled: number;
+  sequenceLinked: boolean;
+}
+
+export function generatePermitDrafts(cap?: number): Promise<GenerateDraftsResult> {
+  return jMsg<GenerateDraftsResult>(`/api/permits/drafts/generate`, {
+    method: "POST",
+    body: JSON.stringify(cap ? { cap } : {}),
+  });
+}
+
+export function getPermitDrafts(status = "pending"): Promise<PermitDraftsResponse> {
+  return j<PermitDraftsResponse>(`/api/permits/drafts?status=${encodeURIComponent(status)}`);
+}
+
+export function editPermitDraft(
+  id: string,
+  body: { subject?: string; body?: string },
+): Promise<{ draft: PermitDraft }> {
+  return jMsg<{ draft: PermitDraft }>(`/api/permits/drafts/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function rejectPermitDraft(id: string, reason?: string): Promise<{ draft: PermitDraft }> {
+  return jMsg<{ draft: PermitDraft }>(`/api/permits/drafts/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+export function approvePermitDraft(
+  id: string,
+): Promise<{ id: string; status: string; apollo_contact_id: string; enrolled: number }> {
+  return jMsg(`/api/permits/drafts/${id}/approve-and-send`, { method: "POST", body: "{}" });
+}
+
 // ── Operator-centric API functions ─────────────────────────────────────────
 
 export function getOperatorsList(params: {
