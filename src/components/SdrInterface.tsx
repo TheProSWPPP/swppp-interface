@@ -97,13 +97,15 @@ const STATUS_COLORS: Record<SdrDraft["status"], string> = {
   cancelled: "bg-slate-100 text-slate-500",
 };
 
-// Dedup: how recently the lead was already contacted in Pipedrive. Red = recent /
-// already sequenced (don't send), amber = contacted long ago (re-sequence ok), green = fresh.
+// Dedup signal. IMPORTANT: "contacted_*" reflects when the CONTACT (person) was last
+// emailed in Pipedrive across ANY project — it is a person-level dedup hint, NOT proof
+// this specific lead was outreached. Only "sequenced" (lead-level Sequence_Started) and
+// our own sends (outreached_by) mean THIS lead was actually worked.
 const OUTREACH_BADGE: Record<string, { label: string; cls: string }> = {
-  contacted_recent: { label: "Contacted", cls: "bg-rose-50 text-rose-700 ring-rose-200" },
-  sequenced: { label: "Sequenced", cls: "bg-rose-50 text-rose-700 ring-rose-200" },
-  contacted_stale: { label: "Contacted (old)", cls: "bg-amber-50 text-amber-700 ring-amber-200" },
-  clear: { label: "Fresh", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  contacted_recent: { label: "Contact emailed", cls: "bg-amber-50 text-amber-700 ring-amber-200" },
+  sequenced: { label: "In sequence", cls: "bg-rose-50 text-rose-700 ring-rose-200" },
+  contacted_stale: { label: "Contact emailed · old", cls: "bg-slate-100 text-slate-500 ring-slate-200" },
+  clear: { label: "Not contacted", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
 };
 
 function OutreachBadge({ status, days }: { status?: string | null; days?: number | null }) {
@@ -111,14 +113,16 @@ function OutreachBadge({ status, days }: { status?: string | null; days?: number
   const { label, cls } = OUTREACH_BADGE[status];
   const title =
     status === "clear"
-      ? "No prior outreach found in Pipedrive"
+      ? "No prior email to this contact found in Pipedrive"
       : status === "sequenced"
-        ? "Already in an Apollo sequence"
-        : `Already emailed ${days ?? "?"} days ago in Pipedrive`;
+        ? "This lead is in an active sequence (Sequence_Started)"
+        : `This CONTACT was emailed ${days ?? "?"}d ago in Pipedrive — across any project, not proof this lead was outreached. Dedup hint.`;
   return (
     <span title={title} className={cn("text-xs font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset", cls)}>
       {label}
-      {typeof days === "number" && status !== "clear" ? ` ${days}d` : ""}
+      {typeof days === "number" && status !== "clear" && status !== "sequenced"
+        ? ` · ${daysAgoLabel(days)}`
+        : ""}
     </span>
   );
 }
@@ -142,6 +146,15 @@ function formatRelative(iso: string | null): string {
   if (abs < 3600) return `${Math.round(abs / 60)}m ${tense}`;
   if (abs < 86400) return `${Math.round(abs / 3600)}h ${tense}`;
   return `${Math.round(abs / 86400)}d ${tense}`;
+}
+
+// "days ago" in plain English. days is a floored absolute-time difference, so 0 means
+// "earlier today / a few hours ago" — never render the bare "0d ago" (reads like a bug).
+function daysAgoLabel(days: number | null | undefined): string {
+  if (typeof days !== "number") return "Never";
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  return `${days}d ago`;
 }
 
 function initials(name: string): string {
@@ -583,7 +596,8 @@ type LeadSortKey =
   | "trigger_type"
   | "last_contact"
   | "bid_date"
-  | "start_date";
+  | "start_date"
+  | "lead_score";
 
 // Apollo sequence id → trigger label, for showing which sequence a lead is in.
 const SEQUENCE_LABEL: Record<string, string> = {
@@ -909,18 +923,19 @@ function LeadsView({
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] border-collapse text-left">
+            <table className="w-full min-w-[1260px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <LeadTh label="Company / Project" sortKey="lead_title" sort={sort} dir={dir} onSort={toggleSort} />
                   <th className="px-4 py-3">Contact</th>
                   <LeadTh label="Stage" sortKey="project_stage" sort={sort} dir={dir} onSort={toggleSort} />
+                  <LeadTh label="Score" sortKey="lead_score" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Bid date" sortKey="bid_date" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Start date" sortKey="start_date" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Contact status" sortKey="outreach_status" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Trigger" sortKey="trigger_type" sort={sort} dir={dir} onSort={toggleSort} />
                   <th className="px-4 py-3">Outreached by</th>
-                  <LeadTh label="Contact last emailed" sortKey="last_contact" sort={sort} dir={dir} onSort={toggleSort} />
+                  <LeadTh label="Contact emailed (any deal)" sortKey="last_contact" sort={sort} dir={dir} onSort={toggleSort} />
                   <th className="px-4 py-3 text-right">Action</th>
                 </tr>
               </thead>
@@ -1123,13 +1138,27 @@ function LeadDetailDrawer({
               <dl className="grid grid-cols-2 gap-3 text-sm">
                 <DrawerField label="Contact" value={lead?.person_name} />
                 <DrawerField label="Email" value={lead?.person_email} />
-                <DrawerField label="Trigger" value={lead?.trigger_type} />
-                <DrawerField label="Contact status" value={lead?.outreach_status} />
+                <DrawerField
+                  label="Trigger"
+                  value={
+                    lead?.trigger_type
+                      ? `${lead.trigger_type} — ${TRIGGER_LABELS[lead.trigger_type] ?? ""}`
+                      : "—"
+                  }
+                />
+                <DrawerField
+                  label="Lead score"
+                  value={typeof lead?.lead_score === "number" ? String(Math.round(lead.lead_score)) : "—"}
+                />
+                <DrawerField
+                  label="Contact status"
+                  value={lead?.outreach_status ? OUTREACH_BADGE[lead.outreach_status]?.label ?? lead.outreach_status : "—"}
+                />
                 <DrawerField label="Bid date" value={formatDate(lead?.bid_date ?? null)} />
                 <DrawerField label="Start date" value={formatDate(lead?.start_date ?? null)} />
                 <DrawerField
-                  label="Contact last emailed"
-                  value={typeof lead?.days_since_outgoing === "number" ? `${lead.days_since_outgoing}d ago` : "Never"}
+                  label="Contact emailed (any deal)"
+                  value={daysAgoLabel(lead?.days_since_outgoing)}
                 />
                 {lead?.send_sequence_id && (
                   <DrawerField
@@ -1504,6 +1533,27 @@ function LeadRow({
       </td>
       {/* Stage */}
       <td className="px-4 py-3 align-top text-slate-600">{lead.project_stage || "—"}</td>
+      {/* Lead score (Pipedrive) — priority signal */}
+      <td className="px-4 py-3 align-top whitespace-nowrap">
+        {lead.lead_score == null ? (
+          <span className="text-slate-300">—</span>
+        ) : (
+          <span
+            className={`inline-flex min-w-[2.25rem] justify-center rounded px-2 py-0.5 text-xs font-semibold tabular-nums ${
+              lead.lead_score >= 40
+                ? "bg-emerald-100 text-emerald-700"
+                : lead.lead_score >= 20
+                  ? "bg-amber-100 text-amber-700"
+                  : lead.lead_score >= 0
+                    ? "bg-slate-100 text-slate-600"
+                    : "bg-slate-50 text-slate-400"
+            }`}
+            title="Pipedrive Lead Score — 40+ hot · 20+ warm · below 0 cold"
+          >
+            {Math.round(lead.lead_score)}
+          </span>
+        )}
+      </td>
       {/* Bid date */}
       <td className="px-4 py-3 align-top whitespace-nowrap text-slate-600">{formatDate(lead.bid_date)}</td>
       {/* Start date */}
@@ -1529,6 +1579,7 @@ function LeadRow({
       <td className="px-4 py-3 align-top">
         {lead.trigger_type ? (
           <span
+            title={TRIGGER_LABELS[lead.trigger_type] ?? undefined}
             className={cn(
               "rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset",
               TRIGGER_COLORS[lead.trigger_type],
@@ -1540,18 +1591,22 @@ function LeadRow({
           <span className="text-xs text-slate-400">none</span>
         )}
       </td>
-      {/* Outreached by — our rep if we sent it, else the Pipedrive lead owner */}
+      {/* Outreach / owner. Only OUR system sending counts as "outreached" (lead-level
+          truth). Otherwise we only know the Pipedrive owner — shown clearly as owner,
+          never as proof this lead was outreached (the contact-level email lives in the
+          status badge + "Contact last emailed" column). */}
       <td className="px-4 py-3 align-top text-slate-600">
         {lead.outreached_by ? (
-          lead.outreached_by
-        ) : contactedManually && lead.owner_name ? (
-          <span title="Pipedrive lead owner">
-            {lead.owner_name} <span className="text-xs text-slate-400">· Pipedrive</span>
+          <span title="Outreached via this interface">
+            {lead.outreached_by} <span className="text-xs text-slate-400">· via interface</span>
           </span>
-        ) : contactedManually ? (
-          <span className="text-slate-400">Pipedrive (manual)</span>
         ) : lead.owner_name ? (
-          <span className="text-slate-400">{lead.owner_name}</span>
+          <span
+            className="text-slate-400"
+            title="Pipedrive lead owner — not proof this lead was outreached"
+          >
+            {lead.owner_name} <span className="text-xs text-slate-300">(owner)</span>
+          </span>
         ) : (
           <span className="text-slate-300">—</span>
         )}
@@ -1561,7 +1616,7 @@ function LeadRow({
         className="px-4 py-3 align-top text-slate-600"
         title="Last time this CONTACT was emailed in Pipedrive — across any project, not just this lead. Used for dedup."
       >
-        {typeof lead.days_since_outgoing === "number" ? `${lead.days_since_outgoing}d ago` : "Never"}
+        {daysAgoLabel(lead.days_since_outgoing)}
       </td>
       {/* Action */}
       <td className="px-4 py-3 align-top text-right">
