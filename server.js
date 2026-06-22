@@ -21,6 +21,7 @@ import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplate
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
+import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { dailyCap, rampDay } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
@@ -912,11 +913,18 @@ async function initDB() {
       `INSERT INTO permit_msgp_template (id, subject, body_html) VALUES (1, $1, $2) ON CONFLICT (id) DO NOTHING`,
       [
         "Action needed: your TXR050000 stormwater permit expires Aug 13",
-        `<p>Hi {{first_name}},</p>
-<p>Our records show your facility's Texas industrial stormwater permit (TXR050000) is set to expire on <strong>August 13, 2026</strong>. Every operator on this permit renews on the same cycle this year, so the window fills up fast.</p>
-<p>Pro SWPPP helps operators like {{operator}} renew without the scramble — updated SWPPP, filings handled, done before the deadline.</p>
-<p>Want us to handle {{operator}}'s renewal? Just reply and we'll take it from here.</p>
-<p>— The Pro SWPPP Team</p>`,
+        `<div style="font-family: Georgia, 'Times New Roman', serif; font-size: 15px; color: #1f2937; line-height: 1.6;">
+<p>{{first_name}},</p>
+<p>It's just Derek with <strong style="color: #1a5276;">Pro SWPPP</strong>. Our records show your Texas industrial stormwater permit (TXR050000) is set to expire on <strong>August 13, 2026</strong>.</p>
+<p>Every operator on this permit renews on the same cycle this year, so the window fills up fast.</p>
+<p>We can handle {{operator}}'s renewal start to finish... the updated SWPPP, the filings, all of it, done before the deadline.</p>
+<p>Want us to take it from here? Just reply and we'll get started.</p>
+<p>We appreciate your business.</p>
+<p style="margin-bottom: 0;">Regards,</p>
+<p style="margin: 0;">Derek E. Chinners - Founder</p>
+<p style="margin: 0;"><strong style="color: #1a5276;">Pro SWPPP, LLC</strong></p>
+<p style="margin-top: 6px;"><a href="https://www.ProSWPPP.com" style="color: #1a5276;">www.ProSWPPP.com</a></p>
+</div>`,
       ]
     );
     console.log("SDR tables (sdr_users, sdr_mailboxes, sdr_drafts, sdr_sends, sdr_engagement_events, sdr_migrations) verified/created.");
@@ -1007,10 +1015,10 @@ if (process.env.DATABASE_URL && process.env.APOLLO_API_KEY) {
   setInterval(runEngPoll, 2 * 60 * 1000);
 }
 
-// Permit engine monthly refresh: EPA re-pull only (compliance-score-preserving).
+// Permit engine monthly refresh: EPA pool re-pull + bulk ECHO compliance refresh.
 // Gated by env opt-in AND the master switch so it never runs unexpectedly.
-// NOTE: ECHO compliance refresh is rate-capped (300/hr, 1500/day) and must be run manually
-// via scripts/echo-bulk-refresh.mjs — it is NOT run here to avoid aborting mid-pool.
+// Bulk refresh uses the EPA ZIP download (not the rate-capped per-permit API), so it
+// can run hands-off here. Requires `unzip` on PATH; failure is logged, not fatal.
 if (process.env.DATABASE_URL && process.env.PERMIT_REFRESH_ENABLED === "true") {
   const runPermitRefresh = async () => {
     try {
@@ -1018,7 +1026,12 @@ if (process.env.DATABASE_URL && process.env.PERMIT_REFRESH_ENABLED === "true") {
       if (!s.rows[0]?.active) { console.log("[permit-refresh] skipped — engine inactive"); return; }
       const ing = await runPermitIngest(pool);
       console.log(`[permit-refresh] ingest=${JSON.stringify(ing)}`);
-      console.log("[permit-refresh] compliance refresh is manual — run scripts/echo-bulk-refresh.mjs (ECHO per-permit API is rate-capped)");
+      try {
+        const comp = await runEchoBulkRefresh({ pool });
+        console.log(`[permit-refresh] compliance=${JSON.stringify(comp)}`);
+      } catch (ce) {
+        console.error("[permit-refresh] bulk compliance refresh failed (ingest still applied):", ce.message);
+      }
     } catch (e) { console.error("[permit-refresh] failed:", e.message); }
   };
   setInterval(runPermitRefresh, 30 * 24 * 60 * 60 * 1000); // ~monthly

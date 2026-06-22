@@ -141,12 +141,13 @@ async function buildComplianceMap(qncrPath, inspPath) {
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
-async function run() {
-  if (!process.env.DATABASE_URL) {
+export async function runEchoBulkRefresh({ pool: injectedPool } = {}) {
+  const ownPool = !injectedPool;
+  if (ownPool && !process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL not set (use Railway public URL)");
   }
 
-  const pool = new pg.Pool({
+  const pool = injectedPool || new pg.Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false },
   });
@@ -234,11 +235,12 @@ async function run() {
       try { return JSON.parse(f).pain > 0; } catch { return false; }
     }).length;
     console.log(`Done: ${permitKeys.length} facilities updated, ${withPain} with compliance pain > 0.`);
+    return { updated: permitKeys.length, withPain };
   } finally {
-    await pool.end();
+    if (ownPool) await pool.end();
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  run().catch((e) => { console.error(e); process.exit(1); });
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runEchoBulkRefresh().catch((e) => { console.error(e); process.exit(1); });
 }
