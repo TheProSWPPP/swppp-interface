@@ -805,6 +805,8 @@ async function initDB() {
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS trigger_override TEXT`);
     // Pipedrive lead owner name — who's working a manually-contacted lead.
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS owner_name TEXT`);
+    // Pipedrive "Lead Score" (numeric, higher = better) — drives priority/ranked auto-enroll.
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS lead_score DOUBLE PRECISION`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_status ON sdr_lead_state(outreach_status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_person ON sdr_lead_state(pipedrive_person_id)`);
 
@@ -1160,6 +1162,7 @@ const LEAD_SORT_COLUMNS = {
   last_contact: "s.last_outgoing_mail_time",
   bid_date: "s.bid_date",
   start_date: "s.start_date",
+  lead_score: "s.lead_score",
   synced_at: "s.synced_at",
 };
 
