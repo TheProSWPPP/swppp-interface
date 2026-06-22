@@ -1081,7 +1081,30 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
     const day = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(new Date());
     if (hr < 8 || hr >= 17 || day === "Sat" || day === "Sun") return; // business hours only
     runAutoOutreach(pool, { mailboxSentToday })
-      .then((r) => { if (r && r.created) console.log("[auto-outreach]", JSON.stringify(r)); })
+      .then(async (r) => {
+        if (r && r.created) console.log("[auto-outreach]", JSON.stringify({ mode: r.mode, created: r.created, capacity: r.capacity }));
+        // Send mode: enroll each freshly-created draft by calling the SAME approve-and-send
+        // path a human uses (internal HTTP + a short-lived token). Reuses its dedup + cap +
+        // warmup guards untouched; a 409/429 just means a guardrail correctly skipped it.
+        if (r && r.mode === "send" && Array.isArray(r.createdDrafts)) {
+          for (const d of r.createdDrafts) {
+            try {
+              const token = jwt.sign({ sub: d.assigned_user_id, username: "auto-outreach", role: "admin" }, JWT_SECRET, { expiresIn: 300 });
+              const resp = await fetch(`http://127.0.0.1:${port}/api/sdr/drafts/${d.id}/approve-and-send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: "{}",
+              });
+              if (!resp.ok) {
+                const txt = await resp.text();
+                console.warn(`[auto-outreach] enroll skip draft ${d.id}: ${resp.status} ${txt.slice(0, 140)}`);
+              }
+            } catch (e) {
+              console.warn(`[auto-outreach] enroll error draft ${d.id}: ${e.message}`);
+            }
+          }
+        }
+      })
       .catch((e) => console.error("[auto-outreach] run failed:", e.message));
   };
   setTimeout(runAuto, 90_000);
