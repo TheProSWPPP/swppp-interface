@@ -18,10 +18,11 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
 
   const toggleActive = async () => {
     if (!settings) return;
+    if (!settings.active && !window.confirm("Turn ON permit email sending? Companies picked for email can then be emailed automatically.")) return;
     try {
       const { settings: s } = await patchPermitSettings({ active: !settings.active });
       setSettings(s);
-      pushToast?.(`Permit email sending ${s.active ? "ON" : "OFF"}`, s.active ? "success" : "error");
+      pushToast?.(`Auto-send permit emails ${s.active ? "ON" : "OFF"}`, s.active ? "success" : "error");
     } catch { pushToast?.("Failed to update setting", "error"); }
   };
 
@@ -40,7 +41,7 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
         <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm">
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={settings.active} onChange={toggleActive} />
-            <span className="font-medium">Permit email sending {settings.active ? "ON" : "OFF"}</span>
+            <span className="font-medium">Auto-send permit emails {settings.active ? "ON" : "OFF"}</span>
           </label>
           <p className="mt-1 text-xs text-slate-500">
             Off = no emails sent. Pulling contacts (enrichment) and the direct-mail CSV work either way.

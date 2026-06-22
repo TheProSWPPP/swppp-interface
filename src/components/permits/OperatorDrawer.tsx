@@ -44,15 +44,11 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function PainChip({ pain }: { pain?: number }) {
   if (!pain) return null;
-  const cls =
-    pain >= 12
-      ? "bg-red-100 text-red-700"
-      : pain >= 8
-        ? "bg-orange-100 text-orange-700"
-        : "bg-amber-100 text-amber-700";
+  const high = pain >= 12;
+  const cls = high ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700";
   return (
     <span className={`ml-1 rounded px-1.5 py-0.5 text-xs font-semibold ${cls}`}>
-      pain {pain}
+      Renewal pressure: {high ? "High" : "Medium"}
     </span>
   );
 }
@@ -126,6 +122,16 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
     } finally {
       setActing(false);
     }
+  }
+
+  function handleSkip() {
+    if (
+      !window.confirm(
+        "Mark this company as skipped? It will drop out of your mailing list.",
+      )
+    )
+      return;
+    handleOutreach("skipped");
   }
 
   async function handleOutreach(status: "mailed" | "skipped") {
@@ -324,12 +330,12 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
                 <div className="text-sm space-y-1">
                   {op.possible_customer ? (
                     <p className="rounded-xl bg-amber-50 px-3 py-1.5 text-amber-700 text-xs font-semibold">
-                      ★ Possible existing customer (POSSIBLE — not confirmed)
+                      ★ Might already be a customer — double-check before skipping.
                     </p>
                   ) : null}
                   {op.possible_crm ? (
                     <p className="rounded-xl bg-slate-100 px-3 py-1.5 text-slate-600 text-xs font-semibold">
-                      ⚑ Possible CRM match (POSSIBLE — not confirmed)
+                      ⚑ Might already be a customer — double-check before skipping.
                     </p>
                   ) : null}
                   {!op.possible_customer && !op.possible_crm && (
@@ -390,13 +396,15 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
             >
               Mark mailed
             </button>
-            <button
-              onClick={() => handleOutreach("skipped")}
-              disabled={acting}
-              className="flex-1 min-w-[120px] text-sm font-semibold px-3 py-2 rounded-xl border border-slate-100 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
-            >
-              Mark skipped
-            </button>
+            <div className="w-full pt-1 mt-1 border-t border-slate-100 flex justify-center">
+              <button
+                onClick={handleSkip}
+                disabled={acting}
+                className="text-xs text-slate-400 hover:text-slate-600 underline-offset-2 hover:underline disabled:opacity-50"
+              >
+                Mark skipped
+              </button>
+            </div>
           </div>
         )}
       </div>
