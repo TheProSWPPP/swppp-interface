@@ -711,6 +711,23 @@ async function initDB() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_lead ON sdr_drafts(pipedrive_lead_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_mailbox ON sdr_drafts(assigned_mailbox_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_drafts_scheduled ON sdr_drafts(scheduled_for) WHERE status IN ('pending','approved')`);
+    // Race guard: at most ONE in-flight (un-sent) draft per lead+trigger. Without this,
+    // two concurrent generate calls (double-click, or n8n + human) both pass the
+    // read-then-insert dedup and create two drafts → both approved → DOUBLE Apollo
+    // enrollment of a real prospect. Drop pre-existing open dups (keep newest) first so
+    // the index can build; wrapped so a failure can't block startup.
+    try {
+      await pool.query(`
+        DELETE FROM sdr_drafts a USING sdr_drafts b
+        WHERE a.status IN ('pending','approved','edited')
+          AND b.status IN ('pending','approved','edited')
+          AND a.pipedrive_lead_id = b.pipedrive_lead_id
+          AND a.trigger_type = b.trigger_type
+          AND a.created_at < b.created_at`);
+      await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_sdr_drafts_open ON sdr_drafts(pipedrive_lead_id, trigger_type) WHERE status IN ('pending','approved','edited')`);
+    } catch (e) {
+      console.warn("uq_sdr_drafts_open index could not be created:", e.message);
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sdr_sends (
@@ -1204,7 +1221,10 @@ app.get("/api/sdr/leads", async (req, res) => {
     // Nulls last on the chosen column, then a stable tiebreak.
     const orderSql = `ORDER BY ${sortCol} ${sortDir} NULLS LAST, s.last_outgoing_mail_time DESC NULLS LAST`;
 
-    // "Outreached by": most-recent draft's assigned user for the lead.
+    // "Outreached by": the rep on the most-recently SENT draft — lead-level proof we
+    // actually outreached this lead. Drafts in other states (pending/edited/rejected)
+    // are NOT outreach, so they must not credit a rep here (was attributing to the
+    // latest draft of any status → false "outreached by" on un-sent leads).
     // "Sequence stage": most-recent Apollo enrollment send (status + when).
     const pageSql = `
       SELECT s.*,
@@ -1225,7 +1245,8 @@ app.get("/api/sdr/leads", async (req, res) => {
         FROM sdr_drafts d
         LEFT JOIN sdr_users u ON u.id = d.assigned_user_id
         WHERE d.pipedrive_lead_id = s.pipedrive_lead_id
-        ORDER BY d.created_at DESC
+          AND d.status = 'sent'
+        ORDER BY d.sent_at DESC NULLS LAST, d.created_at DESC
         LIMIT 1
       ) ob ON TRUE
       LEFT JOIN LATERAL (
@@ -2126,6 +2147,11 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
     );
     res.status(201).json({ draft: rows[0] });
   } catch (err) {
+    // Lost the race to a concurrent generate (uq_sdr_drafts_open) — surface as a clean
+    // conflict instead of a 500, same shape as the read-then-insert dedup above.
+    if (err.code === "23505") {
+      return res.status(409).json({ error: "Open draft already exists for this lead + trigger" });
+    }
     console.error("POST /api/sdr/drafts/generate error:", err);
     res.status(err.status || 500).json({ error: err.message || "Draft generation failed" });
   }
@@ -2166,7 +2192,7 @@ app.post("/api/sdr/drafts", async (req, res) => {
     const dup = await pool.query(
       `SELECT id FROM sdr_drafts
        WHERE pipedrive_lead_id = $1 AND trigger_type = $2
-         AND status IN ('pending','approved','sent') LIMIT 1`,
+         AND status IN ('pending','approved','edited','sent') LIMIT 1`,
       [pipedrive_lead_id, trigger_type],
     );
     if (dup.rows[0]) {
@@ -2367,21 +2393,29 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           console.warn("approve-and-send dedup precheck failed (allowing send):", e.message);
         }
         if (lastOut) {
-          const daysAgo = Math.floor((Date.now() - new Date(lastOut.replace(" ", "T") + "Z").getTime()) / 86400000);
-          if (req.body?.override === true) {
-            if (req.sdrUser?.role !== "admin") {
-              return res.status(403).json({ error: "Admin override required to send to an already-contacted lead" });
+          // Offset-aware parse (matches the generate gate + daysSince) — appending a bare
+          // "Z" to a timestamp that already carries Z/offset yields Invalid Date → NaN.
+          const ms = new Date(lastOut.replace(" ", "T") + (/[zZ]|[+-]\d\d:?\d\d$/.test(lastOut) ? "" : "Z")).getTime();
+          const daysAgo = Number.isNaN(ms) ? null : Math.floor((Date.now() - ms) / 86400000);
+          // Only block RECENT contact (<= 60d) — same window the generate gate uses, so a
+          // draft you were allowed to create can't be silently un-sendable when older.
+          const blockRecent = daysAgo !== null && daysAgo <= 60;
+          if (blockRecent) {
+            if (req.body?.override === true) {
+              if (req.sdrUser?.role !== "admin") {
+                return res.status(403).json({ error: "Admin override required to send to an already-contacted lead" });
+              }
+              overrideContext = `admin override by ${req.sdrUser?.username || req.sdrUser?.sub}: last emailed ${daysAgo}d ago (${lastOut})`;
+              console.log(`[dedup] ${overrideContext} — lead ${draft.pipedrive_lead_id}`);
+            } else {
+              return res.status(409).json({
+                code: "already_outreached",
+                lastOutgoing: lastOut,
+                daysAgo,
+                personName,
+                message: `${personName || "This lead"} was already emailed ${daysAgo}d ago via Pipedrive. Admin override required to send.`,
+              });
             }
-            overrideContext = `admin override by ${req.sdrUser?.username || req.sdrUser?.sub}: last emailed ${daysAgo}d ago (${lastOut})`;
-            console.log(`[dedup] ${overrideContext} — lead ${draft.pipedrive_lead_id}`);
-          } else {
-            return res.status(409).json({
-              code: "already_outreached",
-              lastOutgoing: lastOut,
-              daysAgo,
-              personName,
-              message: `${personName || "This lead"} was already emailed ${daysAgo}d ago via Pipedrive. Admin override required to send.`,
-            });
           }
         }
       }
