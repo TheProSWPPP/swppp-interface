@@ -250,11 +250,12 @@ export default function OperatorWorkspace({
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={runEnrich}
-            disabled={enriching}
+            disabled={enriching || counts.promoted === 0}
+            title={counts.promoted === 0 ? "Promote operators first" : undefined}
             className="flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             <Sparkles className="h-4 w-4" />
-            {enriching ? "Enriching…" : "Run enrichment (50)"}
+            {enriching ? "Enriching…" : "Enrich promoted (up to 50)"}
           </button>
           <a
             href={permitApi.directMailCsvUrl()}
