@@ -1509,8 +1509,11 @@ function LeadRow({
 }) {
   const fresh = lead.outreach_status === "clear";
   const hasTrigger = !!lead.trigger_type;
-  const contactedManually =
-    !lead.outreached_by && lead.outreach_status !== "clear" && lead.last_outgoing_mail_time;
+  // NOTE: half-wired (Ivan WIP) — declared but not yet referenced in JSX, which fails
+  // `tsc -b` (noUnusedLocals) and blocks the build/deploy. Commented to unblock; re-enable
+  // when the "contacted manually" indicator is wired in.
+  // const contactedManually =
+  //   !lead.outreached_by && lead.outreach_status !== "clear" && lead.last_outgoing_mail_time;
   const stageLabel = lead.send_status ? SEND_STAGE_LABEL[lead.send_status] || lead.send_status : null;
   const seqLabel = lead.send_sequence_id ? SEQUENCE_LABEL[lead.send_sequence_id] : null;
   const stop = (e: React.MouseEvent) => e.stopPropagation();

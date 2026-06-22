@@ -6,7 +6,7 @@ const KEY = "permits_guide_open";
 /** Compact, collapsed-by-default "how it works" panel for the Permits section. */
 export default function PermitsGuide() {
   const [open, setOpen] = useState<boolean>(() => {
-    try { return localStorage.getItem(KEY) === "1"; } catch { return false; }
+    try { return localStorage.getItem(KEY) !== "0"; } catch { return true; }
   });
   const toggle = () => {
     setOpen((o) => { const n = !o; try { localStorage.setItem(KEY, n ? "1" : "0"); } catch { /* ignore */ } return n; });
