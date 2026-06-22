@@ -2698,21 +2698,27 @@ function MailboxesView({ user }: { user: SdrUser }) {
           </div>
           <div className="mt-3 flex items-center gap-2 text-xs">
             <span className="text-slate-400">Mode:</span>
-            {(["queue", "send"] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => saveSettings({ auto_outreach_mode: mode })}
-                disabled={savingSettings}
-                className={cn(
-                  "rounded-full border px-2.5 py-0.5 font-medium transition-colors disabled:opacity-50",
-                  settings.auto_outreach_mode === mode
-                    ? "border-brand-300 bg-brand-50 text-brand-700"
-                    : "border-slate-200 text-slate-500 hover:bg-slate-50",
-                )}
-              >
-                {mode === "queue" ? "Draft to Queue" : "Auto-send"}
-              </button>
-            ))}
+            {(["queue", "send"] as const).map((mode) => {
+              const comingSoon = mode === "send";
+              return (
+                <button
+                  key={mode}
+                  onClick={() => !comingSoon && saveSettings({ auto_outreach_mode: mode })}
+                  disabled={savingSettings || comingSoon}
+                  title={comingSoon ? "Coming soon — Queue mode is active. Autonomous send isn't wired yet." : undefined}
+                  className={cn(
+                    "rounded-full border px-2.5 py-0.5 font-medium transition-colors",
+                    comingSoon
+                      ? "border-slate-200 text-slate-300 cursor-not-allowed"
+                      : settings.auto_outreach_mode === mode
+                        ? "border-brand-300 bg-brand-50 text-brand-700"
+                        : "border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50",
+                  )}
+                >
+                  {mode === "queue" ? "Draft to Queue" : "Auto-send (soon)"}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
