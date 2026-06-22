@@ -1658,9 +1658,13 @@ function QueueView({
     try {
       await send(false);
     } catch (e) {
-      const err = e as Error & { status?: number; data?: { code?: string; daysAgo?: number; personName?: string } };
-      // Dedup guard: lead already contacted in Pipedrive.
-      if (err.status === 409 && err.data?.code === "already_outreached") {
+      const err = e as Error & { status?: number; data?: { code?: string; daysAgo?: number; personName?: string; mailbox?: string; sentToday?: number; cap?: number; rampDay?: number } };
+      // Warmup ramp: this mailbox hit its daily send cap.
+      if (err.status === 429 && err.data?.code === "daily_cap_reached") {
+        pushToast("error", `Daily cap reached for ${err.data.mailbox} — ${err.data.sentToday}/${err.data.cap} sent (warmup day ${err.data.rampDay}). Cap rises as the inbox warms; try again tomorrow.`);
+        await load();
+      } else if (err.status === 409 && err.data?.code === "already_outreached") {
+        // Dedup guard: lead already contacted in Pipedrive.
         const who = err.data.personName || "This lead";
         const days = err.data.daysAgo ?? "?";
         if (user.role !== "admin") {
@@ -2459,9 +2463,27 @@ function MailboxesView({ user }: { user: SdrUser }) {
                   {m.warmup_status}
                 </span>
               </div>
+              {/* Today's send usage vs the warmup-ramped cap */}
+              <div className="mb-2 rounded-lg bg-slate-50 px-3 py-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-600">Today's sends</span>
+                  <span className={cn("font-mono font-semibold", (m.sent_today ?? 0) >= (m.daily_cap ?? 0) ? "text-rose-600" : "text-slate-800")}>
+                    {m.sent_today ?? 0} / {m.daily_cap ?? 0}
+                  </span>
+                </div>
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                  <div
+                    className={cn("h-full rounded-full", (m.sent_today ?? 0) >= (m.daily_cap ?? 0) ? "bg-rose-500" : "bg-brand-500")}
+                    style={{ width: `${Math.min(100, ((m.sent_today ?? 0) / Math.max(1, m.daily_cap ?? 1)) * 100)}%` }}
+                  />
+                </div>
+                <div className="mt-1 text-[11px] text-slate-400">
+                  Warmup day {m.warmup_day ?? "—"} · ramping to 40/day
+                </div>
+              </div>
               <dl className="text-xs text-slate-500 space-y-0.5">
-                <div className="flex justify-between"><dt>Daily cap</dt><dd className="font-mono text-slate-700">{m.daily_send_limit}</dd></div>
-                <div className="flex justify-between"><dt>Warmup target</dt><dd className="font-mono text-slate-700">{m.warmup_current_cap}/day</dd></div>
+                <div className="flex justify-between"><dt>Today's cap (ramp)</dt><dd className="font-mono text-slate-700">{m.daily_cap ?? "—"}/day</dd></div>
+                <div className="flex justify-between"><dt>Warmup target</dt><dd className="font-mono text-slate-700">40/day</dd></div>
                 <div className="flex justify-between"><dt>Deliverability</dt><dd className="font-mono text-slate-700">{m.deliverability_score ?? "—"}</dd></div>
                 <div className="flex justify-between"><dt>Apollo ID</dt><dd className="font-mono text-slate-700 truncate ml-2">{m.apollo_mailbox_id?.slice(0, 12) || "(unlinked)"}</dd></div>
               </dl>

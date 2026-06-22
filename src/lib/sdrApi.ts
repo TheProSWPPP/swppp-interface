@@ -25,11 +25,15 @@ export interface SdrMailbox {
   daily_send_limit: number;
   warmup_status: "pending" | "warming" | "ready" | "paused" | "disabled";
   warmup_current_cap: number;
+  warmup_started_at: string | null;
   deliverability_score: number | null;
   last_health_check_at: string | null;
   active: boolean;
   created_at: string;
   updated_at: string;
+  sent_today: number;
+  daily_cap: number;
+  warmup_day: number;
 }
 
 export type SdrTriggerType = "AGC" | "LBA" | "CM" | "PB";

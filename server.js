@@ -23,6 +23,7 @@ import { registerPermitRoutes } from "./lib/permitRoutes.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoRefresh } from "./scripts/echo-ingest.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
+import { dailyCap, rampDay, DEFAULT_WARMUP_START } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
@@ -882,6 +883,8 @@ async function initDB() {
       )`);
     await pool.query(`INSERT INTO permit_engine_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
     await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS permit_enabled BOOLEAN NOT NULL DEFAULT FALSE`);
+    // Anchor the warmup ramp to the team go-live for any mailbox without a start date.
+    await pool.query(`UPDATE sdr_mailboxes SET warmup_started_at = $1 WHERE warmup_started_at IS NULL`, [DEFAULT_WARMUP_START]);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS permit_msgp_template (
         id INT PRIMARY KEY DEFAULT 1,
@@ -1088,9 +1091,13 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
     const scope = ownerScope(req.sdrUser, "owner_user_id");
     const params = [];
     let sql = `SELECT id, email, display_name, apollo_mailbox_id, owner_user_id,
-                      daily_send_limit, warmup_status, warmup_current_cap,
+                      daily_send_limit, warmup_status, warmup_current_cap, warmup_started_at,
                       deliverability_score, last_health_check_at, active,
-                      created_at, updated_at
+                      created_at, updated_at,
+                      (SELECT count(*)::int FROM sdr_sends s
+                         WHERE s.mailbox_id = sdr_mailboxes.id
+                           AND (s.sent_at AT TIME ZONE 'America/Chicago')::date
+                               = (now() AT TIME ZONE 'America/Chicago')::date) AS sent_today
                FROM sdr_mailboxes`;
     if (scope.requires) {
       params.push(scope.value);
@@ -1098,7 +1105,13 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
     }
     sql += ` ORDER BY email`;
     const { rows } = await pool.query(sql, params);
-    res.json({ mailboxes: rows });
+    // Attach the ramped daily cap + warmup day so the UI can show "3/5 sent today".
+    const mailboxes = rows.map((m) => ({
+      ...m,
+      daily_cap: dailyCap(m.warmup_started_at || DEFAULT_WARMUP_START),
+      warmup_day: rampDay(m.warmup_started_at || DEFAULT_WARMUP_START),
+    }));
+    res.json({ mailboxes });
   } catch (err) {
     console.error("GET /api/sdr/mailboxes error:", err);
     res.status(500).json({ error: "Failed to list mailboxes" });
@@ -2342,12 +2355,37 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
 
     // Resolve mailbox → apollo_mailbox_id
     const { rows: mbRows } = await pool.query(
-      `SELECT id, email, apollo_mailbox_id FROM sdr_mailboxes WHERE id = $1`,
+      `SELECT id, email, apollo_mailbox_id, warmup_started_at FROM sdr_mailboxes WHERE id = $1`,
       [draft.assigned_mailbox_id],
     );
     const mailbox = mbRows[0];
     if (!mailbox?.apollo_mailbox_id) {
       return res.status(500).json({ error: "Assigned mailbox has no apollo_mailbox_id — run /api/sdr/mailboxes/sync" });
+    }
+
+    // Warmup ramp: enforce the per-mailbox daily send cap (gradual climb to 40).
+    // Protects the warming inboxes — hard cap, no override (adjust the ramp to change it).
+    {
+      const startedAt = mailbox.warmup_started_at || DEFAULT_WARMUP_START;
+      const cap = dailyCap(startedAt);
+      const { rows: cntRows } = await pool.query(
+        `SELECT count(*)::int n FROM sdr_sends
+          WHERE mailbox_id = $1
+            AND (sent_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date`,
+        [mailbox.id],
+      );
+      const sentToday = cntRows[0].n;
+      if (sentToday >= cap) {
+        const day = rampDay(startedAt);
+        return res.status(429).json({
+          code: "daily_cap_reached",
+          mailbox: mailbox.email,
+          sentToday,
+          cap,
+          rampDay: day,
+          message: `Daily send cap reached for ${mailbox.email}: ${sentToday}/${cap} sent today (warmup day ${day}). The cap rises as the inbox warms up — try again tomorrow.`,
+        });
+      }
     }
 
     // Per-lead lock + tx: match Apollo contact, enroll, record send, mark draft sent.
