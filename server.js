@@ -25,6 +25,7 @@ import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { dailyCap, rampDay } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
+import { runAutoOutreach, pruneStaleQueuedDrafts } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
 const { Pool } = pg;
@@ -826,6 +827,40 @@ async function initDB() {
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS lead_score DOUBLE PRECISION`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_status ON sdr_lead_state(outreach_status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_person ON sdr_lead_state(pipedrive_person_id)`);
+    // Who initiated a draft: a human ('manual') or the auto-outreach engine ('automatic').
+    await pool.query(`ALTER TABLE sdr_drafts ADD COLUMN IF NOT EXISTS initiated_by TEXT NOT NULL DEFAULT 'manual'`);
+    // Single-row SDR settings (auto-outreach config). id pinned to 1.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_settings (
+        id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        auto_outreach_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        auto_outreach_mode TEXT NOT NULL DEFAULT 'queue' CHECK (auto_outreach_mode IN ('queue','send')),
+        auto_min_score DOUBLE PRECISION,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by TEXT
+      )
+    `);
+    await pool.query(`INSERT INTO sdr_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+    // Editable first-touch draft copy per trigger. Seeded from the code templates; the
+    // draft generator reads here first and falls back to code, so generation can't break.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_first_touch_templates (
+        trigger_type TEXT PRIMARY KEY CHECK (trigger_type IN ('AGC','LBA','CM','PB')),
+        body TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by TEXT
+      )
+    `);
+    for (const t of ["AGC", "LBA", "CM", "PB"]) {
+      const codeBody = SDR_TEMPLATES[t]?.[0]?.body;
+      if (codeBody) {
+        await pool.query(
+          `INSERT INTO sdr_first_touch_templates (trigger_type, body) VALUES ($1, $2)
+           ON CONFLICT (trigger_type) DO NOTHING`,
+          [t, codeBody],
+        );
+      }
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS nurture_audit (
@@ -917,6 +952,11 @@ async function initDB() {
       )`);
     await pool.query(`INSERT INTO permit_engine_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
     await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS permit_enabled BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS permit_signature TEXT`);
+    // Seed/refresh the three reps' permit sign-offs (only when not already set).
+    await pool.query(`UPDATE sdr_mailboxes SET permit_signature = $2 WHERE lower(email) = $1 AND permit_signature IS NULL`, ['dc@proswppp.co', 'Regards,\nDerek E. Chinners - Founder\nPro SWPPP, LLC\nwww.ProSWPPP.com']);
+    await pool.query(`UPDATE sdr_mailboxes SET permit_signature = $2 WHERE lower(email) = $1 AND permit_signature IS NULL`, ['jg@proswppp.co', 'Regards,\nJosie Godfrey\nPro SWPPP, LLC\nwww.ProSWPPP.com']);
+    await pool.query(`UPDATE sdr_mailboxes SET permit_signature = $2 WHERE lower(email) = $1 AND permit_signature IS NULL`, ['th@proswppp.co', 'Regards,\nTerry Harris\nPro SWPPP, LLC\nwww.ProSWPPP.com']);
     // Warmup ramp anchors to each mailbox's FIRST send (stamped in approve-and-send),
     // so the clock only starts when the team actually begins — no calendar seed here.
     await pool.query(`
@@ -934,15 +974,12 @@ async function initDB() {
         "Action needed: your TXR050000 stormwater permit expires Aug 13",
         `<div style="font-family:Georgia,'Times New Roman',serif;color:#1a5276;font-size:15px;line-height:1.55">
 <p>{{first_name}},</p>
-<p>It's just Derek with <strong>Pro SWPPP</strong>. Our records show your Texas industrial stormwater permit (TXR050000) is set to expire on <strong>August 13, 2026</strong>.</p>
+<p>It's just {{sender_first}} with <strong>Pro SWPPP</strong>. Our records show your Texas industrial stormwater permit (TXR050000) is set to expire on <strong>August 13, 2026</strong>.</p>
 <p>Every operator on this permit renews on the same cycle this year, so the window fills up fast.</p>
 <p>We can handle {{operator}}'s renewal start to finish... the updated SWPPP, the filings, all of it, done before the deadline.</p>
 <p>Want us to take it from here? Just reply and we'll get started.</p>
 <p>We appreciate your business.</p>
-<p style="margin-bottom:0">Regards,</p>
-<p style="margin:0">Derek E. Chinners - Founder</p>
-<p style="margin:0"><strong>Pro SWPPP, LLC</strong></p>
-<p style="margin-top:6px"><a href="https://www.ProSWPPP.com" style="color:#1a5276">www.ProSWPPP.com</a></p>
+<p>{{signature}}</p>
 </div>`,
       ]
     );
@@ -1017,10 +1054,61 @@ initDB();
 if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
   const runSync = () =>
     syncLeadState(pool)
-      .then((r) => console.log("[sync] sdr_lead_state:", JSON.stringify(r)))
+      .then(async (r) => {
+        console.log("[sync] sdr_lead_state:", JSON.stringify(r));
+        // Right after a sync, prune queued drafts whose contact was emailed in Pipedrive
+        // since we drafted them (so a rep never approves an already-contacted lead).
+        try {
+          const pruned = await pruneStaleQueuedDrafts(pool);
+          if (pruned) console.log(`[auto-outreach] pruned ${pruned} stale queued draft(s)`);
+        } catch (e) {
+          console.error("[auto-outreach] prune failed:", e.message);
+        }
+      })
       .catch((e) => console.error("[sync] sdr_lead_state failed:", e.message));
   setTimeout(runSync, 30_000);
   setInterval(runSync, 6 * 60 * 60 * 1000);
+}
+
+// Auto-outreach engine: when enabled (sdr_settings), top-up each active mailbox's daily
+// cap with the highest lead-score eligible leads. Default mode drafts to the Queue for
+// approval. Runs hourly during business hours (America/Chicago) only.
+if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.APOLLO_API_KEY) {
+  const runAuto = () => {
+    const hr = Number(
+      new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", hour12: false }).format(new Date()),
+    );
+    const day = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(new Date());
+    if (hr < 8 || hr >= 17 || day === "Sat" || day === "Sun") return; // business hours only
+    runAutoOutreach(pool, { mailboxSentToday })
+      .then(async (r) => {
+        if (r && r.created) console.log("[auto-outreach]", JSON.stringify({ mode: r.mode, created: r.created, capacity: r.capacity }));
+        // Send mode: enroll each freshly-created draft by calling the SAME approve-and-send
+        // path a human uses (internal HTTP + a short-lived token). Reuses its dedup + cap +
+        // warmup guards untouched; a 409/429 just means a guardrail correctly skipped it.
+        if (r && r.mode === "send" && Array.isArray(r.createdDrafts)) {
+          for (const d of r.createdDrafts) {
+            try {
+              const token = jwt.sign({ sub: d.assigned_user_id, username: "auto-outreach", role: "admin" }, JWT_SECRET, { expiresIn: 300 });
+              const resp = await fetch(`http://127.0.0.1:${port}/api/sdr/drafts/${d.id}/approve-and-send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: "{}",
+              });
+              if (!resp.ok) {
+                const txt = await resp.text();
+                console.warn(`[auto-outreach] enroll skip draft ${d.id}: ${resp.status} ${txt.slice(0, 140)}`);
+              }
+            } catch (e) {
+              console.warn(`[auto-outreach] enroll error draft ${d.id}: ${e.message}`);
+            }
+          }
+        }
+      })
+      .catch((e) => console.error("[auto-outreach] run failed:", e.message));
+  };
+  setTimeout(runAuto, 90_000);
+  setInterval(runAuto, 60 * 60 * 1000);
 }
 
 // Apollo engagement poll: per-lead replies + bounces fed into /api/sdr/events/ingest.
@@ -1193,6 +1281,97 @@ app.patch("/api/sdr/mailboxes/:id", async (req, res) => {
   }
 });
 
+// SDR settings — auto-outreach config (read by anyone signed in; only admins change it).
+app.get("/api/sdr/settings", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const { rows } = await pool.query(`SELECT * FROM sdr_settings WHERE id = 1`);
+    res.json({ settings: rows[0] || { auto_outreach_enabled: false, auto_outreach_mode: "queue", auto_min_score: null } });
+  } catch (err) {
+    console.error("GET /api/sdr/settings error:", err);
+    res.status(500).json({ error: "Failed to load settings" });
+  }
+});
+
+app.patch("/api/sdr/settings", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const { auto_outreach_enabled, auto_outreach_mode, auto_min_score } = req.body || {};
+  if (auto_outreach_mode !== undefined && !["queue", "send"].includes(auto_outreach_mode)) {
+    return res.status(400).json({ error: "auto_outreach_mode must be 'queue' or 'send'" });
+  }
+  try {
+    const { rows } = await pool.query(
+      `UPDATE sdr_settings SET
+         auto_outreach_enabled = COALESCE($1, auto_outreach_enabled),
+         auto_outreach_mode    = COALESCE($2, auto_outreach_mode),
+         auto_min_score        = CASE WHEN $3::text = 'unset' THEN NULL
+                                      WHEN $4::float8 IS NOT NULL THEN $4::float8
+                                      ELSE auto_min_score END,
+         updated_at = NOW(), updated_by = $5
+       WHERE id = 1 RETURNING *`,
+      [
+        typeof auto_outreach_enabled === "boolean" ? auto_outreach_enabled : null,
+        auto_outreach_mode ?? null,
+        auto_min_score === null ? "unset" : null,
+        typeof auto_min_score === "number" ? auto_min_score : null,
+        req.sdrUser?.username || req.sdrUser?.sub,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO nurture_audit (sdr_user, action, target_kind, target_id, summary)
+       VALUES ($1, 'settings.auto_outreach', 'sdr_settings', '1', $2)`,
+      [req.sdrUser?.username || req.sdrUser?.sub, JSON.stringify(rows[0])],
+    ).catch(() => {});
+    res.json({ settings: rows[0] });
+  } catch (err) {
+    console.error("PATCH /api/sdr/settings error:", err);
+    res.status(500).json({ error: "Failed to update settings" });
+  }
+});
+
+// First-touch draft templates (editable copy that buildDraftFromLead uses). Read by any
+// signed-in user; only admins edit. Merge fields: {First} {ENV} {SWPPP} {Sig}.
+app.get("/api/sdr/first-touch-templates", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const { rows } = await pool.query(`SELECT trigger_type, body, updated_at, updated_by FROM sdr_first_touch_templates`);
+    const byTrigger = {};
+    for (const r of rows) byTrigger[r.trigger_type] = r;
+    res.json({ templates: byTrigger });
+  } catch (err) {
+    console.error("GET /api/sdr/first-touch-templates error:", err);
+    res.status(500).json({ error: "Failed to load first-touch templates" });
+  }
+});
+
+app.put("/api/sdr/first-touch-templates/:trigger", express.json({ limit: "256kb" }), async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const trigger = String(req.params.trigger || "").toUpperCase();
+  if (!["AGC", "LBA", "CM", "PB"].includes(trigger)) return res.status(400).json({ error: "Invalid trigger" });
+  const { body } = req.body || {};
+  if (typeof body !== "string" || !body.trim()) return res.status(400).json({ error: "body (non-empty string) required" });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO sdr_first_touch_templates (trigger_type, body, updated_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (trigger_type) DO UPDATE SET body = EXCLUDED.body, updated_at = NOW(), updated_by = EXCLUDED.updated_by
+       RETURNING trigger_type, body, updated_at, updated_by`,
+      [trigger, body, req.sdrUser?.username || req.sdrUser?.sub],
+    );
+    await pool.query(
+      `INSERT INTO nurture_audit (sdr_user, action, target_kind, target_id, summary)
+       VALUES ($1, 'first_touch.update', 'sdr_first_touch_template', $2, $3)`,
+      [req.sdrUser?.username || req.sdrUser?.sub, trigger, `${body.length} chars`],
+    ).catch(() => {});
+    res.json({ template: rows[0] });
+  } catch (err) {
+    console.error("PUT /api/sdr/first-touch-templates error:", err);
+    res.status(500).json({ error: "Failed to save first-touch template" });
+  }
+});
+
 // SDR lead-state — mirror of Pipedrive outreach state. Read by the interface to show
 // who's already been contacted (dedup). Newest sync first; optional ?status= and ?q= filters.
 // Whitelist of sortable columns (guards against SQL injection via ?sort=).
@@ -1257,6 +1436,7 @@ app.get("/api/sdr/leads", async (req, res) => {
                   ELSE FLOOR(EXTRACT(EPOCH FROM (NOW() - s.last_outgoing_mail_time)) / 86400)::int END AS days_since_outgoing,
              ob.outreached_by,
              ob.outreached_status,
+             ob.initiated_by,
              snd.send_status,
              snd.send_sequence_id,
              snd.sent_at AS send_sent_at,
@@ -1266,7 +1446,8 @@ app.get("/api/sdr/leads", async (req, res) => {
              COUNT(*) OVER() AS _total
       FROM sdr_lead_state s
       LEFT JOIN LATERAL (
-        SELECT COALESCE(u.display_name, u.username) AS outreached_by, d.status AS outreached_status
+        SELECT COALESCE(u.display_name, u.username) AS outreached_by, d.status AS outreached_status,
+               d.initiated_by
         FROM sdr_drafts d
         LEFT JOIN sdr_users u ON u.id = d.assigned_user_id
         WHERE d.pipedrive_lead_id = s.pipedrive_lead_id
