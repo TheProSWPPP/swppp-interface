@@ -181,6 +181,13 @@ export interface SdrSequence {
   steps: SdrSequenceStep[];
 }
 
+export interface SdrFirstTouchTemplate {
+  trigger_type: SdrTriggerType;
+  body: string;
+  updated_at?: string | null;
+  updated_by?: string | null;
+}
+
 export interface SdrSettings {
   auto_outreach_enabled: boolean;
   auto_outreach_mode: "queue" | "send";
@@ -299,6 +306,15 @@ export const sdrApi = {
       `/api/sdr/mailboxes/${id}`,
       { method: "PATCH", body: JSON.stringify({ active }) },
     ),
+
+  getFirstTouchTemplates: () =>
+    sdrFetch<{ templates: Record<SdrTriggerType, SdrFirstTouchTemplate> }>("/api/sdr/first-touch-templates"),
+
+  updateFirstTouchTemplate: (trigger: SdrTriggerType, body: string) =>
+    sdrFetch<{ template: SdrFirstTouchTemplate }>(`/api/sdr/first-touch-templates/${trigger}`, {
+      method: "PUT",
+      body: JSON.stringify({ body }),
+    }),
 
   getSettings: () => sdrFetch<{ settings: SdrSettings }>("/api/sdr/settings"),
 

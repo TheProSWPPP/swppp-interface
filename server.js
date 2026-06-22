@@ -841,6 +841,26 @@ async function initDB() {
       )
     `);
     await pool.query(`INSERT INTO sdr_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+    // Editable first-touch draft copy per trigger. Seeded from the code templates; the
+    // draft generator reads here first and falls back to code, so generation can't break.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_first_touch_templates (
+        trigger_type TEXT PRIMARY KEY CHECK (trigger_type IN ('AGC','LBA','CM','PB')),
+        body TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by TEXT
+      )
+    `);
+    for (const t of ["AGC", "LBA", "CM", "PB"]) {
+      const codeBody = SDR_TEMPLATES[t]?.[0]?.body;
+      if (codeBody) {
+        await pool.query(
+          `INSERT INTO sdr_first_touch_templates (trigger_type, body) VALUES ($1, $2)
+           ON CONFLICT (trigger_type) DO NOTHING`,
+          [t, codeBody],
+        );
+      }
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS nurture_audit (
@@ -1284,6 +1304,48 @@ app.patch("/api/sdr/settings", async (req, res) => {
   } catch (err) {
     console.error("PATCH /api/sdr/settings error:", err);
     res.status(500).json({ error: "Failed to update settings" });
+  }
+});
+
+// First-touch draft templates (editable copy that buildDraftFromLead uses). Read by any
+// signed-in user; only admins edit. Merge fields: {First} {ENV} {SWPPP} {Sig}.
+app.get("/api/sdr/first-touch-templates", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const { rows } = await pool.query(`SELECT trigger_type, body, updated_at, updated_by FROM sdr_first_touch_templates`);
+    const byTrigger = {};
+    for (const r of rows) byTrigger[r.trigger_type] = r;
+    res.json({ templates: byTrigger });
+  } catch (err) {
+    console.error("GET /api/sdr/first-touch-templates error:", err);
+    res.status(500).json({ error: "Failed to load first-touch templates" });
+  }
+});
+
+app.put("/api/sdr/first-touch-templates/:trigger", express.json({ limit: "256kb" }), async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const trigger = String(req.params.trigger || "").toUpperCase();
+  if (!["AGC", "LBA", "CM", "PB"].includes(trigger)) return res.status(400).json({ error: "Invalid trigger" });
+  const { body } = req.body || {};
+  if (typeof body !== "string" || !body.trim()) return res.status(400).json({ error: "body (non-empty string) required" });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO sdr_first_touch_templates (trigger_type, body, updated_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (trigger_type) DO UPDATE SET body = EXCLUDED.body, updated_at = NOW(), updated_by = EXCLUDED.updated_by
+       RETURNING trigger_type, body, updated_at, updated_by`,
+      [trigger, body, req.sdrUser?.username || req.sdrUser?.sub],
+    );
+    await pool.query(
+      `INSERT INTO nurture_audit (sdr_user, action, target_kind, target_id, summary)
+       VALUES ($1, 'first_touch.update', 'sdr_first_touch_template', $2, $3)`,
+      [req.sdrUser?.username || req.sdrUser?.sub, trigger, `${body.length} chars`],
+    ).catch(() => {});
+    res.json({ template: rows[0] });
+  } catch (err) {
+    console.error("PUT /api/sdr/first-touch-templates error:", err);
+    res.status(500).json({ error: "Failed to save first-touch template" });
   }
 });
 
