@@ -12,11 +12,11 @@ type FunnelStage = "pool" | "promoted" | "enriched" | "mailed";
 type Stage = "all" | FunnelStage;
 type Compliance = "all" | "violation" | "snc";
 
-const STAGE_LABELS: { key: FunnelStage; label: string }[] = [
-  { key: "pool", label: "Pool" },
-  { key: "promoted", label: "Promoted" },
-  { key: "enriched", label: "Enriched" },
-  { key: "mailed", label: "Mailed" },
+const STAGE_LABELS: { key: FunnelStage; label: string; tip: string }[] = [
+  { key: "pool", label: "All", tip: "Every company — not started yet" },
+  { key: "promoted", label: "Picked", tip: "Companies you've picked to work" },
+  { key: "enriched", label: "Address ready", tip: "Mailing address pulled — ready for the CSV" },
+  { key: "mailed", label: "Mailed", tip: "Already mailed or exported" },
 ];
 
 const PAGE_SIZE = 50;
@@ -107,7 +107,7 @@ export default function OperatorWorkspace({
 
   const [stage, setStage] = useState<Stage>("all");
   const [compliance, setCompliance] = useState<Compliance>("all");
-  const [hideContacted, setHideContacted] = useState(false);
+  const [hideContacted, setHideContacted] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
@@ -184,11 +184,12 @@ export default function OperatorWorkspace({
     <div className="space-y-4">
       {/* ── Funnel header ── */}
       <div className="flex flex-wrap items-center gap-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-        {STAGE_LABELS.map(({ key, label }, i) => (
+        {STAGE_LABELS.map(({ key, label, tip }, i) => (
           <span key={key} className="flex items-center gap-1">
             {i > 0 && <ChevronRight className="h-4 w-4 text-slate-400" />}
             <button
               onClick={() => setStage((s) => (s === key ? "all" : key))}
+              title={tip}
               className={`rounded-full px-3 py-1 text-sm font-semibold transition-colors ${
                 stage === key
                   ? "bg-indigo-600 text-white"
@@ -257,21 +258,34 @@ export default function OperatorWorkspace({
             <Sparkles className="h-4 w-4" />
             {enriching ? "Enriching…" : "Enrich promoted (up to 50)"}
           </button>
-          <a
-            href={permitApi.directMailCsvUrl()}
-            className="flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50"
-          >
-            <Download className="h-4 w-4" /> Download CSV
-          </a>
+          {counts.enriched === 0 ? (
+            <button
+              disabled
+              title="Get mailing addresses first — click Enrich"
+              className="flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl border border-slate-200 opacity-50 cursor-not-allowed"
+            >
+              <Download className="h-4 w-4" /> Download mailing list ({counts.enriched.toLocaleString()})
+            </button>
+          ) : (
+            <a
+              href={permitApi.directMailCsvUrl()}
+              className="flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50"
+            >
+              <Download className="h-4 w-4" /> Download mailing list ({counts.enriched.toLocaleString()})
+            </a>
+          )}
         </div>
       </div>
+
+      {/* ── Sort hint ── */}
+      <p className="text-xs text-slate-400">Sorted: hottest (most non-compliant) first</p>
 
       {/* ── Operator table ── */}
       <div className="overflow-x-auto rounded-2xl border border-slate-200">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500">
             <tr>
-              <th className="text-left p-2">Operator</th>
+              <th className="text-left p-2">Company</th>
               <th className="text-right p-2">Permits</th>
               <th className="text-left p-2">Compliance</th>
               <th className="text-right p-2">Expiry</th>

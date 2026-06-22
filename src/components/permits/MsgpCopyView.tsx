@@ -8,6 +8,8 @@ const MERGE_TAGS = [
   { label: "Operator",   token: "{{operator}}" },
   { label: "Permit #",   token: "{{permit}}" },
   { label: "Expiry",     token: "{{expires}}" },
+  { label: "Sender name", token: "{{sender_first}}" },
+  { label: "Signature",   token: "{{signature}}" },
 ] as const;
 
 export default function MsgpCopyView({ pushToast }: { pushToast?: (m: string, k?: "success" | "error") => void }) {
@@ -100,6 +102,7 @@ export default function MsgpCopyView({ pushToast }: { pushToast?: (m: string, k?
           </button>
         ))}
         <span className="text-xs text-slate-400 italic">Tokens like {"{{first_name}}"} are filled per recipient at send time.</span>
+        <span className="text-xs text-slate-400 italic">{"{{sender_first}}"} and {"{{signature}}"} fill automatically with whoever sends — Derek, Josie, or Terry.</span>
       </div>
 
       {/* Body editor + source toggle */}
