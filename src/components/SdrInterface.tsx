@@ -583,7 +583,8 @@ type LeadSortKey =
   | "trigger_type"
   | "last_contact"
   | "bid_date"
-  | "start_date";
+  | "start_date"
+  | "lead_score";
 
 // Apollo sequence id → trigger label, for showing which sequence a lead is in.
 const SEQUENCE_LABEL: Record<string, string> = {
@@ -909,12 +910,13 @@ function LeadsView({
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] border-collapse text-left">
+            <table className="w-full min-w-[1260px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <LeadTh label="Company / Project" sortKey="lead_title" sort={sort} dir={dir} onSort={toggleSort} />
                   <th className="px-4 py-3">Contact</th>
                   <LeadTh label="Stage" sortKey="project_stage" sort={sort} dir={dir} onSort={toggleSort} />
+                  <LeadTh label="Score" sortKey="lead_score" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Bid date" sortKey="bid_date" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Start date" sortKey="start_date" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Contact status" sortKey="outreach_status" sort={sort} dir={dir} onSort={toggleSort} />
@@ -1124,6 +1126,10 @@ function LeadDetailDrawer({
                 <DrawerField label="Contact" value={lead?.person_name} />
                 <DrawerField label="Email" value={lead?.person_email} />
                 <DrawerField label="Trigger" value={lead?.trigger_type} />
+                <DrawerField
+                  label="Lead score"
+                  value={typeof lead?.lead_score === "number" ? String(Math.round(lead.lead_score)) : "—"}
+                />
                 <DrawerField label="Contact status" value={lead?.outreach_status} />
                 <DrawerField label="Bid date" value={formatDate(lead?.bid_date ?? null)} />
                 <DrawerField label="Start date" value={formatDate(lead?.start_date ?? null)} />
@@ -1504,6 +1510,27 @@ function LeadRow({
       </td>
       {/* Stage */}
       <td className="px-4 py-3 align-top text-slate-600">{lead.project_stage || "—"}</td>
+      {/* Lead score (Pipedrive) — priority signal */}
+      <td className="px-4 py-3 align-top whitespace-nowrap">
+        {lead.lead_score == null ? (
+          <span className="text-slate-300">—</span>
+        ) : (
+          <span
+            className={`inline-flex min-w-[2.25rem] justify-center rounded px-2 py-0.5 text-xs font-semibold tabular-nums ${
+              lead.lead_score >= 40
+                ? "bg-emerald-100 text-emerald-700"
+                : lead.lead_score >= 20
+                  ? "bg-amber-100 text-amber-700"
+                  : lead.lead_score >= 0
+                    ? "bg-slate-100 text-slate-600"
+                    : "bg-slate-50 text-slate-400"
+            }`}
+            title="Pipedrive Lead Score"
+          >
+            {Math.round(lead.lead_score)}
+          </span>
+        )}
+      </td>
       {/* Bid date */}
       <td className="px-4 py-3 align-top whitespace-nowrap text-slate-600">{formatDate(lead.bid_date)}</td>
       {/* Start date */}
