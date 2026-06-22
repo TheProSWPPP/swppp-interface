@@ -49,6 +49,7 @@ import {
   type SdrMailbox,
   type SdrSequence,
   type SdrSequenceStep,
+  type SdrSettings,
   type SdrTemplate,
   type SdrTriggerType,
   type SdrUser,
@@ -1604,8 +1605,11 @@ function LeadRow({
           status badge + "Contact last emailed" column). */}
       <td className="px-4 py-3 align-top text-slate-600">
         {lead.outreached_by ? (
-          <span title="Outreached via this interface">
-            {lead.outreached_by} <span className="text-xs text-slate-400">· via interface</span>
+          <span title={lead.initiated_by === "automatic" ? "Auto-outreached by the engine" : "Outreached manually via this interface"}>
+            {lead.outreached_by}{" "}
+            <span className="text-xs text-slate-400">
+              · {lead.initiated_by === "automatic" ? "auto" : "manual"}
+            </span>
           </span>
         ) : lead.owner_name ? (
           <span
@@ -2594,6 +2598,8 @@ function MailboxesView({ user }: { user: SdrUser }) {
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<SdrSettings | null>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -2602,11 +2608,31 @@ function MailboxesView({ user }: { user: SdrUser }) {
     } catch (e) {
       setError((e as Error).message);
     }
+    try {
+      const s = await sdrApi.getSettings();
+      setSettings(s.settings);
+    } catch {
+      /* settings are best-effort */
+    }
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  async function saveSettings(patch: Partial<SdrSettings>) {
+    setSavingSettings(true);
+    setSettings((prev) => (prev ? { ...prev, ...patch } : prev)); // optimistic
+    try {
+      const r = await sdrApi.updateSettings(patch);
+      setSettings(r.settings);
+    } catch (e) {
+      setError((e as Error).message);
+      await load();
+    } finally {
+      setSavingSettings(false);
+    }
+  }
 
   async function sync() {
     setSyncing(true);
@@ -2638,6 +2664,65 @@ function MailboxesView({ user }: { user: SdrUser }) {
 
   return (
     <div>
+      {user.role === "admin" && settings && (
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Auto-outreach</div>
+              <p className="mt-0.5 text-xs text-slate-500 max-w-xl">
+                When on, the system fills each active mailbox's daily cap with the highest lead-score leads (fresh, with a
+                trigger), rotating senders. {settings.auto_outreach_mode === "send"
+                  ? "Sends automatically (still capped by the warmup ramp + dedup)."
+                  : "Drafts land in the Queue for approval before anything sends."}{" "}
+                Stale queued drafts auto-clear if the contact gets emailed in Pipedrive.
+              </p>
+            </div>
+            <button
+              onClick={() => saveSettings({ auto_outreach_enabled: !settings.auto_outreach_enabled })}
+              disabled={savingSettings}
+              role="switch"
+              aria-checked={settings.auto_outreach_enabled}
+              className={cn(
+                "relative h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:opacity-50",
+                settings.auto_outreach_enabled ? "bg-cta-500" : "bg-slate-300",
+              )}
+              title={settings.auto_outreach_enabled ? "Turn auto-outreach off" : "Turn auto-outreach on"}
+            >
+              <span
+                className={cn(
+                  "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
+                  settings.auto_outreach_enabled && "translate-x-5",
+                )}
+              />
+            </button>
+          </div>
+          <div className="mt-3 flex items-center gap-2 text-xs">
+            <span className="text-slate-400">Mode:</span>
+            {(["queue", "send"] as const).map((mode) => {
+              const comingSoon = mode === "send";
+              return (
+                <button
+                  key={mode}
+                  onClick={() => !comingSoon && saveSettings({ auto_outreach_mode: mode })}
+                  disabled={savingSettings || comingSoon}
+                  title={comingSoon ? "Coming soon — Queue mode is active. Autonomous send isn't wired yet." : undefined}
+                  className={cn(
+                    "rounded-full border px-2.5 py-0.5 font-medium transition-colors",
+                    comingSoon
+                      ? "border-slate-200 text-slate-300 cursor-not-allowed"
+                      : settings.auto_outreach_mode === mode
+                        ? "border-brand-300 bg-brand-50 text-brand-700"
+                        : "border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50",
+                  )}
+                >
+                  {mode === "queue" ? "Draft to Queue" : "Auto-send (soon)"}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {user.role === "admin" && (
         <div className="flex items-center justify-end gap-3 mb-3">
           {syncError && <span className="text-xs text-rose-600">Sync failed: {syncError}</span>}
