@@ -49,6 +49,7 @@ import {
   type SdrMailbox,
   type SdrSequence,
   type SdrSequenceStep,
+  type SdrSettings,
   type SdrTemplate,
   type SdrTriggerType,
   type SdrUser,
@@ -452,8 +453,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />} badge={hotCount}>Priority</TabButton>
             <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
             <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
-            <TabButton current={tab} value="templates" onClick={setTab} icon={<SettingsIcon className="h-4 w-4" />}>Templates</TabButton>
-            <TabButton current={tab} value="sequences" onClick={setTab} icon={<ListChecks className="h-4 w-4" />}>Sequences</TabButton>
+            <TabButton current={tab} value="templates" onClick={setTab} icon={<ListChecks className="h-4 w-4" />}>Messaging</TabButton>
             <TabButton current={tab} value="permits" onClick={setTab} icon={<FileSearch className="h-4 w-4" />}>Permits</TabButton>
           </div>
           {tab === "leads" && <LeadsView user={user} pushToast={push} onGenerated={() => setTab("queue")} />}
@@ -461,8 +461,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {tab === "engaged" && <EngagedView pushToast={push} />}
           {tab === "dashboard" && <DashboardView />}
           {tab === "mailboxes" && <MailboxesView user={user} />}
-          {tab === "templates" && <TemplatesView />}
-          {tab === "sequences" && <SequencesView user={user} pushToast={push} />}
+          {(tab === "templates" || tab === "sequences") && <MessagingView user={user} pushToast={push} />}
           {tab === "permits" && <PermitsTab pushToast={(m, k) => push(k ?? "success", m)} />}
         </>
       ) : (
@@ -1604,8 +1603,11 @@ function LeadRow({
           status badge + "Contact last emailed" column). */}
       <td className="px-4 py-3 align-top text-slate-600">
         {lead.outreached_by ? (
-          <span title="Outreached via this interface">
-            {lead.outreached_by} <span className="text-xs text-slate-400">· via interface</span>
+          <span title={lead.initiated_by === "automatic" ? "Auto-outreached by the engine" : "Outreached manually via this interface"}>
+            {lead.outreached_by}{" "}
+            <span className="text-xs text-slate-400">
+              · {lead.initiated_by === "automatic" ? "auto" : "manual"}
+            </span>
           </span>
         ) : lead.owner_name ? (
           <span
@@ -2594,6 +2596,8 @@ function MailboxesView({ user }: { user: SdrUser }) {
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<SdrSettings | null>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -2602,11 +2606,31 @@ function MailboxesView({ user }: { user: SdrUser }) {
     } catch (e) {
       setError((e as Error).message);
     }
+    try {
+      const s = await sdrApi.getSettings();
+      setSettings(s.settings);
+    } catch {
+      /* settings are best-effort */
+    }
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  async function saveSettings(patch: Partial<SdrSettings>) {
+    setSavingSettings(true);
+    setSettings((prev) => (prev ? { ...prev, ...patch } : prev)); // optimistic
+    try {
+      const r = await sdrApi.updateSettings(patch);
+      setSettings(r.settings);
+    } catch (e) {
+      setError((e as Error).message);
+      await load();
+    } finally {
+      setSavingSettings(false);
+    }
+  }
 
   async function sync() {
     setSyncing(true);
@@ -2638,6 +2662,67 @@ function MailboxesView({ user }: { user: SdrUser }) {
 
   return (
     <div>
+      {user.role === "admin" && settings && (
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Auto-outreach</div>
+              <p className="mt-0.5 text-xs text-slate-500 max-w-xl">
+                When on, the system fills each active mailbox's daily cap with the highest lead-score leads (fresh, with a
+                trigger), rotating senders. {settings.auto_outreach_mode === "send"
+                  ? "Sends automatically (still capped by the warmup ramp + dedup)."
+                  : "Drafts land in the Queue for approval before anything sends."}{" "}
+                Stale queued drafts auto-clear if the contact gets emailed in Pipedrive.
+              </p>
+            </div>
+            <button
+              onClick={() => saveSettings({ auto_outreach_enabled: !settings.auto_outreach_enabled })}
+              disabled={savingSettings}
+              role="switch"
+              aria-checked={settings.auto_outreach_enabled}
+              className={cn(
+                "relative h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:opacity-50",
+                settings.auto_outreach_enabled ? "bg-cta-500" : "bg-slate-300",
+              )}
+              title={settings.auto_outreach_enabled ? "Turn auto-outreach off" : "Turn auto-outreach on"}
+            >
+              <span
+                className={cn(
+                  "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
+                  settings.auto_outreach_enabled && "translate-x-5",
+                )}
+              />
+            </button>
+          </div>
+          <div className="mt-3 flex items-center gap-2 text-xs">
+            <span className="text-slate-400">Mode:</span>
+            {(["queue", "send"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => saveSettings({ auto_outreach_mode: mode })}
+                disabled={savingSettings}
+                title={mode === "send" ? "Enrolls automatically (no human step), still capped by the warmup ramp + dedup" : "Drafts land in the Queue for approval before sending"}
+                className={cn(
+                  "rounded-full border px-2.5 py-0.5 font-medium transition-colors disabled:opacity-50",
+                  settings.auto_outreach_mode === mode
+                    ? mode === "send"
+                      ? "border-cta-300 bg-cta-50 text-cta-700"
+                      : "border-brand-300 bg-brand-50 text-brand-700"
+                    : "border-slate-200 text-slate-500 hover:bg-slate-50",
+                )}
+              >
+                {mode === "queue" ? "Draft to Queue" : "Auto-send"}
+              </button>
+            ))}
+          </div>
+          {settings.auto_outreach_enabled && settings.auto_outreach_mode === "send" && (
+            <p className="mt-2 text-[11px] text-cta-700">
+              Auto-send is on — eligible leads enroll automatically during business hours, capped by each mailbox's warmup ramp.
+            </p>
+          )}
+        </div>
+      )}
+
       {user.role === "admin" && (
         <div className="flex items-center justify-end gap-3 mb-3">
           {syncError && <span className="text-xs text-rose-600">Sync failed: {syncError}</span>}
@@ -2741,54 +2826,104 @@ function MailboxesView({ user }: { user: SdrUser }) {
 }
 
 // --------------------------------------------------------------------------
-// Templates (read-only preview)
+// Messaging — editable first-touch drafts + the live Apollo sequences in one place.
 // --------------------------------------------------------------------------
 
-function TemplatesView() {
-  const [templates, setTemplates] = useState<Record<SdrTriggerType, SdrTemplate> | null>(null);
+const TRIGGER_ORDER: SdrTriggerType[] = ["AGC", "LBA", "CM", "PB"];
+
+function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "success" | "error", t: string) => void }) {
+  const [templates, setTemplates] = useState<Record<SdrTriggerType, SdrFirstTouchTemplate> | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isAdmin = user.role === "admin";
 
   useEffect(() => {
     sdrApi
-      .listTemplates()
-      .then((d) => setTemplates(d.templates))
+      .getFirstTouchTemplates()
+      .then((d) => {
+        setTemplates(d.templates);
+        const init: Record<string, string> = {};
+        (Object.keys(d.templates) as SdrTriggerType[]).forEach((t) => {
+          init[t] = d.templates[t].body;
+        });
+        setDrafts(init);
+      })
       .catch((e) => setError(e.message));
   }, []);
 
-  if (error)
-    return <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>;
-  if (!templates) return <div className="text-center text-slate-400 py-12">Loading…</div>;
+  async function save(t: SdrTriggerType) {
+    setSaving(t);
+    try {
+      const r = await sdrApi.updateFirstTouchTemplate(t, drafts[t]);
+      setTemplates((prev) => (prev ? { ...prev, [t]: r.template } : prev));
+      pushToast("success", `${t} first-touch saved`);
+    } catch (e) {
+      pushToast("error", (e as Error).message);
+    } finally {
+      setSaving(null);
+    }
+  }
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-slate-600">
-        Read-only view of the templates that get rendered as Day-0 drafts. Apollo sequences (configured in Apollo's UI) handle Day 3 / Day 6 follow-ups for the AGC, LBA, CM triggers — PB is single-touch.
-      </p>
-      {(Object.keys(templates) as SdrTriggerType[]).map((t) => (
-        <div key={t} className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 flex-wrap">
-            <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset", TRIGGER_COLORS[t])}>{t}</span>
-            <span className="text-sm font-semibold text-slate-900">{TRIGGER_LABELS[t]}</span>
-            <span className="text-xs text-slate-500">— {templates[t].steps.length} step{templates[t].steps.length === 1 ? "" : "s"}</span>
-            <span className="ml-auto text-xs text-slate-500">
-              Subject: <span className="font-mono text-slate-700">{templates[t].default_subject}</span>
-            </span>
-          </div>
-          <ul className="divide-y divide-slate-100">
-            {templates[t].steps.map((step, i) => (
-              <li key={i} className="px-4 py-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
-                    Day {step.day}
-                  </span>
-                  {i === 0 && <span className="text-[10px] text-slate-400">sent as the draft — steps below live in Apollo</span>}
-                </div>
-                <pre className="text-xs text-slate-700 whitespace-pre-wrap font-mono bg-slate-50 rounded-lg px-3 py-2">{step.body}</pre>
-              </li>
-            ))}
-          </ul>
+    <div className="space-y-8">
+      <section className="space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">First-touch drafts</h3>
+          <p className="mt-0.5 text-xs text-slate-500">
+            The Day-0 copy generated for each lead. Merge fields:{" "}
+            <span className="font-mono text-slate-600">{"{First} {ENV} {SWPPP} {Sig}"}</span>.{" "}
+            {isAdmin ? "Edit and save — applies to new drafts immediately." : "Ask Derek to edit these."}
+          </p>
         </div>
-      ))}
+        {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+        {!templates ? (
+          <div className="py-8 text-center text-slate-400">Loading…</div>
+        ) : (
+          TRIGGER_ORDER.filter((t) => templates[t]).map((t) => {
+            const dirty = drafts[t] !== templates[t].body;
+            return (
+              <div key={t} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+                  <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset", TRIGGER_COLORS[t])}>{t}</span>
+                  <span className="text-sm font-semibold text-slate-900">{TRIGGER_LABELS[t]}</span>
+                  {isAdmin && (
+                    <button
+                      onClick={() => save(t)}
+                      disabled={!dirty || saving === t}
+                      className={cn(
+                        "ml-auto rounded-lg px-3 py-1 text-xs font-semibold transition-colors",
+                        dirty ? "bg-cta-500 text-white hover:bg-cta-600" : "bg-slate-100 text-slate-400",
+                      )}
+                    >
+                      {saving === t ? "Saving…" : dirty ? "Save" : "Saved"}
+                    </button>
+                  )}
+                </div>
+                <div className="p-4">
+                  <textarea
+                    value={drafts[t] ?? ""}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [t]: e.target.value }))}
+                    readOnly={!isAdmin}
+                    rows={8}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700 focus:border-brand-400 focus:outline-none"
+                  />
+                </div>
+              </div>
+            );
+          })
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Apollo sequences</h3>
+          <p className="mt-0.5 text-xs text-slate-500">
+            The live multi-step campaigns. Step 1 sends the first-touch draft above; later steps are the follow-ups.
+          </p>
+        </div>
+        <SequencesView user={user} pushToast={pushToast} />
+      </section>
     </div>
   );
 }
