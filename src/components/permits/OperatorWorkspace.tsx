@@ -171,6 +171,14 @@ export default function OperatorWorkspace({
   const total = data?.total ?? 0;
   const operators = data?.operators ?? [];
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const complianceRefreshed = data?.compliance_last_refreshed ?? null;
+
+  // Determine freshness: stale if older than 30 days from today
+  const complianceFreshnessClass = (() => {
+    if (!complianceRefreshed) return null;
+    const diffMs = Date.now() - new Date(complianceRefreshed).getTime();
+    return diffMs > 30 * 24 * 60 * 60 * 1000 ? "text-amber-500" : "text-slate-500";
+  })();
 
   return (
     <div className="space-y-4">
@@ -195,6 +203,17 @@ export default function OperatorWorkspace({
           </span>
         ))}
       </div>
+
+      {/* ── Compliance freshness ── */}
+      {complianceRefreshed === null && data && (
+        <p className="text-xs text-slate-500">Compliance data: not yet scored</p>
+      )}
+      {complianceRefreshed && (
+        <p className={`text-xs ${complianceFreshnessClass}`}>
+          Compliance data refreshed: {complianceRefreshed}
+          {complianceFreshnessClass === "text-amber-500" && " (may be stale — run a refresh)"}
+        </p>
+      )}
 
       {/* ── Filter / action bar ── */}
       <div className="flex flex-wrap items-center gap-3">
