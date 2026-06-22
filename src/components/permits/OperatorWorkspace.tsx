@@ -113,7 +113,8 @@ export default function OperatorWorkspace({
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
-  // Debounce search
+  // Keep a ref so `load` can always read the latest search without being
+  // re-created every keystroke (avoids cascading effect re-runs).
   const searchRef = useRef(search);
   searchRef.current = search;
 
@@ -135,14 +136,23 @@ export default function OperatorWorkspace({
     [stage, compliance, hideContacted, page, pushToast],
   );
 
+  // Non-search filters + page: reload whenever these change
   useEffect(() => {
     load(page);
   }, [load]);
 
-  // Reset page to 1 on filter changes (not on page changes)
+  // Debounced search: 300ms after the user stops typing, reset to page 1 and load
   useEffect(() => {
-    setPage(1);
-  }, [stage, compliance, hideContacted, search]);
+    const t = setTimeout(() => {
+      setPage((prev) => {
+        // If already on page 1, `load` dep won't change — call load directly
+        if (prev === 1) { load(1); return 1; }
+        return 1; // changing page triggers the load effect above
+      });
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   async function runEnrich() {
     setEnriching(true);
@@ -161,6 +171,14 @@ export default function OperatorWorkspace({
   const total = data?.total ?? 0;
   const operators = data?.operators ?? [];
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const complianceRefreshed = data?.compliance_last_refreshed ?? null;
+
+  // Determine freshness: stale if older than 30 days from today
+  const complianceFreshnessClass = (() => {
+    if (!complianceRefreshed) return null;
+    const diffMs = Date.now() - new Date(complianceRefreshed).getTime();
+    return diffMs > 30 * 24 * 60 * 60 * 1000 ? "text-amber-500" : "text-slate-500";
+  })();
 
   return (
     <div className="space-y-4">
@@ -185,6 +203,17 @@ export default function OperatorWorkspace({
           </span>
         ))}
       </div>
+
+      {/* ── Compliance freshness ── */}
+      {complianceRefreshed === null && data && (
+        <p className="text-xs text-slate-500">Compliance data: not yet scored</p>
+      )}
+      {complianceRefreshed && (
+        <p className={`text-xs ${complianceFreshnessClass}`}>
+          Compliance data refreshed: {complianceRefreshed}
+          {complianceFreshnessClass === "text-amber-500" && " (may be stale — run a refresh)"}
+        </p>
+      )}
 
       {/* ── Filter / action bar ── */}
       <div className="flex flex-wrap items-center gap-3">
@@ -221,11 +250,12 @@ export default function OperatorWorkspace({
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={runEnrich}
-            disabled={enriching}
+            disabled={enriching || counts.promoted === 0}
+            title={counts.promoted === 0 ? "Promote operators first" : undefined}
             className="flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             <Sparkles className="h-4 w-4" />
-            {enriching ? "Enriching…" : "Run enrichment (50)"}
+            {enriching ? "Enriching…" : "Enrich promoted (up to 50)"}
           </button>
           <a
             href={permitApi.directMailCsvUrl()}

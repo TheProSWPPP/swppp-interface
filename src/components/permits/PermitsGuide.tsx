@@ -56,7 +56,7 @@ export default function PermitsGuide() {
               to say yes. So they float to the top with a red badge:
             </p>
             <ul className="mt-2 space-y-1">
-              <li><Badge className="bg-red-100 text-red-700">⚠ Significant</Badge> <span className="ml-1">Worst offenders — start here.</span></li>
+              <li><Badge className="bg-red-100 text-red-700">⚠ Significant noncompliance</Badge> <span className="ml-1">Worst offenders — start here.</span></li>
               <li><Badge className="bg-orange-100 text-orange-700">⚠ In violation</Badge> <span className="ml-1">Currently flagged by the EPA.</span></li>
               <li><Badge className="bg-amber-100 text-amber-700">Inspected</Badge> <span className="ml-1">On the regulator's radar (inspected recently).</span></li>
               <li><Badge className="bg-slate-100 text-slate-500">—</Badge> <span className="ml-1">Clean record (still a valid lead, just less urgent).</span></li>

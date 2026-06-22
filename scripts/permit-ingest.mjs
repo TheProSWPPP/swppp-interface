@@ -48,7 +48,8 @@ export async function runPermitIngest(pool, { log = () => {} } = {}) {
        ON CONFLICT (external_permit_nmbr) DO UPDATE SET
          operator_name=EXCLUDED.operator_name, operator_key=EXCLUDED.operator_key,
          effective_date=EXCLUDED.effective_date, expiration_date=EXCLUDED.expiration_date,
-         original_issue_date=EXCLUDED.original_issue_date, score=EXCLUDED.score,
+         original_issue_date=EXCLUDED.original_issue_date,
+         score=EXCLUDED.score + COALESCE((permit_facilities.compliance_flags->>'pain')::int, 0),
          last_pulled_at=NOW(), updated_at=NOW()`,
       [f.external_permit_nmbr, f.master_permit, f.state, f.operator_name, f.operator_key, f.coverage_type,
        f.effective_date, f.expiration_date, f.original_issue_date, score]

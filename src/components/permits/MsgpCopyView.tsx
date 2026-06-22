@@ -15,6 +15,7 @@ export default function MsgpCopyView({ pushToast }: { pushToast?: (m: string, k?
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [showSource, setShowSource] = useState(false);
 
   const modules = useMemo(() => ({
@@ -33,8 +34,11 @@ export default function MsgpCopyView({ pushToast }: { pushToast?: (m: string, k?
         setTpl(template);
         setSubject(template.subject);
         setBody(template.body_html);
+        setLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        pushToast?.("Couldn't load email template", "error");
+      });
   }, []);
 
   const save = async () => {
@@ -139,7 +143,8 @@ export default function MsgpCopyView({ pushToast }: { pushToast?: (m: string, k?
       <div className="flex items-center gap-3">
         <button
           onClick={save}
-          disabled={busy}
+          disabled={busy || !loaded}
+          title={!loaded ? "Template not yet loaded — wait before saving" : undefined}
           className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
           Save copy

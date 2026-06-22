@@ -68,6 +68,7 @@ export interface OperatorsListResponse {
   page: number;
   pageSize: number;
   counts: { pool: number; promoted: number; enriched: number; mailed: number };
+  compliance_last_refreshed?: string | null;
 }
 
 export interface OperatorPermit {

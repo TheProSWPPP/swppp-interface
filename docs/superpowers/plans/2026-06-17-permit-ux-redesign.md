@@ -172,3 +172,19 @@ Return:
 - Visual editor: Phase 3. ✓
 - Usability/"where do I do what": funnel header + stage filter + per-stage drawer actions + empty states (2.2/2.3/4). ✓
 - No sending: no enroll/send route added; email actions disabled. ✓
+
+---
+
+## Full compliance refresh runbook
+
+**Script:** `scripts/echo-bulk-refresh.mjs`
+
+**How to run** (requires `unzip` on PATH + Railway public DATABASE_URL):
+```
+DATABASE_URL=<railway-public-url> node scripts/echo-bulk-refresh.mjs
+```
+Downloads the full EPA ECHO NPDES ZIP (~300 MB), extracts `NPDES_QNCR_HISTORY.csv` + `NPDES_INSPECTIONS.csv`, streams both files to build a compliance map for all TX permits in our pool, then bulk-UPDATEs `permit_facilities.compliance_flags` + `score` and refreshes `permit_operators.best_score` in one round-trip.
+
+**When to run:** After each monthly EPA ingest (`scripts/permit-ingest.mjs`), or any time compliance data looks stale (`compliance_last_refreshed` in the operators-list response). The monthly server cron does NOT run this automatically — ECHO's per-permit API is capped at 300/hr and 1,500/day, making full-pool refresh impractical inline.
+
+**Runtime:** ~5–10 min depending on ZIP download speed. Safe to re-run; idempotent.

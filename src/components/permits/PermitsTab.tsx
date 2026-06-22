@@ -11,7 +11,9 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
   const [mailboxes, setMailboxes] = useState<PermitMailbox[]>([]);
 
   useEffect(() => {
-    getPermitSettings().then((d) => { setSettings(d.settings); setMailboxes(d.mailboxes); }).catch(() => {});
+    getPermitSettings()
+      .then((d) => { setSettings(d.settings); setMailboxes(d.mailboxes); })
+      .catch(() => pushToast?.("Couldn't load permit settings", "error"));
   }, []);
 
   const toggleActive = async () => {
@@ -51,8 +53,12 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
               <label key={m.id} className="flex items-center gap-2 py-0.5 cursor-pointer">
                 <input type="checkbox" checked={m.permit_enabled}
                   onChange={async () => {
-                    const { mailbox } = await patchPermitMailbox(m.id, !m.permit_enabled);
-                    setMailboxes((xs) => xs.map((x) => x.id === mailbox.id ? { ...x, permit_enabled: mailbox.permit_enabled } : x));
+                    try {
+                      const { mailbox } = await patchPermitMailbox(m.id, !m.permit_enabled);
+                      setMailboxes((xs) => xs.map((x) => x.id === mailbox.id ? { ...x, permit_enabled: mailbox.permit_enabled } : x));
+                    } catch {
+                      pushToast?.("Failed to update mailbox", "error");
+                    }
                   }} />
                 <span>{m.email}</span>
                 <span className="text-xs text-slate-400">{m.daily_send_limit ?? "—"}/day shared</span>

@@ -105,6 +105,14 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Lock background scroll while drawer is open
+  useEffect(() => {
+    if (operatorKey) {
+      document.body.style.overflow = "hidden";
+      return () => { document.body.style.overflow = ""; };
+    }
+  }, [operatorKey]);
+
   async function handlePromote() {
     if (!operatorKey) return;
     setActing(true);
