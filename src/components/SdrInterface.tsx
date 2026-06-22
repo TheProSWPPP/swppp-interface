@@ -329,6 +329,21 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
       .catch(() => {});
   }, []);
 
+  // Hot-lead count for the Priority tab badge — surfaces leads someone has been
+  // engaging with (clicked, replied, or opened 3+ times) without opening the tab.
+  const [hotCount, setHotCount] = useState(0);
+  useEffect(() => {
+    let stop = false;
+    const load = () =>
+      sdrApi
+        .engagementSummary()
+        .then((s) => { if (!stop) setHotCount(s.leads.filter(isHot).length); })
+        .catch(() => {});
+    load();
+    const iv = setInterval(load, 60_000);
+    return () => { stop = true; clearInterval(iv); };
+  }, []);
+
   const { toasts, push, dismiss } = useToasts();
 
   function switchLane(l: OutreachLane) {
@@ -396,7 +411,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           <div className="flex flex-wrap items-center gap-1 mb-6 rounded-xl border border-slate-200 bg-slate-50 p-1.5">
             <TabButton current={tab} value="leads" onClick={setTab} icon={<Target className="h-4 w-4" />}>Leads</TabButton>
             <TabButton current={tab} value="queue" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Queue</TabButton>
-            <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />}>Priority</TabButton>
+            <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />} badge={hotCount}>Priority</TabButton>
             <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
             <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
             <TabButton current={tab} value="templates" onClick={setTab} icon={<SettingsIcon className="h-4 w-4" />}>Templates</TabButton>
@@ -461,12 +476,14 @@ function TabButton({
   onClick,
   icon,
   children,
+  badge,
 }: {
   current: SdrTab;
   value: SdrTab;
   onClick: (v: SdrTab) => void;
   icon: React.ReactNode;
   children: React.ReactNode;
+  badge?: number;
 }) {
   const active = current === value;
   return (
@@ -481,6 +498,16 @@ function TabButton({
     >
       {icon}
       {children}
+      {badge != null && badge > 0 && (
+        <span
+          className={cn(
+            "ml-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none",
+            active ? "bg-white text-brand-700" : "bg-rose-500 text-white",
+          )}
+        >
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
@@ -710,12 +737,24 @@ function LeadsView({
         <StatCard label="Sequenced" value={counts.sequenced} accent="blue" />
         <StatCard label="Total leads" value={counts.total} accent="slate" />
         <div className="flex flex-1 min-w-[180px] flex-col items-end justify-center gap-2">
-          <div className="text-sm text-slate-500">
-            Synced{" "}
-            <span className="font-medium text-slate-700">
-              {resp?.leads[0]?.synced_at ? formatRelative(resp.leads[0].synced_at) : "—"}
-            </span>
-          </div>
+          {(() => {
+            const last = resp?.leads[0]?.synced_at;
+            const ageH = last ? (Date.now() - new Date(last).getTime()) / 3600000 : Infinity;
+            const fresh = ageH < 12;
+            return (
+              <div
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset",
+                  fresh ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200",
+                )}
+                title="How recently the interface pulled the latest lead state from Pipedrive"
+              >
+                {fresh ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+                {fresh ? "In sync with Pipedrive" : "Sync delayed"}
+                <span className="font-normal opacity-70">· {last ? formatRelative(last) : "—"}</span>
+              </div>
+            );
+          })()}
           {isAdmin && (
             <button
               onClick={onRefresh}

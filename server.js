@@ -22,7 +22,7 @@ import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
-import { dailyCap, rampDay, DEFAULT_WARMUP_START } from "./lib/sendRamp.js";
+import { dailyCap, rampDay } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
@@ -486,6 +486,19 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
+// Shared per-mailbox daily send count (America/Chicago day). This is the single
+// cap both the SDR and TXR050000/permit cold systems draw from — every email send
+// records into sdr_sends, so this counts them together.
+async function mailboxSentToday(mailboxId) {
+  const { rows } = await pool.query(
+    `SELECT count(*)::int n FROM sdr_sends
+      WHERE mailbox_id = $1
+        AND (sent_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date`,
+    [mailboxId],
+  );
+  return rows[0].n;
+}
+
 // Initial Database Schema Setup
 async function initDB() {
   if (!process.env.DATABASE_URL) {
@@ -882,8 +895,8 @@ async function initDB() {
       )`);
     await pool.query(`INSERT INTO permit_engine_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
     await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS permit_enabled BOOLEAN NOT NULL DEFAULT FALSE`);
-    // Anchor the warmup ramp to the team go-live for any mailbox without a start date.
-    await pool.query(`UPDATE sdr_mailboxes SET warmup_started_at = $1 WHERE warmup_started_at IS NULL`, [DEFAULT_WARMUP_START]);
+    // Warmup ramp anchors to each mailbox's FIRST send (stamped in approve-and-send),
+    // so the clock only starts when the team actually begins — no calendar seed here.
     await pool.query(`
       CREATE TABLE IF NOT EXISTS permit_msgp_template (
         id INT PRIMARY KEY DEFAULT 1,
@@ -1107,10 +1120,12 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
     sql += ` ORDER BY email`;
     const { rows } = await pool.query(sql, params);
     // Attach the ramped daily cap + warmup day so the UI can show "3/5 sent today".
+    // sent_today counts the shared sdr_sends log (the one per-mailbox cap that the
+    // SDR and TXR050000/permit cold systems both draw from).
     const mailboxes = rows.map((m) => ({
       ...m,
-      daily_cap: dailyCap(m.warmup_started_at || DEFAULT_WARMUP_START),
-      warmup_day: rampDay(m.warmup_started_at || DEFAULT_WARMUP_START),
+      daily_cap: dailyCap(m.warmup_started_at),
+      warmup_day: rampDay(m.warmup_started_at),
     }));
     res.json({ mailboxes });
   } catch (err) {
@@ -2365,17 +2380,13 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     }
 
     // Warmup ramp: enforce the per-mailbox daily send cap (gradual climb to 40).
-    // Protects the warming inboxes — hard cap, no override (adjust the ramp to change it).
+    // The clock starts on first send (warmup_started_at null → day 1). Hard cap,
+    // no override (adjust the ramp to change it). The count is the SHARED per-mailbox
+    // total — both the SDR and TXR050000/permit cold systems record into sdr_sends.
     {
-      const startedAt = mailbox.warmup_started_at || DEFAULT_WARMUP_START;
+      const startedAt = mailbox.warmup_started_at; // null until first send → day 1
       const cap = dailyCap(startedAt);
-      const { rows: cntRows } = await pool.query(
-        `SELECT count(*)::int n FROM sdr_sends
-          WHERE mailbox_id = $1
-            AND (sent_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date`,
-        [mailbox.id],
-      );
-      const sentToday = cntRows[0].n;
+      const sentToday = await mailboxSentToday(mailbox.id);
       if (sentToday >= cap) {
         const day = rampDay(startedAt);
         return res.status(429).json({
@@ -2440,6 +2451,13 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
            VALUES ($1, $2, $3, $4, $5, 'enrolled')
            RETURNING *`,
           [draft.id, draft.pipedrive_lead_id, draft.apollo_sequence_id, apolloContactId, mailbox.id],
+        );
+
+        // Start the warmup ramp clock on this mailbox's first-ever send.
+        await client.query(
+          `UPDATE sdr_mailboxes SET warmup_started_at = NOW()
+            WHERE id = $1 AND warmup_started_at IS NULL`,
+          [mailbox.id],
         );
 
         return { draft: updRows[0], send: sendRows[0], apollo_response: enrollResponse };
