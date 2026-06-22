@@ -113,7 +113,8 @@ export default function OperatorWorkspace({
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
-  // Debounce search
+  // Keep a ref so `load` can always read the latest search without being
+  // re-created every keystroke (avoids cascading effect re-runs).
   const searchRef = useRef(search);
   searchRef.current = search;
 
@@ -135,14 +136,23 @@ export default function OperatorWorkspace({
     [stage, compliance, hideContacted, page, pushToast],
   );
 
+  // Non-search filters + page: reload whenever these change
   useEffect(() => {
     load(page);
   }, [load]);
 
-  // Reset page to 1 on filter changes (not on page changes)
+  // Debounced search: 300ms after the user stops typing, reset to page 1 and load
   useEffect(() => {
-    setPage(1);
-  }, [stage, compliance, hideContacted, search]);
+    const t = setTimeout(() => {
+      setPage((prev) => {
+        // If already on page 1, `load` dep won't change — call load directly
+        if (prev === 1) { load(1); return 1; }
+        return 1; // changing page triggers the load effect above
+      });
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   async function runEnrich() {
     setEnriching(true);
