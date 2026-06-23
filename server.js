@@ -2463,7 +2463,10 @@ const APOLLO_CF_DRAFT_SUBJECT = process.env.APOLLO_CF_DRAFT_SUBJECT || "6a2adb32
 const APOLLO_CF_DRAFT_BODY = process.env.APOLLO_CF_DRAFT_BODY || "6a2adb32bfaa320020f80f97";
 // swppp_track carries the draft id into the open-pixel ({{contact.swppp_track}} in the
 // template) — Apollo escapes body HTML so the pixel must live in the template.
-const APOLLO_CF_TRACK = process.env.APOLLO_CF_TRACK || "6a32559593e27d000c4ee92f";
+// NOTE: the original field (6a32559593e27d000c4ee92f) was created malformed (type:null),
+// so Apollo silently dropped every write to it and all sends failed `snippets_missing`.
+// Recreated 2026-06-23 as a proper textarea field; this is the working id.
+const APOLLO_CF_TRACK = process.env.APOLLO_CF_TRACK || "6a3b065762456a00208db22b";
 
 // SDR drafts — list (owner-scoped; admin sees all)
 app.get("/api/sdr/drafts", async (req, res) => {
