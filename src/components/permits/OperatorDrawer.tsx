@@ -125,12 +125,7 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
   }
 
   function handleSkip() {
-    if (
-      !window.confirm(
-        "Mark this company as skipped? It will drop out of your mailing list.",
-      )
-    )
-      return;
+    if (!window.confirm("Discard this company? It drops out of the pipeline.")) return;
     handleOutreach("skipped");
   }
 
@@ -155,7 +150,6 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
   const permits = detail?.permits ?? [];
   const enrichment = detail?.enrichment ?? null;
   const outreach = detail?.outreach ?? [];
-  const mailable = detail?.mailable ?? false;
   const email = detail?.email ?? null;
 
   const complianceTier = op ? deriveComplianceTier(op.max_pain) : "clean";
@@ -254,11 +248,6 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
                     <p>
                       <span className="text-slate-500">Mail:</span>{" "}
                       {enrichment.mailing_address}
-                    </p>
-                  )}
-                  {!mailable && (
-                    <p className="mt-1 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600">
-                      ⚠ Not mailable (no ZIP) — excluded from CSV
                     </p>
                   )}
                   {enrichment?.site_address && (
@@ -409,20 +398,13 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
                 Promote
               </button>
             )}
-            <button
-              onClick={() => handleOutreach("mailed")}
-              disabled={acting}
-              className="flex-1 min-w-[120px] text-sm font-semibold px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
-            >
-              Mark mailed
-            </button>
             <div className="w-full pt-1 mt-1 border-t border-slate-100 flex justify-center">
               <button
                 onClick={handleSkip}
                 disabled={acting}
                 className="text-xs text-slate-400 hover:text-slate-600 underline-offset-2 hover:underline disabled:opacity-50"
               >
-                Mark skipped
+                Discard
               </button>
             </div>
           </div>

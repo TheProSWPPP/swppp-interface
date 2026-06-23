@@ -54,8 +54,9 @@ export interface OperatorRow {
   max_pain: number;
   best_score: number;
   earliest_expiry: string | null;
-  stage: "pool" | "promoted" | "email_ready" | "enriched" | "mailed";
+  stage: "pool" | "promoted" | "email_ready" | "discarded" | "mailed";
   emailable: boolean;
+  discarded: boolean;
   compliance_tier: "snc" | "violation" | "inspected" | "clean";
   possible_customer: boolean;
   possible_crm: boolean;
@@ -68,7 +69,7 @@ export interface OperatorsListResponse {
   total: number;
   page: number;
   pageSize: number;
-  counts: { pool: number; promoted: number; email_ready: number; enriched: number; mailed: number };
+  counts: { pool: number; promoted: number; email_ready: number; discarded: number; mailed: number };
   compliance_last_refreshed?: string | null;
 }
 
@@ -261,6 +262,9 @@ export const permitApi = {
     j<{ promoted: number }>(`/api/permits/promote`, { method: "POST", body: JSON.stringify(body) }),
   enrich: (cap = 50) =>
     jMsg<{ processed: number; ok: number; fail: number }>(`/api/permits/enrich`, { method: "POST", body: JSON.stringify({ cap }) }),
+  findEmails: (cap = 25) =>
+    jMsg<{ probed: number; found: number; discarded: number; hadDomain: number }>(
+      `/api/permits/find-emails`, { method: "POST", body: JSON.stringify({ cap }) }),
   getEnriched: (params: { page?: number; pageSize?: number } = {}) => {
     const q = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined) q.set(k, String(v)); });
