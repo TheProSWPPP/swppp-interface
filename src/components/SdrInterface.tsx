@@ -53,6 +53,9 @@ import {
   type SdrTriggerType,
   type SdrUser,
   type SdrUserPublic,
+  type SdrInboxAccount,
+  type SdrInboxThread,
+  type SdrInboxMessage,
 } from "../lib/sdrApi";
 import { cn } from "../utils";
 import CampaignsView from "./nurture/CampaignsView";
@@ -61,7 +64,7 @@ import ContactsView from "./nurture/ContactsView";
 import AutomationsView from "./nurture/AutomationsView";
 import PermitsTab from "./permits/PermitsTab";
 
-type SdrTab = "leads" | "queue" | "engaged" | "dashboard" | "mailboxes" | "templates" | "sequences" | "permits";
+type SdrTab = "leads" | "queue" | "engaged" | "inbox" | "dashboard" | "mailboxes" | "templates" | "sequences" | "permits";
 type OutreachLane = "cold" | "nurture";
 type NurtureTab = "campaigns" | "lists" | "contacts" | "automations";
 
@@ -385,6 +388,21 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
     window.history.replaceState(null, "", base);
   }
 
+  // Return trip from the Gmail OAuth consent (#/sdr?tab=inbox&connected=… | &error=…).
+  useEffect(() => {
+    const hash = window.location.hash;
+    const qi = hash.indexOf("?");
+    if (qi === -1) return;
+    const params = new URLSearchParams(hash.slice(qi + 1));
+    if (params.get("tab") === "inbox") setTab("inbox");
+    const connected = params.get("connected");
+    const error = params.get("error");
+    if (connected) push("success", `Inbox connected: ${connected}`);
+    if (error) push("error", `Inbox connect failed: ${error}`);
+    if (connected || error) window.history.replaceState(null, "", hash.slice(0, qi));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Mailbox lookup shared by Queue (resolve UUID → email in draft detail)
   const [mailboxById, setMailboxById] = useState<Record<string, SdrMailbox>>({});
   useEffect(() => {
@@ -485,6 +503,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             <TabButton current={tab} value="leads" onClick={setTab} icon={<Target className="h-4 w-4" />}>Leads</TabButton>
             <TabButton current={tab} value="queue" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Queue</TabButton>
             <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />} badge={hotCount}>Priority</TabButton>
+            <TabButton current={tab} value="inbox" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Inbox</TabButton>
             <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
             <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
             <TabButton current={tab} value="templates" onClick={setTab} icon={<ListChecks className="h-4 w-4" />}>Messaging</TabButton>
@@ -493,6 +512,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {tab === "leads" && <LeadsView user={user} pushToast={push} onGenerated={() => setTab("queue")} />}
           {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
           {tab === "engaged" && <EngagedView pushToast={push} />}
+          {tab === "inbox" && <InboxView user={user} pushToast={push} />}
           {tab === "dashboard" && <DashboardView />}
           {tab === "mailboxes" && <MailboxesView user={user} />}
           {(tab === "templates" || tab === "sequences") && <MessagingView user={user} pushToast={push} />}
@@ -2623,6 +2643,231 @@ function StatTile({
         <span className={cn("h-7 w-7 rounded-lg inline-flex items-center justify-center", tones[tone])}>{icon}</span>
       </div>
       <div className="text-2xl font-semibold text-slate-900 mt-1">{value}</div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------
+// Inbox (Gmail per .co mailbox)
+// --------------------------------------------------------------------------
+
+function emailFromHeader(s: string | null | undefined): string {
+  if (!s) return "";
+  const m = s.match(/<([^>]+)>/);
+  return (m ? m[1] : s).trim();
+}
+
+function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "success" | "error", msg: string) => void }) {
+  const [accounts, setAccounts] = useState<SdrInboxAccount[] | null>(null);
+  const [mailbox, setMailbox] = useState<string | null>(null);
+  const [threads, setThreads] = useState<SdrInboxThread[] | null>(null);
+  const [loadingThreads, setLoadingThreads] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [thread, setThread] = useState<SdrInboxMessage[] | null>(null);
+  const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    sdrApi
+      .getInboxAccounts()
+      .then((d) => {
+        setAccounts(d.accounts);
+        setMailbox((cur) => cur ?? d.accounts.find((a) => a.connected)?.email ?? null);
+      })
+      .catch((e) => pushToast("error", e.message));
+  }, [pushToast]);
+
+  const loadThreads = (mb: string) => {
+    setLoadingThreads(true);
+    sdrApi
+      .getInboxThreads(mb)
+      .then((d) => setThreads(d.threads))
+      .catch((e) => pushToast("error", e.message))
+      .finally(() => setLoadingThreads(false));
+  };
+
+  useEffect(() => {
+    if (!mailbox) return;
+    setOpenId(null);
+    setThread(null);
+    loadThreads(mailbox);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mailbox]);
+
+  const openThread = (id: string) => {
+    setOpenId(id);
+    setThread(null);
+    setReply("");
+    sdrApi
+      .getInboxThread(id, mailbox || undefined)
+      .then((d) => {
+        setThread(d.messages);
+        setThreads((prev) => prev?.map((t) => (t.id === id ? { ...t, unread: false } : t)) ?? prev);
+      })
+      .catch((e) => pushToast("error", e.message));
+  };
+
+  const connect = (mb: string) => {
+    sdrApi
+      .startInboxOAuth(mb)
+      .then((d) => {
+        window.location.href = d.url;
+      })
+      .catch((e) => pushToast("error", e.message));
+  };
+
+  const doReply = () => {
+    if (!thread || !openId || !mailbox || !reply.trim()) return;
+    const last = thread[thread.length - 1];
+    const to = emailFromHeader(last?.from);
+    if (!to) {
+      pushToast("error", "No recipient address found in the thread");
+      return;
+    }
+    setSending(true);
+    sdrApi
+      .replyInboxThread(openId, {
+        mailbox,
+        to,
+        subject: last?.subject ?? "",
+        body: reply,
+        inReplyTo: last?.messageId,
+        references: last?.references,
+      })
+      .then(() => {
+        pushToast("success", "Reply sent");
+        setReply("");
+        openThread(openId);
+      })
+      .catch((e) => pushToast("error", e.message))
+      .finally(() => setSending(false));
+  };
+
+  if (!accounts) return <div className="p-8 text-sm text-slate-400">Loading inbox…</div>;
+  const connected = accounts.filter((a) => a.connected);
+  const unconnected = accounts.filter((a) => !a.connected);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-lg font-semibold text-slate-800">Inbox</h2>
+        {connected.length > 1 && (
+          <select
+            value={mailbox ?? ""}
+            onChange={(e) => setMailbox(e.target.value)}
+            className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+          >
+            {connected.map((a) => (
+              <option key={a.email} value={a.email}>
+                {a.email}
+              </option>
+            ))}
+          </select>
+        )}
+        {mailbox && (
+          <button
+            onClick={() => loadThreads(mailbox)}
+            title="Refresh"
+            className="rounded-lg border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-50"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+        )}
+        <div className="ml-auto flex flex-wrap gap-2">
+          {unconnected.map((a) => (
+            <button
+              key={a.email}
+              onClick={() => connect(a.email)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 bg-brand-50 px-2.5 py-1 text-sm font-medium text-brand-700 hover:bg-brand-100"
+            >
+              <Mail className="h-4 w-4" /> Connect {a.email}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {connected.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+          No mailbox connected yet. Connect {user.role === "admin" ? "a mailbox" : "your mailbox"} above to read and reply to messages here.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,360px)_1fr]">
+          <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+            {loadingThreads ? (
+              <div className="p-6 text-sm text-slate-400">Loading…</div>
+            ) : !threads?.length ? (
+              <div className="p-6 text-sm text-slate-400">No messages.</div>
+            ) : (
+              threads.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => openThread(t.id)}
+                  className={cn(
+                    "block w-full px-3 py-2.5 text-left hover:bg-slate-50",
+                    openId === t.id && "bg-brand-50",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={cn("truncate text-sm text-slate-800", t.unread && "font-semibold")}>
+                      {emailFromHeader(t.from) || "(unknown)"}
+                    </span>
+                    <span className="shrink-0 text-xs text-slate-400">
+                      {t.date ? formatRelative(new Date(t.date).toISOString()) : ""}
+                    </span>
+                  </div>
+                  <div className={cn("truncate text-sm text-slate-600", t.unread && "font-medium text-slate-800")}>
+                    {t.subject || "(no subject)"}
+                  </div>
+                  <div className="truncate text-xs text-slate-400">{t.snippet}</div>
+                  {t.lead && (
+                    <span className="mt-1 inline-block rounded bg-brand-100 px-1.5 py-0.5 text-[11px] text-brand-700">
+                      {t.lead.lead_title || "Linked lead"}
+                    </span>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 p-4">
+            {!openId ? (
+              <div className="text-sm text-slate-400">Select a message to read and reply.</div>
+            ) : !thread ? (
+              <div className="text-sm text-slate-400">Loading…</div>
+            ) : (
+              <div className="space-y-4">
+                {thread.map((m) => (
+                  <div key={m.id} className="rounded-lg border border-slate-100 p-3">
+                    <div className="mb-1 flex items-center justify-between gap-2 text-xs text-slate-500">
+                      <span className="truncate">{m.from}</span>
+                      <span className="shrink-0">{m.date ? new Date(m.date).toLocaleString() : ""}</span>
+                    </div>
+                    <div className="whitespace-pre-wrap text-sm text-slate-800">{m.body?.trim() || "(no text)"}</div>
+                  </div>
+                ))}
+                <div className="space-y-2">
+                  <textarea
+                    value={reply}
+                    onChange={(e) => setReply(e.target.value)}
+                    rows={4}
+                    placeholder={`Reply as ${mailbox}…`}
+                    className="w-full rounded-lg border border-slate-300 p-2 text-sm"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      onClick={doReply}
+                      disabled={sending || !reply.trim()}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                    >
+                      <Send className="h-4 w-4" /> {sending ? "Sending…" : "Send reply"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

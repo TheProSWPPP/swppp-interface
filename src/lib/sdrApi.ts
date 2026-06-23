@@ -287,6 +287,34 @@ export async function sdrFetch<T>(path: string, opts: RequestInit & { auth?: boo
   return data as T;
 }
 
+export interface SdrInboxAccount {
+  email: string;
+  connected: boolean;
+  connected_at: string | null;
+  owner_name: string | null;
+}
+export interface SdrInboxThread {
+  id: string;
+  subject: string | null;
+  from: string | null;
+  date: string | null;
+  snippet: string;
+  messageCount: number;
+  unread: boolean;
+  lead: { lead_id: string; lead_title: string | null } | null;
+}
+export interface SdrInboxMessage {
+  id: string;
+  from: string | null;
+  to: string | null;
+  subject: string | null;
+  date: string | null;
+  messageId: string | null;
+  references: string | null;
+  unread: boolean;
+  body: string;
+}
+
 export const sdrApi = {
   listUsers: () => sdrFetch<{ users: SdrUserPublic[] }>("/api/sdr/auth/users", { auth: false }),
 
@@ -306,6 +334,33 @@ export const sdrApi = {
       "/api/sdr/mailboxes/sync",
       { method: "POST" },
     ),
+
+  // Unified inbox (Gmail per .co mailbox)
+  getInboxAccounts: () =>
+    sdrFetch<{ accounts: SdrInboxAccount[]; isAdmin: boolean; configured: boolean }>("/api/sdr/inbox/accounts"),
+  startInboxOAuth: (mailbox?: string) =>
+    sdrFetch<{ url: string }>(`/api/sdr/inbox/oauth/start${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ""}`),
+  getInboxThreads: (mailbox?: string, q?: string) => {
+    const p = new URLSearchParams();
+    if (mailbox) p.set("mailbox", mailbox);
+    if (q) p.set("q", q);
+    const qs = p.toString();
+    return sdrFetch<{ mailbox: string | null; threads: SdrInboxThread[]; note?: string }>(
+      `/api/sdr/inbox/threads${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getInboxThread: (id: string, mailbox?: string) =>
+    sdrFetch<{ mailbox: string; id: string; messages: SdrInboxMessage[] }>(
+      `/api/sdr/inbox/threads/${id}${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ""}`,
+    ),
+  replyInboxThread: (
+    id: string,
+    payload: { mailbox?: string; to: string; subject?: string; body: string; inReplyTo?: string | null; references?: string | null },
+  ) =>
+    sdrFetch<{ ok: boolean; id: string }>(`/api/sdr/inbox/threads/${id}/reply`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   setMailboxActive: (id: string, active: boolean) =>
     sdrFetch<{ mailbox: { id: string; email: string; active: boolean } }>(

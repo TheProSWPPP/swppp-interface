@@ -20,11 +20,11 @@ import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
-import { runPermitAutoOutreach } from "./lib/permitAuto.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { sweepSentOutreach, upsertOutreach } from "./lib/outreachSync.js";
+import * as gmailInbox from "./lib/gmailInbox.js";
 import { dailyCap, rampDay } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
 import { runAutoOutreach, pruneStaleQueuedDrafts } from "./lib/autoOutreach.js";
@@ -429,7 +429,10 @@ app.use((req, res, next) => {
     (req.path === "/api/seo-ideas/existing-articles" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/sdr/events/ingest" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/sdr/drafts/generate" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
-    (req.path.startsWith("/api/sdr/track/") && req.method === "GET")
+    (req.path.startsWith("/api/sdr/track/") && req.method === "GET") ||
+    // Google redirects the OAuth consent back here without our bearer token; the
+    // signed `state` param carries identity + CSRF protection (verified in the handler).
+    (req.path === "/api/sdr/inbox/oauth/callback" && req.method === "GET")
   ) {
     return next();
   }
@@ -783,6 +786,21 @@ async function initDB() {
       )
     `);
     await pool.query(`INSERT INTO sdr_outreach_sweep_state (id) VALUES (1) ON CONFLICT DO NOTHING`);
+
+    // Unified inbox: per-mailbox Gmail OAuth (lib/gmailInbox.js). One row per connected
+    // .co mailbox holding its refresh token. owner_user_id binds the mailbox to its SDR
+    // (matched by email local-part) so a rep sees only their inbox; admin sees all.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_inbox_accounts (
+        mailbox_email TEXT PRIMARY KEY,
+        refresh_token TEXT,
+        owner_user_id UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        connected_by_user_id UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        last_error TEXT,
+        connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sdr_engagement_events (
@@ -1189,20 +1207,6 @@ if (process.env.DATABASE_URL && process.env.PERMIT_REFRESH_ENABLED === "true") {
     } catch (e) { console.error("[permit-refresh] failed:", e.message); }
   };
   setInterval(runPermitRefresh, 30 * 24 * 60 * 60 * 1000); // ~monthly
-}
-
-// Permit auto-outreach loop (~every 15 min). No-ops unless the master switch is on
-// (permit_engine_settings.active). First fire is one interval after boot.
-if (process.env.DATABASE_URL) {
-  const tickPermitAuto = async () => {
-    try {
-      const r = await runPermitAutoOutreach(pool);
-      if (!r.skipped && (r.sent || r.skippedBad || r.errors?.length)) {
-        console.log(`[permit-auto] ${JSON.stringify(r)}`);
-      }
-    } catch (e) { console.error("[permit-auto] failed:", e.message); }
-  };
-  setInterval(tickPermitAuto, 15 * 60 * 1000);
 }
 
 // Fallback in-memory store if no DB is connected (for local dev)
@@ -1793,6 +1797,172 @@ app.post("/api/sdr/outreach/sweep", async (req, res) => {
   } catch (err) {
     console.error("POST /api/sdr/outreach/sweep error:", err);
     res.status(500).json({ error: err.message || "Sweep failed" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Unified inbox (Gmail OAuth per .co mailbox) — lib/gmailInbox.js
+// ---------------------------------------------------------------------------
+const _gmailTokenCache = new Map(); // mailbox_email → { token, exp }
+
+async function accessTokenForMailbox(mailboxEmail) {
+  const cached = _gmailTokenCache.get(mailboxEmail);
+  if (cached && cached.exp > Date.now() + 30_000) return cached.token;
+  const { rows } = await pool.query(`SELECT refresh_token FROM sdr_inbox_accounts WHERE mailbox_email=$1`, [mailboxEmail]);
+  const rt = rows[0]?.refresh_token;
+  if (!rt) throw Object.assign(new Error(`Mailbox ${mailboxEmail} not connected`), { status: 409 });
+  const { accessToken, expiresIn } = await gmailInbox.refreshAccessToken(rt);
+  _gmailTokenCache.set(mailboxEmail, { token: accessToken, exp: Date.now() + (expiresIn || 3600) * 1000 });
+  return accessToken;
+}
+
+// All .co mailboxes visible to this user: admin sees every mailbox, an SDR sees the one
+// whose local-part matches their own (jg@proswppp.com → jg@proswppp.co), connected or not.
+async function visibleMailboxes(sdrUser) {
+  const isAdmin = sdrUser?.role === "admin";
+  const { rows } = await pool.query(
+    `SELECT m.email, (a.mailbox_email IS NOT NULL) AS connected, a.connected_at,
+            COALESCE(u.display_name, u.username) AS owner_name
+       FROM sdr_mailboxes m
+       LEFT JOIN sdr_inbox_accounts a ON a.mailbox_email = m.email
+       LEFT JOIN sdr_users u ON u.id = a.owner_user_id
+      WHERE $1 OR split_part(m.email,'@',1) = (SELECT split_part(email,'@',1) FROM sdr_users WHERE id=$2)
+      ORDER BY m.email`,
+    [isAdmin, sdrUser?.sub],
+  );
+  return rows;
+}
+
+async function resolveMailbox(sdrUser, requested) {
+  const vis = await visibleMailboxes(sdrUser);
+  const connected = vis.filter((v) => v.connected).map((v) => v.email);
+  if (requested) {
+    const r = String(requested).toLowerCase();
+    if (!connected.includes(r)) throw Object.assign(new Error("Mailbox not accessible"), { status: 403 });
+    return r;
+  }
+  return connected[0] || null;
+}
+
+function parseEmailAddr(s) {
+  if (!s) return null;
+  const m = String(s).match(/<([^>]+)>/);
+  return (m ? m[1] : String(s)).trim().toLowerCase();
+}
+
+// Start consent → returns the Google URL the client redirects to (client does window.location).
+app.get("/api/sdr/inbox/oauth/start", async (req, res) => {
+  if (!gmailInbox.isConfigured()) return res.status(503).json({ error: "Google OAuth not configured" });
+  const mailbox = req.query.mailbox ? String(req.query.mailbox).toLowerCase() : undefined;
+  // Non-admins may only connect their own mailbox.
+  if (mailbox) {
+    const vis = await visibleMailboxes(req.sdrUser);
+    if (!vis.some((v) => v.email === mailbox)) return res.status(403).json({ error: "Mailbox not yours to connect" });
+  }
+  const state = jwt.sign({ sub: req.sdrUser.sub, mailbox, t: "inbox_oauth" }, JWT_SECRET, { expiresIn: 600 });
+  res.json({ url: gmailInbox.buildAuthUrl({ state, loginHint: mailbox }) });
+});
+
+// Google redirects here (no bearer; identity + CSRF via the signed state JWT).
+app.get("/api/sdr/inbox/oauth/callback", async (req, res) => {
+  const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
+  try {
+    const claims = verifySdrJwt(String(req.query.state || ""));
+    if (!claims || claims.t !== "inbox_oauth") return res.status(400).send("Invalid OAuth state");
+    if (req.query.error) return res.redirect(`${appBase}/#/sdr?tab=inbox&error=${encodeURIComponent(String(req.query.error))}`);
+    const { refreshToken, email } = await gmailInbox.exchangeCode(String(req.query.code));
+    if (!email) return res.status(400).send("Could not determine the mailbox email");
+    const local = email.split("@")[0];
+    const { rows: ow } = await pool.query(`SELECT id FROM sdr_users WHERE split_part(email,'@',1)=$1 LIMIT 1`, [local]);
+    await pool.query(
+      `INSERT INTO sdr_inbox_accounts (mailbox_email, refresh_token, owner_user_id, connected_by_user_id, connected_at, updated_at)
+       VALUES ($1,$2,$3,$4,NOW(),NOW())
+       ON CONFLICT (mailbox_email) DO UPDATE SET
+         refresh_token = COALESCE(EXCLUDED.refresh_token, sdr_inbox_accounts.refresh_token),
+         owner_user_id = EXCLUDED.owner_user_id,
+         connected_by_user_id = EXCLUDED.connected_by_user_id,
+         last_error = NULL, updated_at = NOW()`,
+      [email, refreshToken, ow[0]?.id || null, claims.sub],
+    );
+    _gmailTokenCache.delete(email);
+    res.redirect(`${appBase}/#/sdr?tab=inbox&connected=${encodeURIComponent(email)}`);
+  } catch (e) {
+    console.error("inbox oauth callback error:", e.message);
+    res.redirect(`${appBase}/#/sdr?tab=inbox&error=${encodeURIComponent(e.message)}`);
+  }
+});
+
+// Connected/visible mailboxes for this user (drives the connect buttons + switcher).
+app.get("/api/sdr/inbox/accounts", async (req, res) => {
+  try {
+    const accounts = await visibleMailboxes(req.sdrUser);
+    res.json({ accounts, isAdmin: req.sdrUser?.role === "admin", configured: gmailInbox.isConfigured() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Thread list for a mailbox (scoped). Each thread linked to its lead by sender email.
+app.get("/api/sdr/inbox/threads", async (req, res) => {
+  try {
+    const mailbox = await resolveMailbox(req.sdrUser, req.query.mailbox);
+    if (!mailbox) return res.json({ mailbox: null, threads: [], note: "No connected mailbox" });
+    const token = await accessTokenForMailbox(mailbox);
+    const q = req.query.q ? String(req.query.q) : "in:inbox";
+    const threads = await gmailInbox.listThreads(token, { q, maxResults: 25 });
+    const froms = [...new Set(threads.map((t) => parseEmailAddr(t.from)).filter(Boolean))];
+    const leadMap = {};
+    if (froms.length) {
+      const { rows } = await pool.query(
+        `SELECT lower(person_email) e, pipedrive_lead_id, lead_title FROM sdr_lead_state WHERE lower(person_email) = ANY($1)`,
+        [froms],
+      );
+      for (const r of rows) leadMap[r.e] = { lead_id: r.pipedrive_lead_id, lead_title: r.lead_title };
+    }
+    for (const t of threads) {
+      const e = parseEmailAddr(t.from);
+      t.lead = e ? leadMap[e] || null : null;
+    }
+    res.json({ mailbox, threads });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Full thread (all messages, decoded bodies).
+app.get("/api/sdr/inbox/threads/:id", async (req, res) => {
+  try {
+    const mailbox = await resolveMailbox(req.sdrUser, req.query.mailbox);
+    if (!mailbox) return res.status(409).json({ error: "No connected mailbox" });
+    const token = await accessTokenForMailbox(mailbox);
+    const thread = await gmailInbox.getThread(token, req.params.id);
+    gmailInbox.markThreadRead(token, req.params.id).catch(() => {});
+    res.json({ mailbox, ...thread });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Reply in-thread, sent from the mailbox.
+app.post("/api/sdr/inbox/threads/:id/reply", express.json(), async (req, res) => {
+  try {
+    const mailbox = await resolveMailbox(req.sdrUser, req.body?.mailbox || req.query.mailbox);
+    if (!mailbox) return res.status(409).json({ error: "No connected mailbox" });
+    const token = await accessTokenForMailbox(mailbox);
+    const { to, subject, body, inReplyTo, references } = req.body || {};
+    if (!to || !body) return res.status(400).json({ error: "to and body are required" });
+    const r = await gmailInbox.sendReply(token, {
+      threadId: req.params.id,
+      from: mailbox,
+      to,
+      subject: subject || "",
+      bodyText: body,
+      inReplyTo,
+      references,
+    });
+    res.json({ ok: true, id: r.id });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
