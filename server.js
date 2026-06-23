@@ -20,6 +20,7 @@ import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
+import { ensurePermitDraftSchema } from "./lib/permitDrafts.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
@@ -493,9 +494,14 @@ const pool = new Pool({
 // records into sdr_sends, so this counts them together.
 async function mailboxSentToday(mailboxId) {
   const { rows } = await pool.query(
-    `SELECT count(*)::int n FROM sdr_sends
-      WHERE mailbox_id = $1
-        AND (sent_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date`,
+    `SELECT (
+        (SELECT count(*) FROM sdr_sends
+          WHERE mailbox_id = $1
+            AND (sent_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date)
+      + (SELECT count(*) FROM permit_sends
+          WHERE mailbox_id = $1
+            AND (sent_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date)
+     )::int AS n`,
     [mailboxId],
   );
   return rows[0].n;
@@ -997,6 +1003,11 @@ async function initDB() {
       )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_permit_outreach_opkey ON permit_outreach(operator_key)`);
 
+    // Permit email draft queue (permit_operator_email, permit_drafts, permit_sends).
+    // Lives in lib/permitDrafts.js so the queue logic owns its schema; created here so
+    // the shared mailbox cap counter (mailboxSentToday) can rely on permit_sends.
+    await ensurePermitDraftSchema(pool);
+
     // Automation Roadmap — shared task list (team posts work, Derek tracks/edits/comments)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS automation_tasks (
@@ -1327,6 +1338,22 @@ app.patch("/api/sdr/settings", async (req, res) => {
   } catch (err) {
     console.error("PATCH /api/sdr/settings error:", err);
     res.status(500).json({ error: "Failed to update settings" });
+  }
+});
+
+// Manually trigger one auto-outreach pass (admin). Queue-only by design — always creates
+// drafts for review, never auto-sends, regardless of the mode setting. Optional body.max
+// caps the batch (handy for a quick test). Requires the engine to be enabled in settings.
+app.post("/api/sdr/auto-outreach/run", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const max = req.body?.max != null ? Math.max(1, Math.min(50, Number(req.body.max))) : undefined;
+  try {
+    const r = await runAutoOutreach(pool, { mailboxSentToday, maxDrafts: max });
+    res.json({ ok: true, ...r });
+  } catch (err) {
+    console.error("POST /api/sdr/auto-outreach/run error:", err);
+    res.status(500).json({ error: err.message || "Auto-outreach run failed" });
   }
 });
 
