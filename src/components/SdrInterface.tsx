@@ -1608,15 +1608,10 @@ function LeadRow({
               · {lead.initiated_by === "automatic" ? "auto" : "manual"}
             </span>
           </span>
-        ) : lead.owner_name ? (
-          <span
-            className="text-slate-400"
-            title="Pipedrive lead owner — not proof this lead was outreached"
-          >
-            {lead.owner_name} <span className="text-xs text-slate-300">(owner)</span>
-          </span>
         ) : (
-          <span className="text-slate-300">—</span>
+          // Not outreached by our system. We deliberately do NOT show the lead owner here
+          // (Derek owns ~99% of leads, so it read as "Derek outreached everything").
+          <span className="text-slate-300" title="Not outreached through this interface yet">—</span>
         )}
       </td>
       {/* Contact last emailed (person-level signal from Pipedrive) */}

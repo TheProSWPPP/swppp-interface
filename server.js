@@ -20,7 +20,6 @@ import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
-import { ensurePermitDraftSchema } from "./lib/permitDrafts.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
@@ -494,14 +493,9 @@ const pool = new Pool({
 // records into sdr_sends, so this counts them together.
 async function mailboxSentToday(mailboxId) {
   const { rows } = await pool.query(
-    `SELECT (
-        (SELECT count(*) FROM sdr_sends
-          WHERE mailbox_id = $1
-            AND (sent_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date)
-      + (SELECT count(*) FROM permit_sends
-          WHERE mailbox_id = $1
-            AND (sent_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date)
-     )::int AS n`,
+    `SELECT count(*)::int n FROM sdr_sends
+      WHERE mailbox_id = $1
+        AND (sent_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date`,
     [mailboxId],
   );
   return rows[0].n;
@@ -1003,11 +997,6 @@ async function initDB() {
       )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_permit_outreach_opkey ON permit_outreach(operator_key)`);
 
-    // Permit email draft queue (permit_operator_email, permit_drafts, permit_sends).
-    // Lives in lib/permitDrafts.js so the queue logic owns its schema; created here so
-    // the shared mailbox cap counter (mailboxSentToday) can rely on permit_sends.
-    await ensurePermitDraftSchema(pool);
-
     // Automation Roadmap — shared task list (team posts work, Derek tracks/edits/comments)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS automation_tasks (
@@ -1081,6 +1070,35 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
   setInterval(runSync, 6 * 60 * 60 * 1000);
 }
 
+// Send-mode enrollment: enroll each freshly-created auto draft by calling the SAME
+// approve-and-send path a human uses (internal HTTP + a short-lived minted token). Reuses
+// its dedup + warmup cap + Apollo enroll + Pipedrive write-back untouched; a 409/429 just
+// means a guardrail correctly skipped that lead. Shared by the cron and the manual trigger.
+async function enrollAutoDrafts(createdDrafts) {
+  const out = { enrolled: 0, skipped: 0 };
+  for (const d of createdDrafts || []) {
+    try {
+      const token = jwt.sign({ sub: d.assigned_user_id, username: "auto-outreach", role: "admin" }, JWT_SECRET, { expiresIn: 300 });
+      const resp = await fetch(`http://127.0.0.1:${port}/api/sdr/drafts/${d.id}/approve-and-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: "{}",
+      });
+      if (resp.ok) {
+        out.enrolled++;
+      } else {
+        out.skipped++;
+        const txt = await resp.text();
+        console.warn(`[auto-outreach] enroll skip draft ${d.id}: ${resp.status} ${txt.slice(0, 140)}`);
+      }
+    } catch (e) {
+      out.skipped++;
+      console.warn(`[auto-outreach] enroll error draft ${d.id}: ${e.message}`);
+    }
+  }
+  return out;
+}
+
 // Auto-outreach engine: when enabled (sdr_settings), top-up each active mailbox's daily
 // cap with the highest lead-score eligible leads. Default mode drafts to the Queue for
 // approval. Runs hourly during business hours (America/Chicago) only.
@@ -1094,26 +1112,9 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
     runAutoOutreach(pool, { mailboxSentToday })
       .then(async (r) => {
         if (r && r.created) console.log("[auto-outreach]", JSON.stringify({ mode: r.mode, created: r.created, capacity: r.capacity }));
-        // Send mode: enroll each freshly-created draft by calling the SAME approve-and-send
-        // path a human uses (internal HTTP + a short-lived token). Reuses its dedup + cap +
-        // warmup guards untouched; a 409/429 just means a guardrail correctly skipped it.
         if (r && r.mode === "send" && Array.isArray(r.createdDrafts)) {
-          for (const d of r.createdDrafts) {
-            try {
-              const token = jwt.sign({ sub: d.assigned_user_id, username: "auto-outreach", role: "admin" }, JWT_SECRET, { expiresIn: 300 });
-              const resp = await fetch(`http://127.0.0.1:${port}/api/sdr/drafts/${d.id}/approve-and-send`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: "{}",
-              });
-              if (!resp.ok) {
-                const txt = await resp.text();
-                console.warn(`[auto-outreach] enroll skip draft ${d.id}: ${resp.status} ${txt.slice(0, 140)}`);
-              }
-            } catch (e) {
-              console.warn(`[auto-outreach] enroll error draft ${d.id}: ${e.message}`);
-            }
-          }
+          const er = await enrollAutoDrafts(r.createdDrafts);
+          console.log("[auto-outreach] send results:", JSON.stringify(er));
         }
       })
       .catch((e) => console.error("[auto-outreach] run failed:", e.message));
@@ -1341,15 +1342,18 @@ app.patch("/api/sdr/settings", async (req, res) => {
   }
 });
 
-// Manually trigger one auto-outreach pass (admin). Queue-only by design — always creates
-// drafts for review, never auto-sends, regardless of the mode setting. Optional body.max
-// caps the batch (handy for a quick test). Requires the engine to be enabled in settings.
+// Manually trigger one auto-outreach pass (admin). Respects the configured mode: queue
+// creates drafts for review, send also enrolls them through approve-and-send. Optional
+// body.max caps the batch (handy for a controlled test). Requires the engine enabled.
 app.post("/api/sdr/auto-outreach/run", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
   const max = req.body?.max != null ? Math.max(1, Math.min(50, Number(req.body.max))) : undefined;
   try {
     const r = await runAutoOutreach(pool, { mailboxSentToday, maxDrafts: max });
+    if (r.mode === "send" && Array.isArray(r.createdDrafts) && r.createdDrafts.length) {
+      r.sendResults = await enrollAutoDrafts(r.createdDrafts);
+    }
     res.json({ ok: true, ...r });
   } catch (err) {
     console.error("POST /api/sdr/auto-outreach/run error:", err);
