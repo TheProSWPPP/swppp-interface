@@ -3,6 +3,8 @@ import { ChevronRight, Search, Sparkles } from "lucide-react";
 import {
   getOperatorsList,
   permitApi,
+  generatePermitDrafts,
+  discardOperators,
   type OperatorRow,
   type OperatorsListResponse,
 } from "../../lib/permitApi";
@@ -115,6 +117,13 @@ export default function OperatorWorkspace({
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
+  // Multi-select for bulk actions (separate from the drawer's single selection).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const clearSel = () => setSelected(new Set());
+  const toggleRow = (key: string) =>
+    setSelected((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
+
   // Keep a ref so `load` can always read the latest search without being
   // re-created every keystroke (avoids cascading effect re-runs).
   const searchRef = useRef(search);
@@ -156,20 +165,52 @@ export default function OperatorWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
-  async function runFindEmails() {
+  async function runFindEmails(operatorKeys?: string[]) {
     setEnriching(true);
     try {
-      const r = await permitApi.findEmails(25);
+      const r = await permitApi.findEmails(operatorKeys?.length ? { operatorKeys } : {});
       pushToast?.(
         `Checked ${r.probed} — found ${r.found} email${r.found === 1 ? "" : "s"}, discarded ${r.discarded}`,
         r.found > 0 ? "success" : "error",
       );
+      clearSel();
       load(1);
     } catch (e) {
       pushToast?.((e as Error).message, "error");
     } finally {
       setEnriching(false);
     }
+  }
+
+  // ── Bulk actions on the ticked rows ──
+  async function bulkDraft() {
+    const keys = [...selected];
+    setBulkBusy(true);
+    try {
+      const r = await generatePermitDrafts({ operatorKeys: keys });
+      pushToast?.(
+        r.created > 0 ? `Drafted ${r.created} — review in Email Queue` : "Nothing draftable in selection (need a found email, not already queued/contacted)",
+        r.created > 0 ? "success" : "error",
+      );
+      clearSel();
+      load(page);
+    } catch (e) {
+      pushToast?.((e as Error).message, "error");
+    } finally { setBulkBusy(false); }
+  }
+
+  async function bulkDiscard() {
+    const keys = [...selected];
+    if (!window.confirm(`Discard ${keys.length} compan${keys.length === 1 ? "y" : "ies"}? They drop out of the pipeline.`)) return;
+    setBulkBusy(true);
+    try {
+      const { discarded } = await discardOperators(keys);
+      pushToast?.(`Discarded ${discarded}`, "success");
+      clearSel();
+      load(page);
+    } catch (e) {
+      pushToast?.((e as Error).message, "error");
+    } finally { setBulkBusy(false); }
   }
 
   const counts = data?.counts ?? { pool: 0, promoted: 0, email_ready: 0, discarded: 0, mailed: 0 };
@@ -255,7 +296,7 @@ export default function OperatorWorkspace({
 
         <div className="ml-auto flex items-center gap-2">
           <button
-            onClick={runFindEmails}
+            onClick={() => runFindEmails()}
             disabled={enriching || counts.promoted === 0}
             title={counts.promoted === 0 ? "Pick some companies first" : "Apollo email lookup (~1 credit per company checked)"}
             className="flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
@@ -266,14 +307,48 @@ export default function OperatorWorkspace({
         </div>
       </div>
 
-      {/* ── Sort hint ── */}
-      <p className="text-xs text-slate-400">Sorted: hottest (most non-compliant) first</p>
+      {/* ── Bulk action bar (ticked rows) ── */}
+      {selected.size > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm">
+          <span className="font-semibold text-indigo-700">{selected.size} selected</span>
+          <button onClick={() => runFindEmails([...selected])} disabled={enriching || bulkBusy}
+            className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">
+            Find emails ({selected.size})
+          </button>
+          <button onClick={bulkDraft} disabled={bulkBusy || enriching}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            Draft ({selected.size})
+          </button>
+          <button onClick={bulkDiscard} disabled={bulkBusy || enriching}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-500 hover:text-rose-600 disabled:opacity-50">
+            Discard ({selected.size})
+          </button>
+          <button onClick={clearSel} className="ml-auto text-xs text-slate-500 hover:text-slate-700">Clear</button>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400">Sorted: hottest (most non-compliant) first · tick rows for bulk actions</p>
+      )}
 
       {/* ── Operator table ── */}
       <div className="overflow-x-auto rounded-2xl border border-slate-200">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500">
             <tr>
+              <th className="w-8 p-2">
+                <input
+                  type="checkbox"
+                  aria-label="Select all on page"
+                  checked={operators.length > 0 && operators.every((o) => selected.has(o.operator_key))}
+                  onChange={(e) =>
+                    setSelected((s) => {
+                      const n = new Set(s);
+                      if (e.target.checked) operators.forEach((o) => n.add(o.operator_key));
+                      else operators.forEach((o) => n.delete(o.operator_key));
+                      return n;
+                    })
+                  }
+                />
+              </th>
               <th className="text-left p-2">Company</th>
               <th className="text-right p-2">Permits</th>
               <th className="text-left p-2">Compliance</th>
@@ -286,9 +361,18 @@ export default function OperatorWorkspace({
             {operators.map((row) => (
               <tr
                 key={row.operator_key}
-                className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
+                className={"border-t border-slate-100 hover:bg-slate-50 cursor-pointer " +
+                  (selected.has(row.operator_key) ? "bg-indigo-50/60" : "")}
                 onClick={() => setSelectedKey(row.operator_key)}
               >
+                <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${row.operator_name || row.operator_key}`}
+                    checked={selected.has(row.operator_key)}
+                    onChange={() => toggleRow(row.operator_key)}
+                  />
+                </td>
                 <td className="p-2 font-medium text-slate-800">{row.operator_name || "—"}</td>
                 <td className="p-2 text-right text-slate-600">{row.permit_count}</td>
                 <td className="p-2">
@@ -307,14 +391,14 @@ export default function OperatorWorkspace({
             ))}
             {!operators.length && !loading && (
               <tr>
-                <td colSpan={6} className="p-6 text-center text-slate-400">
+                <td colSpan={7} className="p-6 text-center text-slate-400">
                   No operators match these filters.
                 </td>
               </tr>
             )}
             {loading && (
               <tr>
-                <td colSpan={6} className="p-4 text-center text-slate-400 text-xs">
+                <td colSpan={7} className="p-4 text-center text-slate-400 text-xs">
                   Loading…
                 </td>
               </tr>
