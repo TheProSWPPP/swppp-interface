@@ -98,6 +98,13 @@ export interface SdrLead {
   days_since_outgoing: number | null;
   outreached_by: string | null;
   outreached_status: string | null;
+  initiated_by: string | null;
+  // Per-lead outreach ledger (sdr_outreach_log): the latest real send for THIS lead,
+  // by source. Replaces the person-level last_outgoing_mail_time as the outreach signal.
+  outreach_sent_at: string | null;
+  outreach_source: "pipedrive" | "interface" | null;
+  outreach_sender_name: string | null;
+  outreach_sender_email: string | null;
   bid_date: string | null;
   start_date: string | null;
   trigger_override: string | null;
@@ -178,6 +185,21 @@ export interface SdrSequence {
   active: boolean;
   num_steps: number;
   steps: SdrSequenceStep[];
+}
+
+export interface SdrFirstTouchTemplate {
+  trigger_type: SdrTriggerType;
+  body: string;
+  updated_at?: string | null;
+  updated_by?: string | null;
+}
+
+export interface SdrSettings {
+  auto_outreach_enabled: boolean;
+  auto_outreach_mode: "queue" | "send";
+  auto_min_score: number | null;
+  updated_at?: string | null;
+  updated_by?: string | null;
 }
 
 export interface SdrEngagementLead {
@@ -290,6 +312,23 @@ export const sdrApi = {
       `/api/sdr/mailboxes/${id}`,
       { method: "PATCH", body: JSON.stringify({ active }) },
     ),
+
+  getFirstTouchTemplates: () =>
+    sdrFetch<{ templates: Record<SdrTriggerType, SdrFirstTouchTemplate> }>("/api/sdr/first-touch-templates"),
+
+  updateFirstTouchTemplate: (trigger: SdrTriggerType, body: string) =>
+    sdrFetch<{ template: SdrFirstTouchTemplate }>(`/api/sdr/first-touch-templates/${trigger}`, {
+      method: "PUT",
+      body: JSON.stringify({ body }),
+    }),
+
+  getSettings: () => sdrFetch<{ settings: SdrSettings }>("/api/sdr/settings"),
+
+  updateSettings: (patch: Partial<Pick<SdrSettings, "auto_outreach_enabled" | "auto_outreach_mode" | "auto_min_score">>) =>
+    sdrFetch<{ settings: SdrSettings }>("/api/sdr/settings", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
 
   listTemplates: () =>
     sdrFetch<{ templates: Record<SdrTriggerType, SdrTemplate> }>("/api/sdr/templates"),
