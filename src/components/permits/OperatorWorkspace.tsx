@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { ChevronRight, Search, Download, Sparkles } from "lucide-react";
+import { ChevronRight, Search, Sparkles } from "lucide-react";
 import {
   getOperatorsList,
   permitApi,
@@ -8,24 +8,24 @@ import {
 } from "../../lib/permitApi";
 import OperatorDrawer from "./OperatorDrawer";
 
-type FunnelStage = "pool" | "promoted" | "email_ready" | "enriched" | "mailed";
+type FunnelStage = "pool" | "promoted" | "email_ready" | "mailed" | "discarded";
 type Stage = "all" | FunnelStage;
 type Compliance = "all" | "violation" | "snc";
 
 const STAGE_LABELS: { key: FunnelStage; label: string; tip: string }[] = [
   { key: "pool", label: "All", tip: "Every company — not started yet" },
-  { key: "promoted", label: "Picked", tip: "Companies you've picked to work" },
+  { key: "promoted", label: "Picked", tip: "Companies you've picked — run Find emails to check them" },
   { key: "email_ready", label: "Email ready", tip: "We found an email — send it from the Email Queue tab" },
-  { key: "enriched", label: "Address only", tip: "Mailing address but no email — for the direct-mail CSV" },
-  { key: "mailed", label: "Contacted", tip: "Already emailed, mailed, or exported" },
+  { key: "mailed", label: "Contacted", tip: "Already emailed" },
+  { key: "discarded", label: "Discarded", tip: "Checked but no email found — dropped from the pipeline" },
 ];
 
 const STAGE_PILL: Record<FunnelStage, { label: string; cls: string }> = {
   pool: { label: "Not started", cls: "bg-slate-100 text-slate-600" },
   promoted: { label: "Picked", cls: "bg-blue-100 text-blue-700" },
   email_ready: { label: "Email ready", cls: "bg-emerald-100 text-emerald-700" },
-  enriched: { label: "Address only", cls: "bg-indigo-100 text-indigo-700" },
   mailed: { label: "Contacted", cls: "bg-green-100 text-green-700" },
+  discarded: { label: "No email", cls: "bg-slate-100 text-slate-400" },
 };
 
 const PAGE_SIZE = 50;
@@ -156,11 +156,14 @@ export default function OperatorWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
-  async function runEnrich() {
+  async function runFindEmails() {
     setEnriching(true);
     try {
-      const r = await permitApi.enrich(50);
-      pushToast?.(`Enriched ${r.ok}/${r.processed} (${r.fail} failed)`, "success");
+      const r = await permitApi.findEmails(25);
+      pushToast?.(
+        `Checked ${r.probed} — found ${r.found} email${r.found === 1 ? "" : "s"}, discarded ${r.discarded}`,
+        r.found > 0 ? "success" : "error",
+      );
       load(1);
     } catch (e) {
       pushToast?.((e as Error).message, "error");
@@ -169,7 +172,7 @@ export default function OperatorWorkspace({
     }
   }
 
-  const counts = data?.counts ?? { pool: 0, promoted: 0, email_ready: 0, enriched: 0, mailed: 0 };
+  const counts = data?.counts ?? { pool: 0, promoted: 0, email_ready: 0, discarded: 0, mailed: 0 };
   const total = data?.total ?? 0;
   const operators = data?.operators ?? [];
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -252,30 +255,14 @@ export default function OperatorWorkspace({
 
         <div className="ml-auto flex items-center gap-2">
           <button
-            onClick={runEnrich}
+            onClick={runFindEmails}
             disabled={enriching || counts.promoted === 0}
-            title={counts.promoted === 0 ? "Promote operators first" : undefined}
+            title={counts.promoted === 0 ? "Pick some companies first" : "Apollo email lookup (~1 credit per company checked)"}
             className="flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             <Sparkles className="h-4 w-4" />
-            {enriching ? "Enriching…" : "Enrich promoted (up to 50)"}
+            {enriching ? "Finding…" : `Find emails (${Math.min(25, counts.promoted)})`}
           </button>
-          {counts.enriched === 0 ? (
-            <button
-              disabled
-              title="Get mailing addresses first — click Enrich"
-              className="flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl border border-slate-200 opacity-50 cursor-not-allowed"
-            >
-              <Download className="h-4 w-4" /> Download mailing list ({counts.enriched.toLocaleString()})
-            </button>
-          ) : (
-            <a
-              href={permitApi.directMailCsvUrl()}
-              className="flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50"
-            >
-              <Download className="h-4 w-4" /> Download mailing list ({counts.enriched.toLocaleString()})
-            </a>
-          )}
         </div>
       </div>
 
