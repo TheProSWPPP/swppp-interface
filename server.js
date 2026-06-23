@@ -20,6 +20,7 @@ import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
+import { runPermitAutoFind, runPermitAutoSend } from "./lib/permitAuto.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
@@ -1154,6 +1155,26 @@ if (process.env.DATABASE_URL && process.env.PERMIT_REFRESH_ENABLED === "true") {
     } catch (e) { console.error("[permit-refresh] failed:", e.message); }
   };
   setInterval(runPermitRefresh, 30 * 24 * 60 * 60 * 1000); // ~monthly
+}
+
+// Permit automation loops (in-process cron). Each internally no-ops unless its toggle is
+// on (permit_engine_settings.auto_find_enabled / auto_send_enabled); auto-send also needs
+// the master switch. First fire is one interval after boot (no surprise sends on deploy).
+if (process.env.DATABASE_URL) {
+  const tickFind = async () => {
+    try {
+      const r = await runPermitAutoFind(pool);
+      if (!r.skipped) console.log(`[permit-auto-find] ${JSON.stringify(r)}`);
+    } catch (e) { console.error("[permit-auto-find] failed:", e.message); }
+  };
+  const tickSend = async () => {
+    try {
+      const r = await runPermitAutoSend(pool);
+      if (!r.skipped && (r.sent || r.errors?.length)) console.log(`[permit-auto-send] ${JSON.stringify(r)}`);
+    } catch (e) { console.error("[permit-auto-send] failed:", e.message); }
+  };
+  setInterval(tickFind, 6 * 60 * 60 * 1000); // ~every 6h
+  setInterval(tickSend, 15 * 60 * 1000);     // ~every 15 min
 }
 
 // Fallback in-memory store if no DB is connected (for local dev)

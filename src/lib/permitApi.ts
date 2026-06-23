@@ -115,13 +115,19 @@ export interface OperatorDetail {
   outreach: OutreachEvent[];
 }
 
-export interface PermitSettings { active: boolean; }
+export interface PermitSettings {
+  active: boolean;
+  auto_find_enabled?: boolean;
+  auto_find_daily_cap?: number;
+  auto_find_backlog_max?: number;
+  auto_send_enabled?: boolean;
+}
 export interface PermitMailbox { id: string; email: string; display_name: string | null; permit_enabled: boolean; daily_send_limit?: number; }
 
 export async function getPermitSettings(): Promise<{ settings: PermitSettings; mailboxes: PermitMailbox[] }> {
   return j<{ settings: PermitSettings; mailboxes: PermitMailbox[] }>(`/api/permits/settings`);
 }
-export async function patchPermitSettings(body: { active: boolean }): Promise<{ settings: PermitSettings }> {
+export async function patchPermitSettings(body: Partial<PermitSettings>): Promise<{ settings: PermitSettings }> {
   return j<{ settings: PermitSettings }>(`/api/permits/settings`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -169,7 +175,7 @@ export interface PermitDraft {
 
 export interface PermitDraftsResponse {
   drafts: PermitDraft[];
-  counts: { pending: number; sent: number; rejected: number };
+  counts: { pending: number; approved: number; sent: number; rejected: number };
 }
 
 export interface GenerateDraftsResult {
@@ -207,7 +213,21 @@ export function rejectPermitDraft(id: string, reason?: string): Promise<{ draft:
   });
 }
 
-export function approvePermitDraft(
+// Approve = queue for the auto-sender (status 'approved').
+export function approvePermitDraft(id: string): Promise<{ draft: PermitDraft }> {
+  return jMsg<{ draft: PermitDraft }>(`/api/permits/drafts/${id}/approve`, { method: "POST", body: "{}" });
+}
+
+// Bulk-approve: all pending, or a specific set of ids.
+export function approveAllPermitDrafts(ids?: string[]): Promise<{ approved: number }> {
+  return jMsg<{ approved: number }>(`/api/permits/drafts/approve`, {
+    method: "POST",
+    body: JSON.stringify(ids && ids.length ? { ids } : {}),
+  });
+}
+
+// Send now = immediate enroll (bypasses the auto-send queue).
+export function sendPermitDraftNow(
   id: string,
 ): Promise<{ id: string; status: string; apollo_contact_id: string; enrolled: number }> {
   return jMsg(`/api/permits/drafts/${id}/approve-and-send`, { method: "POST", body: "{}" });

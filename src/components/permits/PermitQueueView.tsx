@@ -1,21 +1,23 @@
 import { useEffect, useState } from "react";
-import { Send, Pencil, X, Check, RefreshCw, Building2 } from "lucide-react";
+import { Send, Pencil, X, Check, RefreshCw, Building2, CheckCheck } from "lucide-react";
 import {
   generatePermitDrafts,
   getPermitDrafts,
   editPermitDraft,
   rejectPermitDraft,
   approvePermitDraft,
+  approveAllPermitDrafts,
+  sendPermitDraftNow,
   type PermitDraft,
 } from "../../lib/permitApi";
 
-type Tab = "pending" | "sent" | "rejected";
+type Tab = "pending" | "approved" | "sent" | "rejected";
 type Toast = (m: string, k?: "success" | "error") => void;
 
 export default function PermitQueueView({ pushToast }: { pushToast?: Toast }) {
   const [tab, setTab] = useState<Tab>("pending");
   const [drafts, setDrafts] = useState<PermitDraft[]>([]);
-  const [counts, setCounts] = useState({ pending: 0, sent: 0, rejected: 0 });
+  const [counts, setCounts] = useState({ pending: 0, approved: 0, sent: 0, rejected: 0 });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -39,16 +41,10 @@ export default function PermitQueueView({ pushToast }: { pushToast?: Toast }) {
     setBusy(true);
     try {
       const r = await generatePermitDrafts();
-      if (r.created > 0) {
-        pushToast?.(`Drafted ${r.created} email${r.created === 1 ? "" : "s"} — review below`, "success");
-      } else if (r.eligible === 0) {
-        pushToast?.("No new companies to draft — all email-able ones are queued or contacted", "success");
-      } else {
-        pushToast?.("Nothing new to draft", "success");
-      }
-      if (r.mailboxesEnabled === 0) {
-        pushToast?.("Heads up: no sending mailbox is enabled for permits yet", "error");
-      }
+      if (r.created > 0) pushToast?.(`Drafted ${r.created} email${r.created === 1 ? "" : "s"} — review below`, "success");
+      else if (r.eligible === 0) pushToast?.("No new companies to draft — all email-able ones are queued or contacted", "success");
+      else pushToast?.("Nothing new to draft", "success");
+      if (r.mailboxesEnabled === 0) pushToast?.("Heads up: no sending mailbox is enabled for permits yet", "error");
       setTab("pending");
       await load("pending");
     } catch (e) {
@@ -59,18 +55,38 @@ export default function PermitQueueView({ pushToast }: { pushToast?: Toast }) {
   };
 
   const approve = async (d: PermitDraft) => {
-    if (!window.confirm(`Send this email to ${d.operator_name || d.email} now?`)) return;
     setBusy(true);
     try {
       await approvePermitDraft(d.id);
+      pushToast?.(`Approved ${d.operator_name || d.email}`, "success");
+      await load(tab);
+    } catch (e) {
+      pushToast?.(e instanceof Error ? e.message : "Couldn't approve", "error");
+    } finally { setBusy(false); }
+  };
+
+  const approveAll = async () => {
+    if (!window.confirm(`Approve all ${counts.pending} drafts to review? They'll send within each inbox's daily cap once the master switch is on.`)) return;
+    setBusy(true);
+    try {
+      const { approved } = await approveAllPermitDrafts();
+      pushToast?.(`Approved ${approved} draft${approved === 1 ? "" : "s"}`, "success");
+      await load("pending");
+    } catch (e) {
+      pushToast?.(e instanceof Error ? e.message : "Couldn't approve all", "error");
+    } finally { setBusy(false); }
+  };
+
+  const sendNow = async (d: PermitDraft) => {
+    if (!window.confirm(`Send this email to ${d.operator_name || d.email} right now?`)) return;
+    setBusy(true);
+    try {
+      await sendPermitDraftNow(d.id);
       pushToast?.(`Sent to ${d.operator_name || d.email}`, "success");
-      setDrafts((xs) => xs.filter((x) => x.id !== d.id));
-      setCounts((c) => ({ ...c, pending: Math.max(0, c.pending - 1), sent: c.sent + 1 }));
+      await load(tab);
     } catch (e) {
       pushToast?.(e instanceof Error ? e.message : "Send failed", "error");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   };
 
   const reject = async (d: PermitDraft) => {
@@ -78,13 +94,10 @@ export default function PermitQueueView({ pushToast }: { pushToast?: Toast }) {
     setBusy(true);
     try {
       await rejectPermitDraft(d.id);
-      setDrafts((xs) => xs.filter((x) => x.id !== d.id));
-      setCounts((c) => ({ ...c, pending: Math.max(0, c.pending - 1), rejected: c.rejected + 1 }));
+      await load(tab);
     } catch (e) {
       pushToast?.(e instanceof Error ? e.message : "Couldn't remove draft", "error");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   };
 
   const saveEdit = async (id: string, subject: string, body: string) => {
@@ -96,18 +109,14 @@ export default function PermitQueueView({ pushToast }: { pushToast?: Toast }) {
       pushToast?.("Saved", "success");
     } catch (e) {
       pushToast?.(e instanceof Error ? e.message : "Couldn't save", "error");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   };
 
   const tabBtn = (v: Tab, label: string, n: number) => (
     <button
       onClick={() => setTab(v)}
-      className={
-        "rounded-lg px-3 py-1.5 text-sm font-semibold " +
-        (tab === v ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700")
-      }
+      className={"rounded-lg px-3 py-1.5 text-sm font-semibold " +
+        (tab === v ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700")}
     >
       {label} <span className="text-xs text-slate-400">({n})</span>
     </button>
@@ -115,38 +124,46 @@ export default function PermitQueueView({ pushToast }: { pushToast?: Toast }) {
 
   return (
     <div className="space-y-3">
-      {/* What this screen does */}
       <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-        Drafts the renewal email for companies we found an address for. Nothing sends on its own —
-        review each one and hit <strong>Approve &amp; send</strong>. Sending also needs the master
-        switch ON (top of this tab) and the Apollo step activated once.
+        <strong>Approve</strong> queues a draft for auto-send (within each inbox's daily cap, when auto-send + the
+        master switch are on). <strong>Send now</strong> fires one immediately. Nothing leaves without one of those.
       </div>
 
-      {/* Generate + status tabs */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
           {tabBtn("pending", "To review", counts.pending)}
+          {tabBtn("approved", "Approved", counts.approved)}
           {tabBtn("sent", "Sent", counts.sent)}
           {tabBtn("rejected", "Removed", counts.rejected)}
         </div>
-        <button
-          onClick={generate}
-          disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-        >
-          <RefreshCw className="h-4 w-4" /> Draft emails
-        </button>
+        <div className="flex items-center gap-2">
+          {tab === "pending" && counts.pending > 0 && (
+            <button
+              onClick={approveAll}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+            >
+              <CheckCheck className="h-4 w-4" /> Approve all ({counts.pending})
+            </button>
+          )}
+          <button
+            onClick={generate}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            <RefreshCw className="h-4 w-4" /> Draft emails
+          </button>
+        </div>
       </div>
 
       {loading ? (
         <p className="py-8 text-center text-sm text-slate-400">Loading…</p>
       ) : drafts.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">
-          {tab === "pending"
-            ? "Nothing to review. Hit “Draft emails” to queue the email-able companies."
-            : tab === "sent"
-              ? "No emails sent yet."
-              : "No removed drafts."}
+          {tab === "pending" ? "Nothing to review. Hit “Draft emails” to queue the email-able companies."
+            : tab === "approved" ? "No approved drafts waiting."
+            : tab === "sent" ? "No emails sent yet."
+            : "No removed drafts."}
         </div>
       ) : (
         <div className="space-y-3">
@@ -161,6 +178,7 @@ export default function PermitQueueView({ pushToast }: { pushToast?: Toast }) {
               onCancelEdit={() => setEditing(null)}
               onSave={saveEdit}
               onApprove={() => approve(d)}
+              onSendNow={() => sendNow(d)}
               onReject={() => reject(d)}
             />
           ))}
@@ -171,7 +189,7 @@ export default function PermitQueueView({ pushToast }: { pushToast?: Toast }) {
 }
 
 function DraftCard({
-  draft, tab, busy, editing, onEdit, onCancelEdit, onSave, onApprove, onReject,
+  draft, tab, busy, editing, onEdit, onCancelEdit, onSave, onApprove, onSendNow, onReject,
 }: {
   draft: PermitDraft;
   tab: Tab;
@@ -181,6 +199,7 @@ function DraftCard({
   onCancelEdit: () => void;
   onSave: (id: string, subject: string, body: string) => void;
   onApprove: () => void;
+  onSendNow: () => void;
   onReject: () => void;
 }) {
   const [subject, setSubject] = useState(draft.subject);
@@ -190,7 +209,6 @@ function DraftCard({
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      {/* Recipient */}
       <div className="mb-2 flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-1.5 font-semibold text-slate-800">
@@ -220,18 +238,12 @@ function DraftCard({
             className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs focus:border-indigo-400 focus:outline-none"
           />
           <div className="flex gap-2">
-            <button
-              onClick={() => onSave(draft.id, subject, body)}
-              disabled={busy}
-              className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
-            >
+            <button onClick={() => onSave(draft.id, subject, body)} disabled={busy}
+              className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
               <Check className="h-3.5 w-3.5" /> Save
             </button>
-            <button
-              onClick={onCancelEdit}
-              disabled={busy}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600"
-            >
+            <button onClick={onCancelEdit} disabled={busy}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600">
               Cancel
             </button>
           </div>
@@ -240,34 +252,41 @@ function DraftCard({
         <>
           <div className="mb-1 text-sm font-semibold text-slate-700">{draft.subject}</div>
           {/* Faithful preview: Apollo wraps the body in this same blue Georgia style */}
-          <div
-            className="whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm"
-            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: "#1a5276", lineHeight: 1.55 }}
-          >
+          <div className="whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm"
+            style={{ fontFamily: "Georgia, 'Times New Roman', serif", color: "#1a5276", lineHeight: 1.55 }}>
             {draft.body}
           </div>
 
           {tab === "pending" && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button
-                onClick={onApprove}
-                disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-              >
-                <Send className="h-3.5 w-3.5" /> Approve &amp; send
+              <button onClick={onApprove} disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                <Check className="h-3.5 w-3.5" /> Approve
               </button>
-              <button
-                onClick={onEdit}
-                disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-              >
+              <button onClick={onSendNow} disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <Send className="h-3.5 w-3.5" /> Send now
+              </button>
+              <button onClick={onEdit} disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">
                 <Pencil className="h-3.5 w-3.5" /> Edit
               </button>
-              <button
-                onClick={onReject}
-                disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-rose-600 disabled:opacity-50"
-              >
+              <button onClick={onReject} disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-rose-600 disabled:opacity-50">
+                <X className="h-3.5 w-3.5" /> Remove
+              </button>
+            </div>
+          )}
+
+          {tab === "approved" && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-emerald-600">✓ Approved — waiting for auto-send (or send it now)</span>
+              <button onClick={onSendNow} disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <Send className="h-3.5 w-3.5" /> Send now
+              </button>
+              <button onClick={onReject} disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-rose-600 disabled:opacity-50">
                 <X className="h-3.5 w-3.5" /> Remove
               </button>
             </div>
