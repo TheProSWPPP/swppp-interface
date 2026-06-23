@@ -270,5 +270,4 @@ export const permitApi = {
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined) q.set(k, String(v)); });
     return j<EnrichedResponse>(`/api/permits/enriched?${q.toString()}`);
   },
-  directMailCsvUrl: () => `/api/permits/export/direct-mail.csv`,
 };
