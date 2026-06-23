@@ -2827,31 +2827,44 @@ const TRIGGER_ORDER: SdrTriggerType[] = ["AGC", "LBA", "CM", "PB"];
 
 function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "success" | "error", t: string) => void }) {
   const [templates, setTemplates] = useState<Record<SdrTriggerType, SdrFirstTouchTemplate> | null>(null);
+  const [sequences, setSequences] = useState<SdrSequence[] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isAdmin = user.role === "admin";
 
   useEffect(() => {
-    sdrApi
-      .getFirstTouchTemplates()
-      .then((d) => {
-        setTemplates(d.templates);
+    Promise.all([
+      sdrApi.getFirstTouchTemplates(),
+      sdrApi.listSequences().catch(() => ({ sequences: [] as SdrSequence[] })),
+    ])
+      .then(([ft, sq]) => {
+        setTemplates(ft.templates);
         const init: Record<string, string> = {};
-        (Object.keys(d.templates) as SdrTriggerType[]).forEach((t) => {
-          init[t] = d.templates[t].body;
+        (Object.keys(ft.templates) as SdrTriggerType[]).forEach((t) => {
+          init[t] = ft.templates[t].body;
         });
         setDrafts(init);
+        setSequences(sq.sequences || []);
       })
       .catch((e) => setError(e.message));
   }, []);
+
+  const seqByTrigger = useMemo(() => {
+    const m: Record<string, SdrSequence> = {};
+    for (const s of sequences || []) {
+      const tr = SEQUENCE_LABEL[s.id];
+      if (tr) m[tr] = s;
+    }
+    return m;
+  }, [sequences]);
 
   async function save(t: SdrTriggerType) {
     setSaving(t);
     try {
       const r = await sdrApi.updateFirstTouchTemplate(t, drafts[t]);
       setTemplates((prev) => (prev ? { ...prev, [t]: r.template } : prev));
-      pushToast("success", `${t} first-touch saved`);
+      pushToast("success", `${t} step 1 saved`);
     } catch (e) {
       pushToast("error", (e as Error).message);
     } finally {
@@ -2860,176 +2873,90 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
   }
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-4">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900">First-touch drafts</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
-            The Day-0 copy generated for each lead. Merge fields:{" "}
-            <span className="font-mono text-slate-600">{"{First} {ENV} {SWPPP} {Sig}"}</span>.{" "}
-            {isAdmin ? "Edit and save — applies to new drafts immediately." : "Ask Derek to edit these."}
-          </p>
-        </div>
-        {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
-        {!templates ? (
-          <div className="py-8 text-center text-slate-400">Loading…</div>
-        ) : (
-          TRIGGER_ORDER.filter((t) => templates[t]).map((t) => {
-            const dirty = drafts[t] !== templates[t].body;
-            return (
-              <div key={t} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-                  <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset", TRIGGER_COLORS[t])}>{t}</span>
-                  <span className="text-sm font-semibold text-slate-900">{TRIGGER_LABELS[t]}</span>
-                  {isAdmin && (
-                    <button
-                      onClick={() => save(t)}
-                      disabled={!dirty || saving === t}
-                      className={cn(
-                        "ml-auto rounded-lg px-3 py-1 text-xs font-semibold transition-colors",
-                        dirty ? "bg-cta-500 text-white hover:bg-cta-600" : "bg-slate-100 text-slate-400",
-                      )}
-                    >
-                      {saving === t ? "Saving…" : dirty ? "Save" : "Saved"}
-                    </button>
-                  )}
-                </div>
-                <div className="p-4">
+    <div className="space-y-4">
+      <p className="text-xs text-slate-500">
+        One sequence per trigger. Step 1 is the first-touch email built per lead (merge fields{" "}
+        <span className="font-mono text-slate-600">{"{First} {ENV} {SWPPP} {Sig}"}</span>); the later steps are the live
+        Apollo follow-ups. {isAdmin ? "Edits save immediately." : "Admins edit these."}
+      </p>
+      {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+      {!templates || !sequences ? (
+        <div className="py-8 text-center text-slate-400">Loading…</div>
+      ) : (
+        TRIGGER_ORDER.filter((t) => templates[t]).map((t) => {
+          const dirty = drafts[t] !== templates[t].body;
+          const seq = seqByTrigger[t];
+          const followups = seq
+            ? [...seq.steps]
+                .sort((a, b) => (a.position ?? 1e9) - (b.position ?? 1e9))
+                .slice(1) // step 1 is the wrapper that injects the first-touch draft below
+            : [];
+          return (
+            <div key={t} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+                <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset", TRIGGER_COLORS[t])}>{t}</span>
+                <span className="text-sm font-semibold text-slate-900">{TRIGGER_LABELS[t]}</span>
+                {seq && (
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset",
+                      seq.active ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-slate-100 text-slate-500 ring-slate-200",
+                    )}
+                  >
+                    {seq.active ? "Active" : "Inactive"}
+                  </span>
+                )}
+                <span className="text-xs text-slate-500">
+                  — {1 + followups.length} step{1 + followups.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <ul className="divide-y divide-slate-100">
+                {/* Step 1 — the editable first-touch (day 0) */}
+                <li className="px-4 py-3">
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">Step 1</span>
+                    <span className="text-[11px] text-slate-400">Day 0 · first touch</span>
+                    {isAdmin && (
+                      <button
+                        onClick={() => save(t)}
+                        disabled={!dirty || saving === t}
+                        className={cn(
+                          "ml-auto rounded-lg px-3 py-1 text-xs font-semibold transition-colors",
+                          dirty ? "bg-cta-500 text-white hover:bg-cta-600" : "bg-slate-100 text-slate-400",
+                        )}
+                      >
+                        {saving === t ? "Saving…" : dirty ? "Save" : "Saved"}
+                      </button>
+                    )}
+                  </div>
                   <textarea
                     value={drafts[t] ?? ""}
                     onChange={(e) => setDrafts((d) => ({ ...d, [t]: e.target.value }))}
                     readOnly={!isAdmin}
-                    rows={8}
+                    rows={7}
                     className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700 focus:border-brand-400 focus:outline-none"
                   />
-                </div>
-              </div>
-            );
-          })
-        )}
-      </section>
-
-      <section className="space-y-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900">Apollo sequences</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
-            The live multi-step campaigns. Step 1 sends the first-touch draft above; later steps are the follow-ups.
-          </p>
-        </div>
-        <SequencesView user={user} pushToast={pushToast} />
-      </section>
+                </li>
+                {/* Steps 2+ — the live Apollo follow-ups */}
+                {followups.map((step, i) => (
+                  <SequenceStepEditor
+                    key={step.template_id || i}
+                    seqName={seq.name}
+                    step={step}
+                    stepNumber={i + 2}
+                    isAdmin={isAdmin}
+                    pushToast={pushToast}
+                  />
+                ))}
+              </ul>
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }
 
-// --------------------------------------------------------------------------
-// Sequences — live Apollo sequence HTML editor (admin-only edit, instant save)
-// --------------------------------------------------------------------------
-
-function SequencesView({
-  user,
-  pushToast,
-}: {
-  user: SdrUser;
-  pushToast: (kind: "success" | "error", text: string) => void;
-}) {
-  const isAdmin = user.role === "admin";
-  const [sequences, setSequences] = useState<SdrSequence[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    sdrApi
-      .listSequences()
-      .then((d) => {
-        if (!cancelled) setSequences(d.sequences);
-      })
-      .catch((e) => {
-        if (!cancelled) setError((e as Error).message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (error)
-    return (
-      <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
-    );
-  if (!sequences) return <div className="text-center text-slate-400 py-12">Loading…</div>;
-  if (sequences.length === 0)
-    return (
-      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
-        No Apollo sequences found.
-      </div>
-    );
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-        These are <span className="font-semibold">LIVE Apollo sequences</span> that email real prospects. Edits
-        save straight to Apollo — there is no separate publish step.
-        {!isAdmin && <span className="block mt-1 font-semibold">Admins only can edit sequences.</span>}
-      </div>
-      {sequences.map((seq) => (
-        <SequenceCard key={seq.id} seq={seq} isAdmin={isAdmin} pushToast={pushToast} />
-      ))}
-    </div>
-  );
-}
-
-function SequenceCard({
-  seq,
-  isAdmin,
-  pushToast,
-}: {
-  seq: SdrSequence;
-  isAdmin: boolean;
-  pushToast: (kind: "success" | "error", text: string) => void;
-}) {
-  const sortedSteps = useMemo(
-    () =>
-      [...seq.steps].sort((a, b) => {
-        const pa = a.position ?? Number.MAX_SAFE_INTEGER;
-        const pb = b.position ?? Number.MAX_SAFE_INTEGER;
-        return pa - pb;
-      }),
-    [seq.steps],
-  );
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 flex-wrap">
-        <span className="text-sm font-semibold text-slate-900">{seq.name}</span>
-        <span
-          className={cn(
-            "text-xs font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset",
-            seq.active
-              ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-              : "bg-slate-100 text-slate-500 ring-slate-200",
-          )}
-        >
-          {seq.active ? "Active" : "Inactive"}
-        </span>
-        <span className="text-xs text-slate-500">
-          — {seq.num_steps} step{seq.num_steps === 1 ? "" : "s"}
-        </span>
-      </div>
-      <ul className="divide-y divide-slate-100">
-        {sortedSteps.map((step, i) => (
-          <SequenceStepEditor
-            key={step.template_id || i}
-            seqName={seq.name}
-            step={step}
-            stepNumber={i + 1}
-            isAdmin={isAdmin}
-            pushToast={pushToast}
-          />
-        ))}
-      </ul>
-    </div>
-  );
-}
 
 // Re-append the tracking pixel <img> if the visual editor stripped it on edit.
 // The pixel is a trailing, display:none <img> pointing at /api/sdr/track/open/...
