@@ -20,6 +20,7 @@ import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
+import { registerPermitExportRoutes } from "./lib/permitExportRoutes.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
@@ -5297,6 +5298,7 @@ setInterval(async () => {
 // routes get shadowed by the index.html fallback.
 registerNurtureRoutes(app, pool);
 registerPermitRoutes(app, pool);
+registerPermitExportRoutes(app, pool);
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, "dist")));
