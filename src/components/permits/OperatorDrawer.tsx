@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
-import { X } from "lucide-react";
+import { X, Phone, Mail } from "lucide-react";
 import {
   getOperatorDetail,
-  promoteOperator,
   logOutreach,
   type OperatorDetail,
   type OperatorRow,
@@ -109,32 +108,12 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
     }
   }, [operatorKey]);
 
-  async function handlePromote() {
+  async function markContacted(status: "called" | "mailed" | "emailed", channel: "phone" | "mail" | "email") {
     if (!operatorKey) return;
     setActing(true);
     try {
-      const { promoted } = await promoteOperator(operatorKey);
-      pushToast?.(`Promoted ${promoted} permit(s)`, "success");
-      onChanged();
-      loadDetail();
-    } catch (e) {
-      pushToast?.(`Promote failed: ${(e as Error).message}`, "error");
-    } finally {
-      setActing(false);
-    }
-  }
-
-  function handleSkip() {
-    if (!window.confirm("Discard this company? It drops out of the pipeline.")) return;
-    handleOutreach("skipped");
-  }
-
-  async function handleOutreach(status: "mailed" | "skipped") {
-    if (!operatorKey) return;
-    setActing(true);
-    try {
-      await logOutreach(operatorKey, status);
-      pushToast?.(`Marked as ${status}`, "success");
+      await logOutreach(operatorKey, status, channel);
+      pushToast?.(`Marked ${status}`, "success");
       onChanged();
       loadDetail();
     } catch (e) {
@@ -151,9 +130,9 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
   const enrichment = detail?.enrichment ?? null;
   const outreach = detail?.outreach ?? [];
   const email = detail?.email ?? null;
+  const phone = detail?.phone ?? null;
 
   const complianceTier = op ? deriveComplianceTier(op.max_pain) : "clean";
-  const hasPoolPermit = permits.some((p) => p.status === "pool");
 
   return (
     <>
@@ -211,28 +190,38 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
                 </div>
               </div>
 
-              {/* ── Email (priority channel) ── */}
+              {/* ── Phone ── */}
+              {phone && (
+                <div>
+                  <SectionLabel>Phone</SectionLabel>
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+                    <a href={`tel:${phone.phone.replace(/[^\d+]/g, "")}`} className="font-semibold text-emerald-800">{phone.phone}</a>
+                    <p className="mt-0.5 text-xs text-emerald-600">
+                      {phone.source === "gemini_grounded" ? "Web-sourced — verify before relying on it" : "Company main line"}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Email ── */}
               {email && (
                 <div>
                   <SectionLabel>Email</SectionLabel>
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
-                    <p className="font-semibold text-emerald-800 break-all">{email.email}</p>
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
+                    <a href={`mailto:${email.email}`} className="font-semibold text-blue-800 break-all">{email.email}</a>
                     {(email.contact_name || email.title) && (
-                      <p className="mt-0.5 text-xs text-emerald-700">
+                      <p className="mt-0.5 text-xs text-blue-700">
                         {email.contact_name}
                         {email.title ? ` · ${email.title}` : ""}
                       </p>
                     )}
-                    <p className="mt-1 text-xs text-emerald-600">
-                      Email ready — draft &amp; send it from the Email Queue tab.
-                    </p>
                   </div>
                 </div>
               )}
 
               {/* ── Contact & address ── */}
               <div>
-                <SectionLabel>{email ? "Mailing fallback" : "Contact & Address"}</SectionLabel>
+                <SectionLabel>Mailing address</SectionLabel>
                 <div className="space-y-1 text-sm text-slate-700">
                   {enrichment?.contact_name ? (
                     <p>
@@ -386,25 +375,22 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
           )}
         </div>
 
-        {/* ── Actions footer ── */}
+        {/* ── Actions footer: mark how Derek reached them ── */}
         {detail && (
-          <div className="sticky bottom-0 bg-white border-t border-slate-100 px-5 py-3 flex flex-wrap gap-2">
-            {hasPoolPermit && (
-              <button
-                onClick={handlePromote}
-                disabled={acting}
-                className="flex-1 min-w-[120px] text-sm font-semibold px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-              >
-                Promote
+          <div className="sticky bottom-0 bg-white border-t border-slate-100 px-5 py-3">
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">Mark contacted</p>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => markContacted("called", "phone")} disabled={acting}
+                className="flex flex-1 min-w-[90px] items-center justify-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                <Phone className="h-4 w-4" /> Called
               </button>
-            )}
-            <div className="w-full pt-1 mt-1 border-t border-slate-100 flex justify-center">
-              <button
-                onClick={handleSkip}
-                disabled={acting}
-                className="text-xs text-slate-400 hover:text-slate-600 underline-offset-2 hover:underline disabled:opacity-50"
-              >
-                Discard
+              <button onClick={() => markContacted("mailed", "mail")} disabled={acting}
+                className="flex flex-1 min-w-[90px] items-center justify-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+                Mailed
+              </button>
+              <button onClick={() => markContacted("emailed", "email")} disabled={acting}
+                className="flex flex-1 min-w-[90px] items-center justify-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                <Mail className="h-4 w-4" /> Emailed
               </button>
             </div>
           </div>
