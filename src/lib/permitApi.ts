@@ -54,9 +54,11 @@ export interface OperatorRow {
   max_pain: number;
   best_score: number;
   earliest_expiry: string | null;
-  stage: "pool" | "promoted" | "email_ready" | "discarded" | "mailed";
-  emailable: boolean;
-  discarded: boolean;
+  stage: "todo" | "contacted";
+  phone: string | null;
+  has_phone: boolean;
+  has_email: boolean;
+  has_address: boolean;
   compliance_tier: "snc" | "violation" | "inspected" | "clean";
   possible_customer: boolean;
   possible_crm: boolean;
@@ -69,7 +71,7 @@ export interface OperatorsListResponse {
   total: number;
   page: number;
   pageSize: number;
-  counts: { pool: number; promoted: number; email_ready: number; discarded: number; mailed: number };
+  counts: { all: number; todo: number; contacted: number; with_phone: number; with_email: number; with_address: number };
   compliance_last_refreshed?: string | null;
 }
 
@@ -112,6 +114,7 @@ export interface OperatorDetail {
   mailable: boolean;
   email: { email: string; contact_name: string | null; title: string | null } | null;
   emailable: boolean;
+  phone: { phone: string; source: string | null } | null;
   outreach: OutreachEvent[];
 }
 
@@ -266,8 +269,8 @@ export function sendPermitDraftNow(
 
 export function getOperatorsList(params: {
   stage?: string;
+  channel?: string;
   compliance?: string;
-  hideContacted?: boolean;
   search?: string;
   sort?: string;
   page?: number;
@@ -275,7 +278,7 @@ export function getOperatorsList(params: {
 } = {}): Promise<OperatorsListResponse> {
   const q = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== "" && v !== false) q.set(k, String(v));
+    if (v !== undefined && v !== "") q.set(k, String(v));
   });
   return j<OperatorsListResponse>(`/api/permits/operators-list?${q.toString()}`);
 }
@@ -294,11 +297,12 @@ export function promoteOperator(operatorKey: string): Promise<{ promoted: number
 export function logOutreach(
   operatorKey: string,
   status: string,
+  channel?: string,
   note?: string,
 ): Promise<{ outreach: OutreachEvent }> {
   return j<{ outreach: OutreachEvent }>(
     `/api/permits/operator/${encodeURIComponent(operatorKey)}/outreach`,
-    { method: "POST", body: JSON.stringify({ status, ...(note ? { note } : {}) }) },
+    { method: "POST", body: JSON.stringify({ status, ...(channel ? { channel } : {}), ...(note ? { note } : {}) }) },
   );
 }
 
