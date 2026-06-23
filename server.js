@@ -23,8 +23,11 @@ import { registerPermitRoutes } from "./lib/permitRoutes.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
+import { sweepSentOutreach, upsertOutreach } from "./lib/outreachSync.js";
+import * as gmailInbox from "./lib/gmailInbox.js";
 import { dailyCap, rampDay } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
+import { runAutoOutreach, pruneStaleQueuedDrafts } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
 const { Pool } = pg;
@@ -426,7 +429,10 @@ app.use((req, res, next) => {
     (req.path === "/api/seo-ideas/existing-articles" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/sdr/events/ingest" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/sdr/drafts/generate" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
-    (req.path.startsWith("/api/sdr/track/") && req.method === "GET")
+    (req.path.startsWith("/api/sdr/track/") && req.method === "GET") ||
+    // Google redirects the OAuth consent back here without our bearer token; the
+    // signed `state` param carries identity + CSRF protection (verified in the handler).
+    (req.path === "/api/sdr/inbox/oauth/callback" && req.method === "GET")
   ) {
     return next();
   }
@@ -755,6 +761,47 @@ async function initDB() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_sequence ON sdr_sends(apollo_sequence_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_status ON sdr_sends(status)`);
 
+    // Per-lead outreach ledger (lib/outreachSync.js). One row per (lead, source):
+    // 'pipedrive' swept from the sent folder, 'interface' written by approve-and-send.
+    // Replaces the misleading person-level last_outgoing_mail_time in the Leads view.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_outreach_log (
+        pipedrive_lead_id TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('pipedrive','interface')),
+        sent_at TIMESTAMPTZ NOT NULL,
+        sender_name TEXT,
+        sender_email TEXT,
+        subject TEXT,
+        external_ref TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (pipedrive_lead_id, source)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_outreach_log_lead ON sdr_outreach_log(pipedrive_lead_id)`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_outreach_sweep_state (
+        id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        last_swept_at TIMESTAMPTZ,
+        last_thread_ts TIMESTAMPTZ
+      )
+    `);
+    await pool.query(`INSERT INTO sdr_outreach_sweep_state (id) VALUES (1) ON CONFLICT DO NOTHING`);
+
+    // Unified inbox: per-mailbox Gmail OAuth (lib/gmailInbox.js). One row per connected
+    // .co mailbox holding its refresh token. owner_user_id binds the mailbox to its SDR
+    // (matched by email local-part) so a rep sees only their inbox; admin sees all.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_inbox_accounts (
+        mailbox_email TEXT PRIMARY KEY,
+        refresh_token TEXT,
+        owner_user_id UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        connected_by_user_id UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        last_error TEXT,
+        connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sdr_engagement_events (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -826,6 +873,40 @@ async function initDB() {
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS lead_score DOUBLE PRECISION`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_status ON sdr_lead_state(outreach_status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_person ON sdr_lead_state(pipedrive_person_id)`);
+    // Who initiated a draft: a human ('manual') or the auto-outreach engine ('automatic').
+    await pool.query(`ALTER TABLE sdr_drafts ADD COLUMN IF NOT EXISTS initiated_by TEXT NOT NULL DEFAULT 'manual'`);
+    // Single-row SDR settings (auto-outreach config). id pinned to 1.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_settings (
+        id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        auto_outreach_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        auto_outreach_mode TEXT NOT NULL DEFAULT 'queue' CHECK (auto_outreach_mode IN ('queue','send')),
+        auto_min_score DOUBLE PRECISION,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by TEXT
+      )
+    `);
+    await pool.query(`INSERT INTO sdr_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+    // Editable first-touch draft copy per trigger. Seeded from the code templates; the
+    // draft generator reads here first and falls back to code, so generation can't break.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_first_touch_templates (
+        trigger_type TEXT PRIMARY KEY CHECK (trigger_type IN ('AGC','LBA','CM','PB')),
+        body TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by TEXT
+      )
+    `);
+    for (const t of ["AGC", "LBA", "CM", "PB"]) {
+      const codeBody = SDR_TEMPLATES[t]?.[0]?.body;
+      if (codeBody) {
+        await pool.query(
+          `INSERT INTO sdr_first_touch_templates (trigger_type, body) VALUES ($1, $2)
+           ON CONFLICT (trigger_type) DO NOTHING`,
+          [t, codeBody],
+        );
+      }
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS nurture_audit (
@@ -917,6 +998,11 @@ async function initDB() {
       )`);
     await pool.query(`INSERT INTO permit_engine_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
     await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS permit_enabled BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS permit_signature TEXT`);
+    // Seed/refresh the three reps' permit sign-offs (only when not already set).
+    await pool.query(`UPDATE sdr_mailboxes SET permit_signature = $2 WHERE lower(email) = $1 AND permit_signature IS NULL`, ['dc@proswppp.co', 'Regards,\nDerek E. Chinners - Founder\nPro SWPPP, LLC\nwww.ProSWPPP.com']);
+    await pool.query(`UPDATE sdr_mailboxes SET permit_signature = $2 WHERE lower(email) = $1 AND permit_signature IS NULL`, ['jg@proswppp.co', 'Regards,\nJosie Godfrey\nPro SWPPP, LLC\nwww.ProSWPPP.com']);
+    await pool.query(`UPDATE sdr_mailboxes SET permit_signature = $2 WHERE lower(email) = $1 AND permit_signature IS NULL`, ['th@proswppp.co', 'Regards,\nTerry Harris\nPro SWPPP, LLC\nwww.ProSWPPP.com']);
     // Warmup ramp anchors to each mailbox's FIRST send (stamped in approve-and-send),
     // so the clock only starts when the team actually begins — no calendar seed here.
     await pool.query(`
@@ -934,15 +1020,12 @@ async function initDB() {
         "Action needed: your TXR050000 stormwater permit expires Aug 13",
         `<div style="font-family:Georgia,'Times New Roman',serif;color:#1a5276;font-size:15px;line-height:1.55">
 <p>{{first_name}},</p>
-<p>It's just Derek with <strong>Pro SWPPP</strong>. Our records show your Texas industrial stormwater permit (TXR050000) is set to expire on <strong>August 13, 2026</strong>.</p>
+<p>It's just {{sender_first}} with <strong>Pro SWPPP</strong>. Our records show your Texas industrial stormwater permit (TXR050000) is set to expire on <strong>August 13, 2026</strong>.</p>
 <p>Every operator on this permit renews on the same cycle this year, so the window fills up fast.</p>
 <p>We can handle {{operator}}'s renewal start to finish... the updated SWPPP, the filings, all of it, done before the deadline.</p>
 <p>Want us to take it from here? Just reply and we'll get started.</p>
 <p>We appreciate your business.</p>
-<p style="margin-bottom:0">Regards,</p>
-<p style="margin:0">Derek E. Chinners - Founder</p>
-<p style="margin:0"><strong>Pro SWPPP, LLC</strong></p>
-<p style="margin-top:6px"><a href="https://www.ProSWPPP.com" style="color:#1a5276">www.ProSWPPP.com</a></p>
+<p>{{signature}}</p>
 </div>`,
       ]
     );
@@ -1017,10 +1100,80 @@ initDB();
 if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
   const runSync = () =>
     syncLeadState(pool)
-      .then((r) => console.log("[sync] sdr_lead_state:", JSON.stringify(r)))
+      .then(async (r) => {
+        console.log("[sync] sdr_lead_state:", JSON.stringify(r));
+        // Right after a sync, prune queued drafts whose contact was emailed in Pipedrive
+        // since we drafted them (so a rep never approves an already-contacted lead).
+        try {
+          const pruned = await pruneStaleQueuedDrafts(pool);
+          if (pruned) console.log(`[auto-outreach] pruned ${pruned} stale queued draft(s)`);
+        } catch (e) {
+          console.error("[auto-outreach] prune failed:", e.message);
+        }
+        // Incremental sweep of the Pipedrive sent folder → per-lead outreach ledger.
+        try {
+          const sw = await sweepSentOutreach(pool, { full: false });
+          console.log("[outreach-sweep]", JSON.stringify(sw));
+        } catch (e) {
+          console.error("[outreach-sweep] failed:", e.message);
+        }
+      })
       .catch((e) => console.error("[sync] sdr_lead_state failed:", e.message));
   setTimeout(runSync, 30_000);
   setInterval(runSync, 6 * 60 * 60 * 1000);
+}
+
+// Send-mode enrollment: enroll each freshly-created auto draft by calling the SAME
+// approve-and-send path a human uses (internal HTTP + a short-lived minted token). Reuses
+// its dedup + warmup cap + Apollo enroll + Pipedrive write-back untouched; a 409/429 just
+// means a guardrail correctly skipped that lead. Shared by the cron and the manual trigger.
+async function enrollAutoDrafts(createdDrafts) {
+  const out = { enrolled: 0, skipped: 0 };
+  for (const d of createdDrafts || []) {
+    try {
+      const token = jwt.sign({ sub: d.assigned_user_id, username: "auto-outreach", role: "admin" }, JWT_SECRET, { expiresIn: 300 });
+      const resp = await fetch(`http://127.0.0.1:${port}/api/sdr/drafts/${d.id}/approve-and-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: "{}",
+      });
+      if (resp.ok) {
+        out.enrolled++;
+      } else {
+        out.skipped++;
+        const txt = await resp.text();
+        console.warn(`[auto-outreach] enroll skip draft ${d.id}: ${resp.status} ${txt.slice(0, 140)}`);
+      }
+    } catch (e) {
+      out.skipped++;
+      console.warn(`[auto-outreach] enroll error draft ${d.id}: ${e.message}`);
+    }
+  }
+  return out;
+}
+
+// Auto-outreach engine: when enabled (sdr_settings), top-up each active mailbox's daily
+// cap with the highest lead-score eligible leads. Default mode drafts to the Queue for
+// approval. Runs hourly during business hours (America/Chicago) only.
+if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.APOLLO_API_KEY) {
+  const runAuto = () => {
+    const hr = Number(
+      new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", hour12: false }).format(new Date()),
+    );
+    const day = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(new Date());
+    if (hr < 8 || hr >= 17 || day === "Sat" || day === "Sun") return; // business hours only
+    runAutoOutreach(pool, { mailboxSentToday })
+      .then(async (r) => {
+        if (r && r.created) console.log("[auto-outreach]", JSON.stringify({ mode: r.mode, created: r.created, capacity: r.capacity }));
+        if (r && r.mode === "send" && Array.isArray(r.createdDrafts)) {
+          const er = await enrollAutoDrafts(r.createdDrafts);
+          console.log("[auto-outreach] send results:", JSON.stringify(er));
+        }
+      })
+      .catch((e) => console.error("[auto-outreach] run failed:", e.message));
+  };
+  setTimeout(runAuto, 90_000);
+  setInterval(runAuto, 60 * 60 * 1000);
 }
 
 // Apollo engagement poll: per-lead replies + bounces fed into /api/sdr/events/ingest.
@@ -1193,6 +1346,116 @@ app.patch("/api/sdr/mailboxes/:id", async (req, res) => {
   }
 });
 
+// SDR settings — auto-outreach config (read by anyone signed in; only admins change it).
+app.get("/api/sdr/settings", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const { rows } = await pool.query(`SELECT * FROM sdr_settings WHERE id = 1`);
+    res.json({ settings: rows[0] || { auto_outreach_enabled: false, auto_outreach_mode: "queue", auto_min_score: null } });
+  } catch (err) {
+    console.error("GET /api/sdr/settings error:", err);
+    res.status(500).json({ error: "Failed to load settings" });
+  }
+});
+
+app.patch("/api/sdr/settings", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const { auto_outreach_enabled, auto_outreach_mode, auto_min_score } = req.body || {};
+  if (auto_outreach_mode !== undefined && !["queue", "send"].includes(auto_outreach_mode)) {
+    return res.status(400).json({ error: "auto_outreach_mode must be 'queue' or 'send'" });
+  }
+  try {
+    const { rows } = await pool.query(
+      `UPDATE sdr_settings SET
+         auto_outreach_enabled = COALESCE($1, auto_outreach_enabled),
+         auto_outreach_mode    = COALESCE($2, auto_outreach_mode),
+         auto_min_score        = CASE WHEN $3::text = 'unset' THEN NULL
+                                      WHEN $4::float8 IS NOT NULL THEN $4::float8
+                                      ELSE auto_min_score END,
+         updated_at = NOW(), updated_by = $5
+       WHERE id = 1 RETURNING *`,
+      [
+        typeof auto_outreach_enabled === "boolean" ? auto_outreach_enabled : null,
+        auto_outreach_mode ?? null,
+        auto_min_score === null ? "unset" : null,
+        typeof auto_min_score === "number" ? auto_min_score : null,
+        req.sdrUser?.username || req.sdrUser?.sub,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO nurture_audit (sdr_user, action, target_kind, target_id, summary)
+       VALUES ($1, 'settings.auto_outreach', 'sdr_settings', '1', $2)`,
+      [req.sdrUser?.username || req.sdrUser?.sub, JSON.stringify(rows[0])],
+    ).catch(() => {});
+    res.json({ settings: rows[0] });
+  } catch (err) {
+    console.error("PATCH /api/sdr/settings error:", err);
+    res.status(500).json({ error: "Failed to update settings" });
+  }
+});
+
+// Manually trigger one auto-outreach pass (admin). Respects the configured mode: queue
+// creates drafts for review, send also enrolls them through approve-and-send. Optional
+// body.max caps the batch (handy for a controlled test). Requires the engine enabled.
+app.post("/api/sdr/auto-outreach/run", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const max = req.body?.max != null ? Math.max(1, Math.min(50, Number(req.body.max))) : undefined;
+  try {
+    const r = await runAutoOutreach(pool, { mailboxSentToday, maxDrafts: max });
+    if (r.mode === "send" && Array.isArray(r.createdDrafts) && r.createdDrafts.length) {
+      r.sendResults = await enrollAutoDrafts(r.createdDrafts);
+    }
+    res.json({ ok: true, ...r });
+  } catch (err) {
+    console.error("POST /api/sdr/auto-outreach/run error:", err);
+    res.status(500).json({ error: err.message || "Auto-outreach run failed" });
+  }
+});
+
+// First-touch draft templates (editable copy that buildDraftFromLead uses). Read by any
+// signed-in user; only admins edit. Merge fields: {First} {ENV} {SWPPP} {Sig}.
+app.get("/api/sdr/first-touch-templates", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const { rows } = await pool.query(`SELECT trigger_type, body, updated_at, updated_by FROM sdr_first_touch_templates`);
+    const byTrigger = {};
+    for (const r of rows) byTrigger[r.trigger_type] = r;
+    res.json({ templates: byTrigger });
+  } catch (err) {
+    console.error("GET /api/sdr/first-touch-templates error:", err);
+    res.status(500).json({ error: "Failed to load first-touch templates" });
+  }
+});
+
+app.put("/api/sdr/first-touch-templates/:trigger", express.json({ limit: "256kb" }), async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const trigger = String(req.params.trigger || "").toUpperCase();
+  if (!["AGC", "LBA", "CM", "PB"].includes(trigger)) return res.status(400).json({ error: "Invalid trigger" });
+  const { body } = req.body || {};
+  if (typeof body !== "string" || !body.trim()) return res.status(400).json({ error: "body (non-empty string) required" });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO sdr_first_touch_templates (trigger_type, body, updated_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (trigger_type) DO UPDATE SET body = EXCLUDED.body, updated_at = NOW(), updated_by = EXCLUDED.updated_by
+       RETURNING trigger_type, body, updated_at, updated_by`,
+      [trigger, body, req.sdrUser?.username || req.sdrUser?.sub],
+    );
+    await pool.query(
+      `INSERT INTO nurture_audit (sdr_user, action, target_kind, target_id, summary)
+       VALUES ($1, 'first_touch.update', 'sdr_first_touch_template', $2, $3)`,
+      [req.sdrUser?.username || req.sdrUser?.sub, trigger, `${body.length} chars`],
+    ).catch(() => {});
+    res.json({ template: rows[0] });
+  } catch (err) {
+    console.error("PUT /api/sdr/first-touch-templates error:", err);
+    res.status(500).json({ error: "Failed to save first-touch template" });
+  }
+});
+
 // SDR lead-state — mirror of Pipedrive outreach state. Read by the interface to show
 // who's already been contacted (dedup). Newest sync first; optional ?status= and ?q= filters.
 // Whitelist of sortable columns (guards against SQL injection via ?sort=).
@@ -1257,6 +1520,11 @@ app.get("/api/sdr/leads", async (req, res) => {
                   ELSE FLOOR(EXTRACT(EPOCH FROM (NOW() - s.last_outgoing_mail_time)) / 86400)::int END AS days_since_outgoing,
              ob.outreached_by,
              ob.outreached_status,
+             ob.initiated_by,
+             ol.sent_at AS outreach_sent_at,
+             ol.source AS outreach_source,
+             ol.sender_name AS outreach_sender_name,
+             ol.sender_email AS outreach_sender_email,
              snd.send_status,
              snd.send_sequence_id,
              snd.sent_at AS send_sent_at,
@@ -1266,7 +1534,8 @@ app.get("/api/sdr/leads", async (req, res) => {
              COUNT(*) OVER() AS _total
       FROM sdr_lead_state s
       LEFT JOIN LATERAL (
-        SELECT COALESCE(u.display_name, u.username) AS outreached_by, d.status AS outreached_status
+        SELECT COALESCE(u.display_name, u.username) AS outreached_by, d.status AS outreached_status,
+               d.initiated_by
         FROM sdr_drafts d
         LEFT JOIN sdr_users u ON u.id = d.assigned_user_id
         WHERE d.pipedrive_lead_id = s.pipedrive_lead_id
@@ -1282,6 +1551,13 @@ app.get("/api/sdr/leads", async (req, res) => {
         ORDER BY sent_at DESC NULLS LAST
         LIMIT 1
       ) snd ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT sent_at, source, sender_name, sender_email
+        FROM sdr_outreach_log
+        WHERE pipedrive_lead_id = s.pipedrive_lead_id
+        ORDER BY sent_at DESC
+        LIMIT 1
+      ) ol ON TRUE
       ${whereSql}
       ${orderSql}
       LIMIT ${limit} OFFSET ${offset}`;
@@ -1499,6 +1775,245 @@ app.post("/api/sdr/sync/leads", async (req, res) => {
     .then((r) => console.log("[sync] on-demand sdr_lead_state:", JSON.stringify(r)))
     .catch((e) => console.error("[sync] on-demand failed:", e.message));
   res.status(202).json({ started: true, note: "Sync running in background; poll GET /api/sdr/leads for updated state." });
+});
+
+// SDR outreach ledger — sweep the Pipedrive sent folder into sdr_outreach_log
+// (admin only). body { full:true } pages the whole sent folder (initial backfill);
+// otherwise incremental from the last watermark. Fire-and-forget for the full run.
+app.post("/api/sdr/outreach/sweep", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
+  const full = req.body?.full === true;
+  if (full) {
+    sweepSentOutreach(pool, { full: true })
+      .then((r) => console.log("[outreach-sweep] full:", JSON.stringify(r)))
+      .catch((e) => console.error("[outreach-sweep] full failed:", e.message));
+    return res.status(202).json({ started: true, full: true });
+  }
+  try {
+    const r = await sweepSentOutreach(pool, { full: false });
+    res.json(r);
+  } catch (err) {
+    console.error("POST /api/sdr/outreach/sweep error:", err);
+    res.status(500).json({ error: err.message || "Sweep failed" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Unified inbox (Gmail OAuth per .co mailbox) — lib/gmailInbox.js
+// ---------------------------------------------------------------------------
+const _gmailTokenCache = new Map(); // mailbox_email → { token, exp }
+
+async function accessTokenForMailbox(mailboxEmail) {
+  const cached = _gmailTokenCache.get(mailboxEmail);
+  if (cached && cached.exp > Date.now() + 30_000) return cached.token;
+  const { rows } = await pool.query(`SELECT refresh_token FROM sdr_inbox_accounts WHERE mailbox_email=$1`, [mailboxEmail]);
+  const rt = rows[0]?.refresh_token;
+  if (!rt) throw Object.assign(new Error(`Mailbox ${mailboxEmail} not connected`), { status: 409 });
+  const { accessToken, expiresIn } = await gmailInbox.refreshAccessToken(rt);
+  _gmailTokenCache.set(mailboxEmail, { token: accessToken, exp: Date.now() + (expiresIn || 3600) * 1000 });
+  return accessToken;
+}
+
+// All .co mailboxes visible to this user: admin sees every mailbox, an SDR sees the one
+// whose local-part matches their own (jg@proswppp.com → jg@proswppp.co), connected or not.
+async function visibleMailboxes(sdrUser) {
+  const isAdmin = sdrUser?.role === "admin";
+  const { rows } = await pool.query(
+    `SELECT m.email, (a.mailbox_email IS NOT NULL) AS connected, a.connected_at,
+            COALESCE(u.display_name, u.username) AS owner_name
+       FROM sdr_mailboxes m
+       LEFT JOIN sdr_inbox_accounts a ON a.mailbox_email = m.email
+       LEFT JOIN sdr_users u ON u.id = a.owner_user_id
+      WHERE $1 OR split_part(m.email,'@',1) = (SELECT split_part(email,'@',1) FROM sdr_users WHERE id=$2)
+      ORDER BY m.email`,
+    [isAdmin, sdrUser?.sub],
+  );
+  return rows;
+}
+
+async function resolveMailbox(sdrUser, requested) {
+  const vis = await visibleMailboxes(sdrUser);
+  const connected = vis.filter((v) => v.connected).map((v) => v.email);
+  if (requested) {
+    const r = String(requested).toLowerCase();
+    if (!connected.includes(r)) throw Object.assign(new Error("Mailbox not accessible"), { status: 403 });
+    return r;
+  }
+  return connected[0] || null;
+}
+
+function parseEmailAddr(s) {
+  if (!s) return null;
+  const m = String(s).match(/<([^>]+)>/);
+  return (m ? m[1] : String(s)).trim().toLowerCase();
+}
+
+// Start consent → returns the Google URL the client redirects to (client does window.location).
+app.get("/api/sdr/inbox/oauth/start", async (req, res) => {
+  if (!gmailInbox.isConfigured()) return res.status(503).json({ error: "Google OAuth not configured" });
+  const mailbox = req.query.mailbox ? String(req.query.mailbox).toLowerCase() : undefined;
+  // Non-admins may only connect their own mailbox.
+  if (mailbox) {
+    const vis = await visibleMailboxes(req.sdrUser);
+    if (!vis.some((v) => v.email === mailbox)) return res.status(403).json({ error: "Mailbox not yours to connect" });
+  }
+  const state = jwt.sign({ sub: req.sdrUser.sub, mailbox, t: "inbox_oauth" }, JWT_SECRET, { expiresIn: 600 });
+  res.json({ url: gmailInbox.buildAuthUrl({ state, loginHint: mailbox }) });
+});
+
+// Google redirects here (no bearer; identity + CSRF via the signed state JWT).
+app.get("/api/sdr/inbox/oauth/callback", async (req, res) => {
+  const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
+  try {
+    const claims = verifySdrJwt(String(req.query.state || ""));
+    if (!claims || claims.t !== "inbox_oauth") return res.status(400).send("Invalid OAuth state");
+    if (req.query.error) return res.redirect(`${appBase}/#/sdr?tab=inbox&error=${encodeURIComponent(String(req.query.error))}`);
+    const { refreshToken, email } = await gmailInbox.exchangeCode(String(req.query.code));
+    if (!email) return res.status(400).send("Could not determine the mailbox email");
+    const local = email.split("@")[0];
+    const { rows: ow } = await pool.query(`SELECT id FROM sdr_users WHERE split_part(email,'@',1)=$1 LIMIT 1`, [local]);
+    await pool.query(
+      `INSERT INTO sdr_inbox_accounts (mailbox_email, refresh_token, owner_user_id, connected_by_user_id, connected_at, updated_at)
+       VALUES ($1,$2,$3,$4,NOW(),NOW())
+       ON CONFLICT (mailbox_email) DO UPDATE SET
+         refresh_token = COALESCE(EXCLUDED.refresh_token, sdr_inbox_accounts.refresh_token),
+         owner_user_id = EXCLUDED.owner_user_id,
+         connected_by_user_id = EXCLUDED.connected_by_user_id,
+         last_error = NULL, updated_at = NOW()`,
+      [email, refreshToken, ow[0]?.id || null, claims.sub],
+    );
+    _gmailTokenCache.delete(email);
+    res.redirect(`${appBase}/#/sdr?tab=inbox&connected=${encodeURIComponent(email)}`);
+  } catch (e) {
+    console.error("inbox oauth callback error:", e.message);
+    res.redirect(`${appBase}/#/sdr?tab=inbox&error=${encodeURIComponent(e.message)}`);
+  }
+});
+
+// Connected/visible mailboxes for this user (drives the connect buttons + switcher).
+app.get("/api/sdr/inbox/accounts", async (req, res) => {
+  try {
+    const accounts = await visibleMailboxes(req.sdrUser);
+    res.json({ accounts, isAdmin: req.sdrUser?.role === "admin", configured: gmailInbox.isConfigured() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Thread list for a mailbox (scoped). Each thread linked to its lead by sender email.
+app.get("/api/sdr/inbox/threads", async (req, res) => {
+  try {
+    const mailbox = await resolveMailbox(req.sdrUser, req.query.mailbox);
+    if (!mailbox) return res.json({ mailbox: null, threads: [], note: "No connected mailbox" });
+    const token = await accessTokenForMailbox(mailbox);
+    const q = req.query.q ? String(req.query.q) : "in:inbox";
+    const threads = await gmailInbox.listThreads(token, { q, maxResults: 25 });
+    const froms = [...new Set(threads.map((t) => parseEmailAddr(t.from)).filter(Boolean))];
+    const leadMap = {};
+    if (froms.length) {
+      const { rows } = await pool.query(
+        `SELECT lower(person_email) e, pipedrive_lead_id, lead_title FROM sdr_lead_state WHERE lower(person_email) = ANY($1)`,
+        [froms],
+      );
+      for (const r of rows) leadMap[r.e] = { lead_id: r.pipedrive_lead_id, lead_title: r.lead_title };
+    }
+    for (const t of threads) {
+      const e = parseEmailAddr(t.from);
+      t.lead = e ? leadMap[e] || null : null;
+    }
+    res.json({ mailbox, threads });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Full thread (all messages, decoded bodies).
+app.get("/api/sdr/inbox/threads/:id", async (req, res) => {
+  try {
+    const mailbox = await resolveMailbox(req.sdrUser, req.query.mailbox);
+    if (!mailbox) return res.status(409).json({ error: "No connected mailbox" });
+    const token = await accessTokenForMailbox(mailbox);
+    const thread = await gmailInbox.getThread(token, req.params.id);
+    gmailInbox.markThreadRead(token, req.params.id).catch(() => {});
+    res.json({ mailbox, ...thread });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Reply in-thread, sent from the mailbox.
+app.post("/api/sdr/inbox/threads/:id/reply", express.json(), async (req, res) => {
+  try {
+    const mailbox = await resolveMailbox(req.sdrUser, req.body?.mailbox || req.query.mailbox);
+    if (!mailbox) return res.status(409).json({ error: "No connected mailbox" });
+    const token = await accessTokenForMailbox(mailbox);
+    const { to, subject, body, inReplyTo, references } = req.body || {};
+    if (!to || !body) return res.status(400).json({ error: "to and body are required" });
+    const r = await gmailInbox.sendReply(token, {
+      threadId: req.params.id,
+      from: mailbox,
+      to,
+      subject: subject || "",
+      bodyText: body,
+      inReplyTo,
+      references,
+    });
+    res.json({ ok: true, id: r.id });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Cross-mailbox OUTREACH overview: the signal-only view. Aggregates inbox threads
+// across every mailbox the user can see, keeps only conversations whose counterpart
+// is a lead in our book (i.e. tied to outreach), and tags each with its mailbox + lead.
+app.get("/api/sdr/inbox/overview", async (req, res) => {
+  try {
+    const vis = await visibleMailboxes(req.sdrUser);
+    const boxes = vis.filter((v) => v.connected).map((v) => v.email);
+    if (!boxes.length) return res.json({ threads: [], mailboxes: [] });
+    const all = [];
+    for (const mb of boxes) {
+      let token;
+      try {
+        token = await accessTokenForMailbox(mb);
+      } catch {
+        continue;
+      }
+      try {
+        const threads = await gmailInbox.listThreads(token, { q: "in:inbox", maxResults: 15 });
+        for (const t of threads) all.push({ ...t, mailbox: mb });
+      } catch {
+        /* skip a mailbox that errors, keep the rest */
+      }
+    }
+    const froms = [...new Set(all.map((t) => parseEmailAddr(t.from)).filter(Boolean))];
+    const leadMap = {};
+    if (froms.length) {
+      const { rows } = await pool.query(
+        `SELECT lower(s.person_email) e, s.pipedrive_lead_id, s.lead_title,
+                EXISTS(SELECT 1 FROM sdr_outreach_log o WHERE o.pipedrive_lead_id = s.pipedrive_lead_id) AS outreached
+           FROM sdr_lead_state s WHERE lower(s.person_email) = ANY($1)`,
+        [froms],
+      );
+      for (const r of rows) leadMap[r.e] = r;
+    }
+    const threads = all
+      .map((t) => {
+        const e = parseEmailAddr(t.from);
+        const m = e ? leadMap[e] : null;
+        return m
+          ? { ...t, lead: { lead_id: m.pipedrive_lead_id, lead_title: m.lead_title }, outreached: m.outreached }
+          : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => (Date.parse(b.date || "") || 0) - (Date.parse(a.date || "") || 0));
+    res.json({ threads, mailboxes: boxes });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
 });
 
 // SDR engagement — on-demand Apollo replies/bounces poll (admin only). Returns scan counts.
@@ -2561,8 +3076,27 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       result = { draft: updRows[0] || { ...draft, status: "sent" }, send: sendRows[0] || null, apollo_response: enrollResponse, warning: warn };
     }
 
-    // Pipedrive write-back (non-fatal): mark the lead as in-sequence + leave a note,
-    // so other workflows/humans don't double-outreach this lead.
+    // Per-lead outreach ledger (interface source). Sender = the .co mailbox that
+    // sends via Apollo (not a Pipedrive-connected mailbox, so it never lands in the
+    // sent-folder sweep — this is how interface sends enter the ledger). Runs after
+    // the send is recorded so it covers the Apollo-enrolled-but-DB-failed fallback too.
+    try {
+      await upsertOutreach(pool, {
+        pipedrive_lead_id: draft.pipedrive_lead_id,
+        source: "interface",
+        sent_at: new Date().toISOString(),
+        sender_name: req.sdrUser?.username || null,
+        sender_email: mailbox.email,
+        subject: draft.subject,
+        external_ref: result?.send?.id ? String(result.send.id) : null,
+      });
+    } catch (e) {
+      console.error("outreach ledger upsert (interface) failed:", e.message);
+    }
+
+    // Pipedrive write-back (non-fatal): mark the lead in-sequence (dedup), drop a
+    // note with the interface deep-link, and log a dated Activity so the send shows
+    // in the lead's Pipedrive timeline. No new custom field — state lives in Postgres.
     if (process.env.PIPEDRIVE_API_TOKEN) {
       try {
         await pipedriveClient.updateLead(draft.pipedrive_lead_id, {
@@ -2576,6 +3110,13 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
             `Sender: ${mailbox.email}. Sequence_Started set.` +
             (overrideContext ? ` ⚠️ ${overrideContext}.` : "") +
             `\nOpen in interface: ${appBase}/#/sdr?lead=${draft.pipedrive_lead_id}`,
+        });
+        await pipedriveClient.addActivity({
+          leadId: draft.pipedrive_lead_id,
+          subject: `Outreach sent: ${draft.trigger_type} sequence via ${mailbox.email} (interface)`,
+          type: "email",
+          done: true,
+          note: `Enrolled in Apollo ${draft.trigger_type} sequence (${draft.apollo_sequence_id}) by ${req.sdrUser?.username || "auto"}.`,
         });
       } catch (e) {
         console.error("Pipedrive sync on send failed:", e.message);
