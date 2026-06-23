@@ -297,12 +297,12 @@ export default function OperatorWorkspace({
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => runFindEmails()}
-            disabled={enriching || counts.promoted === 0}
-            title={counts.promoted === 0 ? "Pick some companies first" : "Apollo email lookup (~1 credit per company checked)"}
+            disabled={enriching || counts.pool + counts.promoted === 0}
+            title={counts.pool + counts.promoted === 0 ? "Every company has been checked" : "Apollo email lookup on the next 25 hottest unchecked (~1 credit each)"}
             className="flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             <Sparkles className="h-4 w-4" />
-            {enriching ? "Finding…" : `Find emails (${Math.min(25, counts.promoted)})`}
+            {enriching ? "Finding…" : `Find emails (${Math.min(25, counts.pool + counts.promoted)})`}
           </button>
         </div>
       </div>
