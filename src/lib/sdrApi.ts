@@ -29,6 +29,7 @@ export interface SdrMailbox {
   deliverability_score: number | null;
   last_health_check_at: string | null;
   active: boolean;
+  signature_html: string | null;
   created_at: string;
   updated_at: string;
   sent_today: number;
@@ -333,6 +334,12 @@ export const sdrApi = {
     sdrFetch<{ synced_count: number; synced: { email: string; apollo_id: string }[] }>(
       "/api/sdr/mailboxes/sync",
       { method: "POST" },
+    ),
+
+  updateMailboxSignature: (id: string, signature_html: string) =>
+    sdrFetch<{ mailbox: { id: string; email: string; signature_html: string | null } }>(
+      `/api/sdr/mailboxes/${id}/signature`,
+      { method: "PUT", body: JSON.stringify({ signature_html }) },
     ),
 
   // Unified inbox (Gmail per .co mailbox)

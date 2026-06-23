@@ -2921,6 +2921,79 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
 // Mailboxes
 // --------------------------------------------------------------------------
 
+// Per-mailbox sending signature: rendered preview + admin edit (writes to Apollo + DB).
+function MailboxSignature({ mailbox, isAdmin }: { mailbox: SdrMailbox; isAdmin: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [html, setHtml] = useState(mailbox.signature_html ?? "");
+  const [current, setCurrent] = useState(mailbox.signature_html ?? "");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const save = () => {
+    setSaving(true);
+    setMsg(null);
+    sdrApi
+      .updateMailboxSignature(mailbox.id, html)
+      .then(() => {
+        setCurrent(html);
+        setMsg("Saved to Apollo");
+        setEditing(false);
+      })
+      .catch((e) => setMsg(`Failed: ${(e as Error).message}`))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <div className="mt-2 border-t border-slate-100 pt-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Signature</span>
+        {isAdmin && !editing && (
+          <button
+            onClick={() => {
+              setHtml(current);
+              setEditing(true);
+            }}
+            className="text-[11px] font-semibold text-brand-700 hover:text-brand-800"
+          >
+            Edit
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="space-y-1.5">
+          <textarea
+            value={html}
+            onChange={(e) => setHtml(e.target.value)}
+            rows={5}
+            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 font-mono text-[11px] text-slate-700 focus:border-brand-400 focus:outline-none"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={save}
+              disabled={saving}
+              className="rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button onClick={() => setEditing(false)} className="text-xs text-slate-500 hover:text-slate-700">
+              Cancel
+            </button>
+            {msg && <span className="text-[11px] text-slate-500">{msg}</span>}
+          </div>
+        </div>
+      ) : current ? (
+        <div
+          className="rounded-lg border border-slate-100 bg-white px-2 py-1.5 text-xs text-slate-700"
+          dangerouslySetInnerHTML={{ __html: current }}
+        />
+      ) : (
+        <div className="text-[11px] text-slate-400">No signature set{isAdmin ? " — click Edit to add one." : "."}</div>
+      )}
+      {!editing && msg && <div className="mt-1 text-[11px] text-slate-500">{msg}</div>}
+    </div>
+  );
+}
+
 function MailboxesView({ user }: { user: SdrUser }) {
   const [mailboxes, setMailboxes] = useState<SdrMailbox[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -3139,6 +3212,7 @@ function MailboxesView({ user }: { user: SdrUser }) {
                 <div className="flex justify-between"><dt>Deliverability</dt><dd className="font-mono text-slate-700">{m.deliverability_score ?? "—"}</dd></div>
                 <div className="flex justify-between"><dt>Apollo ID</dt><dd className="font-mono text-slate-700 truncate ml-2">{m.apollo_mailbox_id?.slice(0, 12) || "(unlinked)"}</dd></div>
               </dl>
+              <MailboxSignature mailbox={m} isAdmin={user.role === "admin"} />
             </div>
           ))}
           {mailboxes.length === 0 && (
@@ -3251,7 +3325,7 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
                 <li className="px-4 py-3">
                   <div className="mb-1.5 flex items-center gap-2">
                     <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">Step 1</span>
-                    <span className="text-[11px] text-slate-400">Day 0 · first touch</span>
+                    <span className="text-[11px] text-slate-400">Day 0 · first touch · built per lead, gets the brand styling on send</span>
                     {isAdmin && (
                       <button
                         onClick={() => save(t)}
@@ -3265,13 +3339,26 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
                       </button>
                     )}
                   </div>
-                  <textarea
-                    value={drafts[t] ?? ""}
-                    onChange={(e) => setDrafts((d) => ({ ...d, [t]: e.target.value }))}
-                    readOnly={!isAdmin}
-                    rows={7}
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700 focus:border-brand-400 focus:outline-none"
-                  />
+                  <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                    <div>
+                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Editable text + merge fields</div>
+                      <textarea
+                        value={drafts[t] ?? ""}
+                        onChange={(e) => setDrafts((d) => ({ ...d, [t]: e.target.value }))}
+                        readOnly={!isAdmin}
+                        rows={9}
+                        className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700 focus:border-brand-400 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Preview (how it sends)</div>
+                      <div
+                        className="min-h-[180px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-800"
+                        style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
+                        dangerouslySetInnerHTML={{ __html: firstTouchPreview(drafts[t] ?? "") }}
+                      />
+                    </div>
+                  </div>
                 </li>
                 {/* Steps 2+ — the live Apollo follow-ups */}
                 {followups.map((step, i) => (
@@ -3305,6 +3392,13 @@ function preservePixel(originalHtml: string, editedHtml: string): string {
   // Re-append the original pixel (and the styled marker comment if it was present).
   const marker = /<!--\s*swppp-styled\s*-->/i.test(originalHtml) ? "<!--swppp-styled-->" : "";
   return editedHtml + marker + origMatch[0];
+}
+
+// First-touch bodies are plain text + merge fields; on send they get the brand wrapper
+// (Georgia, blue). Render that look as a preview so step 1 reads like steps 2+.
+function firstTouchPreview(body: string): string {
+  const esc = (body || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return esc.replace(/\n/g, "<br>");
 }
 
 const RTE_COLORS: { label: string; value: string }[] = [
@@ -3458,10 +3552,13 @@ function RichTextEditor({
           contentEditable={!disabled}
           onInput={handleInput}
           suppressContentEditableWarning
+          // Default to the brand face (Georgia) so an unstyled template renders the same
+          // as a fully-styled one — fixes "one Georgia/blue, one bare white".
+          style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
           className={cn(
             "min-h-[180px] w-full overflow-auto border border-slate-200 px-3 py-2 text-sm text-slate-800",
             "focus:outline-none focus:ring-2 focus:ring-brand-200 focus:border-brand-400",
-            showSource ? "rounded-b-lg" : "rounded-b-lg",
+            "rounded-b-lg",
             disabled
               ? "rounded-lg bg-slate-50 text-slate-500 cursor-not-allowed opacity-70"
               : "bg-white",

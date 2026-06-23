@@ -801,6 +801,8 @@ async function initDB() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    // Mailbox sending signature, mirrored from Apollo (editable in the interface).
+    await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS signature_html TEXT`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sdr_engagement_events (
@@ -1293,7 +1295,7 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
     const params = [];
     let sql = `SELECT id, email, display_name, apollo_mailbox_id, owner_user_id,
                       daily_send_limit, warmup_status, warmup_current_cap, warmup_started_at,
-                      deliverability_score, last_health_check_at, active,
+                      deliverability_score, last_health_check_at, active, signature_html,
                       created_at, updated_at,
                       (SELECT count(*)::int FROM sdr_sends s
                          WHERE s.mailbox_id = sdr_mailboxes.id
@@ -1343,6 +1345,27 @@ app.patch("/api/sdr/mailboxes/:id", async (req, res) => {
   } catch (err) {
     console.error("PATCH /api/sdr/mailboxes/:id error:", err);
     res.status(500).json({ error: "Failed to update mailbox" });
+  }
+});
+
+// SDR mailbox — view/edit the sending signature (admin). Writes to Apollo, mirrors to DB.
+app.put("/api/sdr/mailboxes/:id/signature", express.json(), async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const { signature_html } = req.body || {};
+  if (typeof signature_html !== "string") return res.status(400).json({ error: "signature_html (string) required" });
+  try {
+    const { rows } = await pool.query(`SELECT apollo_mailbox_id FROM sdr_mailboxes WHERE id = $1`, [req.params.id]);
+    const apolloId = rows[0]?.apollo_mailbox_id;
+    if (!apolloId) return res.status(404).json({ error: "Mailbox not found or not Apollo-linked" });
+    if (process.env.APOLLO_API_KEY) await apolloClient.updateEmailAccountSignature(apolloId, signature_html);
+    const { rows: upd } = await pool.query(
+      `UPDATE sdr_mailboxes SET signature_html = $1, updated_at = NOW() WHERE id = $2 RETURNING id, email, signature_html`,
+      [signature_html, req.params.id],
+    );
+    res.json({ mailbox: upd[0] });
+  } catch (err) {
+    console.error("PUT /api/sdr/mailboxes/:id/signature error:", err);
+    res.status(500).json({ error: err.message || "Failed to update signature" });
   }
 });
 
@@ -2108,8 +2131,8 @@ app.post("/api/sdr/mailboxes/sync", async (req, res) => {
       await pool.query(
         `INSERT INTO sdr_mailboxes (email, display_name, apollo_mailbox_id,
                                      daily_send_limit, warmup_status, warmup_current_cap,
-                                     deliverability_score, last_health_check_at, active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+                                     deliverability_score, last_health_check_at, active, signature_html)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9)
          ON CONFLICT (email) DO UPDATE
            SET apollo_mailbox_id = EXCLUDED.apollo_mailbox_id,
                daily_send_limit = EXCLUDED.daily_send_limit,
@@ -2118,8 +2141,9 @@ app.post("/api/sdr/mailboxes/sync", async (req, res) => {
                deliverability_score = EXCLUDED.deliverability_score,
                last_health_check_at = NOW(),
                active = EXCLUDED.active,
+               signature_html = EXCLUDED.signature_html,
                updated_at = NOW()`,
-        [mb.email, mb.email, mb.id, dailyLimit, warmupStatus, warmupCap, score, mb.active !== false],
+        [mb.email, mb.email, mb.id, dailyLimit, warmupStatus, warmupCap, score, mb.active !== false, mb.signature_html ?? null],
       );
       synced.push({ email: mb.email, apollo_id: mb.id });
     }
