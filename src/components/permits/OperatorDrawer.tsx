@@ -156,6 +156,7 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
   const enrichment = detail?.enrichment ?? null;
   const outreach = detail?.outreach ?? [];
   const mailable = detail?.mailable ?? false;
+  const email = detail?.email ?? null;
 
   const complianceTier = op ? deriveComplianceTier(op.max_pain) : "clean";
   const hasPoolPermit = permits.some((p) => p.status === "pool");
@@ -216,9 +217,28 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
                 </div>
               </div>
 
+              {/* ── Email (priority channel) ── */}
+              {email && (
+                <div>
+                  <SectionLabel>Email</SectionLabel>
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+                    <p className="font-semibold text-emerald-800 break-all">{email.email}</p>
+                    {(email.contact_name || email.title) && (
+                      <p className="mt-0.5 text-xs text-emerald-700">
+                        {email.contact_name}
+                        {email.title ? ` · ${email.title}` : ""}
+                      </p>
+                    )}
+                    <p className="mt-1 text-xs text-emerald-600">
+                      Email ready — draft &amp; send it from the Email Queue tab.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* ── Contact & address ── */}
               <div>
-                <SectionLabel>Contact &amp; Address</SectionLabel>
+                <SectionLabel>{email ? "Mailing fallback" : "Contact & Address"}</SectionLabel>
                 <div className="space-y-1 text-sm text-slate-700">
                   {enrichment?.contact_name ? (
                     <p>
