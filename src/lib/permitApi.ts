@@ -185,10 +185,23 @@ export interface GenerateDraftsResult {
   sequenceLinked: boolean;
 }
 
-export function generatePermitDrafts(cap?: number): Promise<GenerateDraftsResult> {
+export function generatePermitDrafts(
+  opts: { cap?: number; operatorKeys?: string[] } = {},
+): Promise<GenerateDraftsResult> {
+  const body: Record<string, unknown> = {};
+  if (opts.cap) body.cap = opts.cap;
+  if (opts.operatorKeys?.length) body.operator_keys = opts.operatorKeys;
   return jMsg<GenerateDraftsResult>(`/api/permits/drafts/generate`, {
     method: "POST",
-    body: JSON.stringify(cap ? { cap } : {}),
+    body: JSON.stringify(body),
+  });
+}
+
+// Bulk discard selected companies (multi-select).
+export function discardOperators(operatorKeys: string[]): Promise<{ discarded: number }> {
+  return jMsg<{ discarded: number }>(`/api/permits/operators/discard`, {
+    method: "POST",
+    body: JSON.stringify({ operator_keys: operatorKeys }),
   });
 }
 
@@ -282,9 +295,13 @@ export const permitApi = {
     j<{ promoted: number }>(`/api/permits/promote`, { method: "POST", body: JSON.stringify(body) }),
   enrich: (cap = 50) =>
     jMsg<{ processed: number; ok: number; fail: number }>(`/api/permits/enrich`, { method: "POST", body: JSON.stringify({ cap }) }),
-  findEmails: (cap = 25) =>
-    jMsg<{ probed: number; found: number; discarded: number; hadDomain: number }>(
-      `/api/permits/find-emails`, { method: "POST", body: JSON.stringify({ cap }) }),
+  findEmails: (opts: { cap?: number; operatorKeys?: string[] } = {}) => {
+    const body: Record<string, unknown> = {};
+    if (opts.cap) body.cap = opts.cap;
+    if (opts.operatorKeys?.length) body.operator_keys = opts.operatorKeys;
+    return jMsg<{ probed: number; found: number; discarded: number; hadDomain: number }>(
+      `/api/permits/find-emails`, { method: "POST", body: JSON.stringify(body) });
+  },
   getEnriched: (params: { page?: number; pageSize?: number } = {}) => {
     const q = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined) q.set(k, String(v)); });
