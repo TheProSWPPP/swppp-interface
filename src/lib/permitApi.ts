@@ -269,6 +269,7 @@ export function getOperatorsList(params: {
   compliance?: string;
   hideContacted?: boolean;
   search?: string;
+  sort?: string;
   page?: number;
   pageSize?: number;
 } = {}): Promise<OperatorsListResponse> {

@@ -113,6 +113,7 @@ export default function OperatorWorkspace({
   const [compliance, setCompliance] = useState<Compliance>("all");
   const [hideContacted, setHideContacted] = useState(true);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<string>("pain");
   const [page, setPage] = useState(1);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -137,6 +138,7 @@ export default function OperatorWorkspace({
         compliance: compliance !== "all" ? compliance : undefined,
         hideContacted: hideContacted || undefined,
         search: searchRef.current || undefined,
+        sort: sort !== "pain" ? sort : undefined,
         page: p,
         pageSize: PAGE_SIZE,
       })
@@ -144,7 +146,7 @@ export default function OperatorWorkspace({
         .catch((e) => pushToast?.(`Load failed: ${(e as Error).message}`, "error"))
         .finally(() => setLoading(false));
     },
-    [stage, compliance, hideContacted, page, pushToast],
+    [stage, compliance, hideContacted, sort, page, pushToast],
   );
 
   // Non-search filters + page: reload whenever these change
@@ -282,6 +284,18 @@ export default function OperatorWorkspace({
           <option value="all">All compliance</option>
           <option value="violation">In violation</option>
           <option value="snc">Significant noncompliance</option>
+        </select>
+
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value)}
+          className="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white"
+          title="Sort operators"
+        >
+          <option value="pain">Sort: violation severity</option>
+          <option value="permits"># of permits (multi-plant first)</option>
+          <option value="expiry">Soonest expiry</option>
+          <option value="score">Lead score</option>
         </select>
 
         <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
