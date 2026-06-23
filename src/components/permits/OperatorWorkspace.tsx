@@ -8,16 +8,25 @@ import {
 } from "../../lib/permitApi";
 import OperatorDrawer from "./OperatorDrawer";
 
-type FunnelStage = "pool" | "promoted" | "enriched" | "mailed";
+type FunnelStage = "pool" | "promoted" | "email_ready" | "enriched" | "mailed";
 type Stage = "all" | FunnelStage;
 type Compliance = "all" | "violation" | "snc";
 
 const STAGE_LABELS: { key: FunnelStage; label: string; tip: string }[] = [
   { key: "pool", label: "All", tip: "Every company — not started yet" },
   { key: "promoted", label: "Picked", tip: "Companies you've picked to work" },
-  { key: "enriched", label: "Address ready", tip: "Mailing address pulled — ready for the CSV" },
-  { key: "mailed", label: "Mailed", tip: "Already mailed or exported" },
+  { key: "email_ready", label: "Email ready", tip: "We found an email — send it from the Email Queue tab" },
+  { key: "enriched", label: "Address only", tip: "Mailing address but no email — for the direct-mail CSV" },
+  { key: "mailed", label: "Contacted", tip: "Already emailed, mailed, or exported" },
 ];
+
+const STAGE_PILL: Record<FunnelStage, { label: string; cls: string }> = {
+  pool: { label: "Not started", cls: "bg-slate-100 text-slate-600" },
+  promoted: { label: "Picked", cls: "bg-blue-100 text-blue-700" },
+  email_ready: { label: "Email ready", cls: "bg-emerald-100 text-emerald-700" },
+  enriched: { label: "Address only", cls: "bg-indigo-100 text-indigo-700" },
+  mailed: { label: "Contacted", cls: "bg-green-100 text-green-700" },
+};
 
 const PAGE_SIZE = 50;
 
@@ -44,17 +53,10 @@ function ComplianceBadge({ tier }: { tier: OperatorRow["compliance_tier"] }) {
 }
 
 function StagePill({ stage }: { stage: OperatorRow["stage"] }) {
-  const map: Record<string, string> = {
-    pool: "bg-slate-100 text-slate-600",
-    promoted: "bg-blue-100 text-blue-700",
-    enriched: "bg-indigo-100 text-indigo-700",
-    mailed: "bg-green-100 text-green-700",
-  };
+  const p = STAGE_PILL[stage as FunnelStage] ?? { label: stage, cls: "bg-slate-100 text-slate-600" };
   return (
-    <span
-      className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${map[stage] ?? "bg-slate-100 text-slate-600"}`}
-    >
-      {stage}
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${p.cls}`}>
+      {p.label}
     </span>
   );
 }
@@ -167,7 +169,7 @@ export default function OperatorWorkspace({
     }
   }
 
-  const counts = data?.counts ?? { pool: 0, promoted: 0, enriched: 0, mailed: 0 };
+  const counts = data?.counts ?? { pool: 0, promoted: 0, email_ready: 0, enriched: 0, mailed: 0 };
   const total = data?.total ?? 0;
   const operators = data?.operators ?? [];
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));

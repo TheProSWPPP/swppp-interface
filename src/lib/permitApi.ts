@@ -54,7 +54,8 @@ export interface OperatorRow {
   max_pain: number;
   best_score: number;
   earliest_expiry: string | null;
-  stage: "pool" | "promoted" | "enriched" | "mailed";
+  stage: "pool" | "promoted" | "email_ready" | "enriched" | "mailed";
+  emailable: boolean;
   compliance_tier: "snc" | "violation" | "inspected" | "clean";
   possible_customer: boolean;
   possible_crm: boolean;
@@ -67,7 +68,7 @@ export interface OperatorsListResponse {
   total: number;
   page: number;
   pageSize: number;
-  counts: { pool: number; promoted: number; enriched: number; mailed: number };
+  counts: { pool: number; promoted: number; email_ready: number; enriched: number; mailed: number };
   compliance_last_refreshed?: string | null;
 }
 
@@ -108,6 +109,8 @@ export interface OperatorDetail {
   permits: OperatorPermit[];
   enrichment: OperatorEnrichment | null;
   mailable: boolean;
+  email: { email: string; contact_name: string | null; title: string | null } | null;
+  emailable: boolean;
   outreach: OutreachEvent[];
 }
 
