@@ -3051,6 +3051,27 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           [apolloContactId],
           mailbox.apollo_mailbox_id,
         );
+
+        // Apollo returns HTTP 200 even when it silently DROPS the contact (e.g.
+        // `contacts_finished_in_other_campaigns` for a lead already touched by another
+        // sequence, or an unverified email). In that case `contacts` is empty and the
+        // id shows up under `skipped_contact_ids`. We must NOT report a send, log the
+        // ledger, or fire a Pipedrive activity — that would attribute outreach that
+        // never left the building. Throw before `enrolled` flips so the draft is left
+        // un-sent with the reason surfaced.
+        const skipReason = enrollResponse?.skipped_contact_ids?.[apolloContactId];
+        const addedOk =
+          !skipReason &&
+          Array.isArray(enrollResponse?.contacts) &&
+          enrollResponse.contacts.length > 0;
+        if (!addedOk) {
+          const reason = skipReason || "not added (Apollo returned no enrolled contact)";
+          const e = new Error(`Apollo did not enroll the contact: ${reason}`);
+          e.status = 409;
+          e.code = "apollo_skipped";
+          e.skipReason = reason;
+          throw e;
+        }
         enrolled = true;
 
         // Mark draft sent
@@ -3158,7 +3179,10 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
        WHERE id = $1 AND status IN ('pending','approved','edited')`,
       [req.params.id, String(err.message).slice(0, 1000)],
     ).catch(() => {});
-    res.status(err.status || 500).json({ error: err.message || "Approve-and-send failed" });
+    const payload = { error: err.message || "Approve-and-send failed" };
+    if (err.code) payload.code = err.code;
+    if (err.skipReason) payload.skipReason = err.skipReason;
+    res.status(err.status || 500).json(payload);
   }
 });
 
