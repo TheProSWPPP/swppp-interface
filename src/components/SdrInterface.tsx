@@ -2657,12 +2657,22 @@ function emailFromHeader(s: string | null | undefined): string {
   return (m ? m[1] : s).trim();
 }
 
+type OverviewThread = SdrInboxThread & { mailbox: string; outreached?: boolean };
+
+function nameFromHeader(s: string | null | undefined): string {
+  if (!s) return "";
+  const m = s.match(/^\s*"?([^"<]+?)"?\s*</);
+  return (m ? m[1] : emailFromHeader(s)).trim();
+}
+
 function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "success" | "error", msg: string) => void }) {
   const [accounts, setAccounts] = useState<SdrInboxAccount[] | null>(null);
+  const [view, setView] = useState<"outreach" | "mailbox">("outreach");
   const [mailbox, setMailbox] = useState<string | null>(null);
-  const [threads, setThreads] = useState<SdrInboxThread[] | null>(null);
-  const [loadingThreads, setLoadingThreads] = useState(false);
+  const [threads, setThreads] = useState<OverviewThread[] | null>(null);
+  const [loading, setLoading] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [openMailbox, setOpenMailbox] = useState<string | null>(null);
   const [thread, setThread] = useState<SdrInboxMessage[] | null>(null);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
@@ -2677,29 +2687,32 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
       .catch((e) => pushToast("error", e.message));
   }, [pushToast]);
 
-  const loadThreads = (mb: string) => {
-    setLoadingThreads(true);
-    sdrApi
-      .getInboxThreads(mb)
-      .then((d) => setThreads(d.threads))
-      .catch((e) => pushToast("error", e.message))
-      .finally(() => setLoadingThreads(false));
-  };
-
-  useEffect(() => {
-    if (!mailbox) return;
+  const loadList = useCallback(() => {
+    setLoading(true);
     setOpenId(null);
     setThread(null);
-    loadThreads(mailbox);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mailbox]);
+    const p =
+      view === "outreach"
+        ? sdrApi.getInboxOverview().then((d) => d.threads as OverviewThread[])
+        : mailbox
+          ? sdrApi.getInboxThreads(mailbox).then((d) => (d.threads as OverviewThread[]).map((t) => ({ ...t, mailbox: mailbox })))
+          : Promise.resolve([] as OverviewThread[]);
+    p.then(setThreads)
+      .catch((e) => pushToast("error", e.message))
+      .finally(() => setLoading(false));
+  }, [view, mailbox, pushToast]);
 
-  const openThread = (id: string) => {
+  useEffect(() => {
+    if (accounts) loadList();
+  }, [accounts, loadList]);
+
+  const openThread = (id: string, mb: string) => {
     setOpenId(id);
+    setOpenMailbox(mb);
     setThread(null);
     setReply("");
     sdrApi
-      .getInboxThread(id, mailbox || undefined)
+      .getInboxThread(id, mb)
       .then((d) => {
         setThread(d.messages);
         setThreads((prev) => prev?.map((t) => (t.id === id ? { ...t, unread: false } : t)) ?? prev);
@@ -2717,7 +2730,7 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
   };
 
   const doReply = () => {
-    if (!thread || !openId || !mailbox || !reply.trim()) return;
+    if (!thread || !openId || !openMailbox || !reply.trim()) return;
     const last = thread[thread.length - 1];
     const to = emailFromHeader(last?.from);
     if (!to) {
@@ -2727,7 +2740,7 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
     setSending(true);
     sdrApi
       .replyInboxThread(openId, {
-        mailbox,
+        mailbox: openMailbox,
         to,
         subject: last?.subject ?? "",
         body: reply,
@@ -2737,7 +2750,7 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
       .then(() => {
         pushToast("success", "Reply sent");
         setReply("");
-        openThread(openId);
+        openThread(openId, openMailbox);
       })
       .catch((e) => pushToast("error", e.message))
       .finally(() => setSending(false));
@@ -2750,8 +2763,21 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold text-slate-800">Inbox</h2>
-        {connected.length > 1 && (
+        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-sm">
+          <button
+            onClick={() => setView("outreach")}
+            className={cn("rounded-md px-3 py-1 font-medium", view === "outreach" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+          >
+            Outreach
+          </button>
+          <button
+            onClick={() => setView("mailbox")}
+            className={cn("rounded-md px-3 py-1 font-medium", view === "mailbox" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+          >
+            By mailbox
+          </button>
+        </div>
+        {view === "mailbox" && connected.length > 1 && (
           <select
             value={mailbox ?? ""}
             onChange={(e) => setMailbox(e.target.value)}
@@ -2764,15 +2790,13 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
             ))}
           </select>
         )}
-        {mailbox && (
-          <button
-            onClick={() => loadThreads(mailbox)}
-            title="Refresh"
-            className="rounded-lg border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-50"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        )}
+        <button
+          onClick={() => loadList()}
+          title="Refresh"
+          className="rounded-lg border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-50"
+        >
+          <RefreshCw className="h-4 w-4" />
+        </button>
         <div className="ml-auto flex flex-wrap gap-2">
           {unconnected.map((a) => (
             <button
@@ -2785,31 +2809,35 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
           ))}
         </div>
       </div>
+      <p className="text-xs text-slate-500">
+        {view === "outreach"
+          ? "Replies from leads you've outreached, across every connected mailbox. Open one to see the full thread and reply."
+          : "Everything in this mailbox's inbox."}
+      </p>
 
       {connected.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-          No mailbox connected yet. Connect {user.role === "admin" ? "a mailbox" : "your mailbox"} above to read and reply to messages here.
+          No mailbox connected yet. Connect {user.role === "admin" ? "a mailbox" : "your mailbox"} above to read and reply here.
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,360px)_1fr]">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,380px)_1fr]">
           <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
-            {loadingThreads ? (
+            {loading ? (
               <div className="p-6 text-sm text-slate-400">Loading…</div>
             ) : !threads?.length ? (
-              <div className="p-6 text-sm text-slate-400">No messages.</div>
+              <div className="p-6 text-sm text-slate-400">
+                {view === "outreach" ? "No replies from outreached leads yet." : "No messages."}
+              </div>
             ) : (
               threads.map((t) => (
                 <button
-                  key={t.id}
-                  onClick={() => openThread(t.id)}
-                  className={cn(
-                    "block w-full px-3 py-2.5 text-left hover:bg-slate-50",
-                    openId === t.id && "bg-brand-50",
-                  )}
+                  key={`${t.mailbox}:${t.id}`}
+                  onClick={() => openThread(t.id, t.mailbox)}
+                  className={cn("block w-full px-3 py-2.5 text-left hover:bg-slate-50", openId === t.id && "bg-brand-50")}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className={cn("truncate text-sm text-slate-800", t.unread && "font-semibold")}>
-                      {emailFromHeader(t.from) || "(unknown)"}
+                      {nameFromHeader(t.from) || "(unknown)"}
                     </span>
                     <span className="shrink-0 text-xs text-slate-400">
                       {t.date ? formatRelative(new Date(t.date).toISOString()) : ""}
@@ -2819,11 +2847,18 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
                     {t.subject || "(no subject)"}
                   </div>
                   <div className="truncate text-xs text-slate-400">{t.snippet}</div>
-                  {t.lead && (
-                    <span className="mt-1 inline-block rounded bg-brand-100 px-1.5 py-0.5 text-[11px] text-brand-700">
-                      {t.lead.lead_title || "Linked lead"}
-                    </span>
-                  )}
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    {t.lead && (
+                      <span className="inline-block rounded bg-brand-100 px-1.5 py-0.5 text-[11px] text-brand-700">
+                        {t.lead.lead_title || "Linked lead"}
+                      </span>
+                    )}
+                    {view === "outreach" && (
+                      <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
+                        {t.mailbox.split("@")[0]}
+                      </span>
+                    )}
+                  </div>
                 </button>
               ))
             )}
@@ -2831,29 +2866,39 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
 
           <div className="rounded-xl border border-slate-200 p-4">
             {!openId ? (
-              <div className="text-sm text-slate-400">Select a message to read and reply.</div>
+              <div className="text-sm text-slate-400">Select a conversation to read and reply.</div>
             ) : !thread ? (
               <div className="text-sm text-slate-400">Loading…</div>
             ) : (
-              <div className="space-y-4">
-                {thread.map((m) => (
-                  <div key={m.id} className="rounded-lg border border-slate-100 p-3">
-                    <div className="mb-1 flex items-center justify-between gap-2 text-xs text-slate-500">
-                      <span className="truncate">{m.from}</span>
-                      <span className="shrink-0">{m.date ? new Date(m.date).toLocaleString() : ""}</span>
+              <div className="space-y-3">
+                {thread.map((m) => {
+                  const mine = !!openMailbox && emailFromHeader(m.from) === openMailbox;
+                  return (
+                    <div
+                      key={m.id}
+                      className={cn(
+                        "rounded-lg border p-3",
+                        mine ? "ml-6 border-brand-200 bg-brand-50/60" : "mr-6 border-slate-100 bg-white",
+                      )}
+                    >
+                      <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                        <span className="truncate font-medium text-slate-700">{mine ? "You" : nameFromHeader(m.from)}</span>
+                        <span className="shrink-0 text-slate-400">{m.date ? new Date(m.date).toLocaleString() : ""}</span>
+                      </div>
+                      <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{m.body?.trim() || "(no text)"}</div>
                     </div>
-                    <div className="whitespace-pre-wrap text-sm text-slate-800">{m.body?.trim() || "(no text)"}</div>
-                  </div>
-                ))}
-                <div className="space-y-2">
+                  );
+                })}
+                <div className="space-y-2 border-t border-slate-100 pt-3">
                   <textarea
                     value={reply}
                     onChange={(e) => setReply(e.target.value)}
                     rows={4}
-                    placeholder={`Reply as ${mailbox}…`}
-                    className="w-full rounded-lg border border-slate-300 p-2 text-sm"
+                    placeholder={`Reply as ${openMailbox}…`}
+                    className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-brand-400 focus:outline-none"
                   />
-                  <div className="flex justify-end">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-400">Sends from {openMailbox}</span>
                     <button
                       onClick={doReply}
                       disabled={sending || !reply.trim()}

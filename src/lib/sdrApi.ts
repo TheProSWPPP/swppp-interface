@@ -349,6 +349,10 @@ export const sdrApi = {
       `/api/sdr/inbox/threads${qs ? `?${qs}` : ""}`,
     );
   },
+  getInboxOverview: () =>
+    sdrFetch<{ threads: (SdrInboxThread & { mailbox: string; outreached?: boolean })[]; mailboxes: string[] }>(
+      "/api/sdr/inbox/overview",
+    ),
   getInboxThread: (id: string, mailbox?: string) =>
     sdrFetch<{ mailbox: string; id: string; messages: SdrInboxMessage[] }>(
       `/api/sdr/inbox/threads/${id}${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ""}`,

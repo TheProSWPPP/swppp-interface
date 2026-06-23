@@ -1966,6 +1966,56 @@ app.post("/api/sdr/inbox/threads/:id/reply", express.json(), async (req, res) =>
   }
 });
 
+// Cross-mailbox OUTREACH overview: the signal-only view. Aggregates inbox threads
+// across every mailbox the user can see, keeps only conversations whose counterpart
+// is a lead in our book (i.e. tied to outreach), and tags each with its mailbox + lead.
+app.get("/api/sdr/inbox/overview", async (req, res) => {
+  try {
+    const vis = await visibleMailboxes(req.sdrUser);
+    const boxes = vis.filter((v) => v.connected).map((v) => v.email);
+    if (!boxes.length) return res.json({ threads: [], mailboxes: [] });
+    const all = [];
+    for (const mb of boxes) {
+      let token;
+      try {
+        token = await accessTokenForMailbox(mb);
+      } catch {
+        continue;
+      }
+      try {
+        const threads = await gmailInbox.listThreads(token, { q: "in:inbox", maxResults: 15 });
+        for (const t of threads) all.push({ ...t, mailbox: mb });
+      } catch {
+        /* skip a mailbox that errors, keep the rest */
+      }
+    }
+    const froms = [...new Set(all.map((t) => parseEmailAddr(t.from)).filter(Boolean))];
+    const leadMap = {};
+    if (froms.length) {
+      const { rows } = await pool.query(
+        `SELECT lower(s.person_email) e, s.pipedrive_lead_id, s.lead_title,
+                EXISTS(SELECT 1 FROM sdr_outreach_log o WHERE o.pipedrive_lead_id = s.pipedrive_lead_id) AS outreached
+           FROM sdr_lead_state s WHERE lower(s.person_email) = ANY($1)`,
+        [froms],
+      );
+      for (const r of rows) leadMap[r.e] = r;
+    }
+    const threads = all
+      .map((t) => {
+        const e = parseEmailAddr(t.from);
+        const m = e ? leadMap[e] : null;
+        return m
+          ? { ...t, lead: { lead_id: m.pipedrive_lead_id, lead_title: m.lead_title }, outreached: m.outreached }
+          : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => (Date.parse(b.date || "") || 0) - (Date.parse(a.date || "") || 0));
+    res.json({ threads, mailboxes: boxes });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // SDR engagement — on-demand Apollo replies/bounces poll (admin only). Returns scan counts.
 app.post("/api/sdr/engagement/poll", async (req, res) => {
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
