@@ -20,10 +20,10 @@ import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
-import { runPermitAutoFind, runPermitAutoSend } from "./lib/permitAuto.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
+import { sweepSentOutreach, upsertOutreach } from "./lib/outreachSync.js";
 import { dailyCap, rampDay } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
 import { runAutoOutreach, pruneStaleQueuedDrafts } from "./lib/autoOutreach.js";
@@ -757,6 +757,32 @@ async function initDB() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_sequence ON sdr_sends(apollo_sequence_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_status ON sdr_sends(status)`);
 
+    // Per-lead outreach ledger (lib/outreachSync.js). One row per (lead, source):
+    // 'pipedrive' swept from the sent folder, 'interface' written by approve-and-send.
+    // Replaces the misleading person-level last_outgoing_mail_time in the Leads view.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_outreach_log (
+        pipedrive_lead_id TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('pipedrive','interface')),
+        sent_at TIMESTAMPTZ NOT NULL,
+        sender_name TEXT,
+        sender_email TEXT,
+        subject TEXT,
+        external_ref TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (pipedrive_lead_id, source)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_outreach_log_lead ON sdr_outreach_log(pipedrive_lead_id)`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_outreach_sweep_state (
+        id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        last_swept_at TIMESTAMPTZ,
+        last_thread_ts TIMESTAMPTZ
+      )
+    `);
+    await pool.query(`INSERT INTO sdr_outreach_sweep_state (id) VALUES (1) ON CONFLICT DO NOTHING`);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sdr_engagement_events (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1065,6 +1091,13 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
         } catch (e) {
           console.error("[auto-outreach] prune failed:", e.message);
         }
+        // Incremental sweep of the Pipedrive sent folder → per-lead outreach ledger.
+        try {
+          const sw = await sweepSentOutreach(pool, { full: false });
+          console.log("[outreach-sweep]", JSON.stringify(sw));
+        } catch (e) {
+          console.error("[outreach-sweep] failed:", e.message);
+        }
       })
       .catch((e) => console.error("[sync] sdr_lead_state failed:", e.message));
   setTimeout(runSync, 30_000);
@@ -1155,26 +1188,6 @@ if (process.env.DATABASE_URL && process.env.PERMIT_REFRESH_ENABLED === "true") {
     } catch (e) { console.error("[permit-refresh] failed:", e.message); }
   };
   setInterval(runPermitRefresh, 30 * 24 * 60 * 60 * 1000); // ~monthly
-}
-
-// Permit automation loops (in-process cron). Each internally no-ops unless its toggle is
-// on (permit_engine_settings.auto_find_enabled / auto_send_enabled); auto-send also needs
-// the master switch. First fire is one interval after boot (no surprise sends on deploy).
-if (process.env.DATABASE_URL) {
-  const tickFind = async () => {
-    try {
-      const r = await runPermitAutoFind(pool);
-      if (!r.skipped) console.log(`[permit-auto-find] ${JSON.stringify(r)}`);
-    } catch (e) { console.error("[permit-auto-find] failed:", e.message); }
-  };
-  const tickSend = async () => {
-    try {
-      const r = await runPermitAutoSend(pool);
-      if (!r.skipped && (r.sent || r.errors?.length)) console.log(`[permit-auto-send] ${JSON.stringify(r)}`);
-    } catch (e) { console.error("[permit-auto-send] failed:", e.message); }
-  };
-  setInterval(tickFind, 6 * 60 * 60 * 1000); // ~every 6h
-  setInterval(tickSend, 15 * 60 * 1000);     // ~every 15 min
 }
 
 // Fallback in-memory store if no DB is connected (for local dev)
@@ -1489,6 +1502,10 @@ app.get("/api/sdr/leads", async (req, res) => {
              ob.outreached_by,
              ob.outreached_status,
              ob.initiated_by,
+             ol.sent_at AS outreach_sent_at,
+             ol.source AS outreach_source,
+             ol.sender_name AS outreach_sender_name,
+             ol.sender_email AS outreach_sender_email,
              snd.send_status,
              snd.send_sequence_id,
              snd.sent_at AS send_sent_at,
@@ -1515,6 +1532,13 @@ app.get("/api/sdr/leads", async (req, res) => {
         ORDER BY sent_at DESC NULLS LAST
         LIMIT 1
       ) snd ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT sent_at, source, sender_name, sender_email
+        FROM sdr_outreach_log
+        WHERE pipedrive_lead_id = s.pipedrive_lead_id
+        ORDER BY sent_at DESC
+        LIMIT 1
+      ) ol ON TRUE
       ${whereSql}
       ${orderSql}
       LIMIT ${limit} OFFSET ${offset}`;
@@ -1732,6 +1756,29 @@ app.post("/api/sdr/sync/leads", async (req, res) => {
     .then((r) => console.log("[sync] on-demand sdr_lead_state:", JSON.stringify(r)))
     .catch((e) => console.error("[sync] on-demand failed:", e.message));
   res.status(202).json({ started: true, note: "Sync running in background; poll GET /api/sdr/leads for updated state." });
+});
+
+// SDR outreach ledger — sweep the Pipedrive sent folder into sdr_outreach_log
+// (admin only). body { full:true } pages the whole sent folder (initial backfill);
+// otherwise incremental from the last watermark. Fire-and-forget for the full run.
+app.post("/api/sdr/outreach/sweep", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
+  const full = req.body?.full === true;
+  if (full) {
+    sweepSentOutreach(pool, { full: true })
+      .then((r) => console.log("[outreach-sweep] full:", JSON.stringify(r)))
+      .catch((e) => console.error("[outreach-sweep] full failed:", e.message));
+    return res.status(202).json({ started: true, full: true });
+  }
+  try {
+    const r = await sweepSentOutreach(pool, { full: false });
+    res.json(r);
+  } catch (err) {
+    console.error("POST /api/sdr/outreach/sweep error:", err);
+    res.status(500).json({ error: err.message || "Sweep failed" });
+  }
 });
 
 // SDR engagement — on-demand Apollo replies/bounces poll (admin only). Returns scan counts.
@@ -2794,8 +2841,27 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       result = { draft: updRows[0] || { ...draft, status: "sent" }, send: sendRows[0] || null, apollo_response: enrollResponse, warning: warn };
     }
 
-    // Pipedrive write-back (non-fatal): mark the lead as in-sequence + leave a note,
-    // so other workflows/humans don't double-outreach this lead.
+    // Per-lead outreach ledger (interface source). Sender = the .co mailbox that
+    // sends via Apollo (not a Pipedrive-connected mailbox, so it never lands in the
+    // sent-folder sweep — this is how interface sends enter the ledger). Runs after
+    // the send is recorded so it covers the Apollo-enrolled-but-DB-failed fallback too.
+    try {
+      await upsertOutreach(pool, {
+        pipedrive_lead_id: draft.pipedrive_lead_id,
+        source: "interface",
+        sent_at: new Date().toISOString(),
+        sender_name: req.sdrUser?.username || null,
+        sender_email: mailbox.email,
+        subject: draft.subject,
+        external_ref: result?.send?.id ? String(result.send.id) : null,
+      });
+    } catch (e) {
+      console.error("outreach ledger upsert (interface) failed:", e.message);
+    }
+
+    // Pipedrive write-back (non-fatal): mark the lead in-sequence (dedup), drop a
+    // note with the interface deep-link, and log a dated Activity so the send shows
+    // in the lead's Pipedrive timeline. No new custom field — state lives in Postgres.
     if (process.env.PIPEDRIVE_API_TOKEN) {
       try {
         await pipedriveClient.updateLead(draft.pipedrive_lead_id, {
@@ -2809,6 +2875,13 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
             `Sender: ${mailbox.email}. Sequence_Started set.` +
             (overrideContext ? ` ⚠️ ${overrideContext}.` : "") +
             `\nOpen in interface: ${appBase}/#/sdr?lead=${draft.pipedrive_lead_id}`,
+        });
+        await pipedriveClient.addActivity({
+          leadId: draft.pipedrive_lead_id,
+          subject: `Outreach sent: ${draft.trigger_type} sequence via ${mailbox.email} (interface)`,
+          type: "email",
+          done: true,
+          note: `Enrolled in Apollo ${draft.trigger_type} sequence (${draft.apollo_sequence_id}) by ${req.sdrUser?.username || "auto"}.`,
         });
       } catch (e) {
         console.error("Pipedrive sync on send failed:", e.message);

@@ -157,6 +157,41 @@ function daysAgoLabel(days: number | null | undefined): string {
   return `${days}d ago`;
 }
 
+// Floored days since an ISO timestamp; null when absent/unparseable.
+function daysFromIso(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 86400000);
+}
+
+// Per-lead outreach attribution (from sdr_outreach_log): who sent + which system.
+// Falls back to a sent-draft rep, then to nothing. Never invents a Pipedrive owner.
+function outreachAttribution(lead: SdrLead): { who: string; src: string; title: string } | null {
+  if (lead.outreach_source === "interface") {
+    return {
+      who: lead.outreach_sender_email || lead.outreach_sender_name || "Interface",
+      src: "Interface",
+      title: "Sent from this interface via Apollo",
+    };
+  }
+  if (lead.outreach_source === "pipedrive") {
+    return {
+      who: lead.outreach_sender_name || lead.outreach_sender_email || "Pipedrive",
+      src: "Pipedrive",
+      title: "Sent from a Pipedrive-connected mailbox",
+    };
+  }
+  if (lead.outreached_by) {
+    return {
+      who: lead.outreached_by,
+      src: "Interface",
+      title: lead.initiated_by === "automatic" ? "Auto-outreached by the engine" : "Outreached manually via this interface",
+    };
+  }
+  return null;
+}
+
 function initials(name: string): string {
   return name.split(/\s+/).map((s) => s[0]).join("").slice(0, 2).toUpperCase();
 }
@@ -937,7 +972,7 @@ function LeadsView({
                   <LeadTh label="Contact status" sortKey="outreach_status" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Trigger" sortKey="trigger_type" sort={sort} dir={dir} onSort={toggleSort} />
                   <th className="px-4 py-3">Outreached by</th>
-                  <LeadTh label="Contact emailed (any deal)" sortKey="last_contact" sort={sort} dir={dir} onSort={toggleSort} />
+                  <th className="px-4 py-3" title="Latest real send for THIS lead (Pipedrive sent folder or our interface). Not the contact's any-deal email.">Last outreach</th>
                   <th className="px-4 py-3 text-right">Action</th>
                 </tr>
               </thead>
@@ -1159,7 +1194,15 @@ function LeadDetailDrawer({
                 <DrawerField label="Bid date" value={formatDate(lead?.bid_date ?? null)} />
                 <DrawerField label="Start date" value={formatDate(lead?.start_date ?? null)} />
                 <DrawerField
-                  label="Contact emailed (any deal)"
+                  label="Last outreach (this lead)"
+                  value={
+                    lead?.outreach_sent_at
+                      ? `${formatDate(lead.outreach_sent_at)} · ${lead.outreach_sender_name || lead.outreach_sender_email || lead.outreach_source} · ${lead.outreach_source}`
+                      : "Not outreached"
+                  }
+                />
+                <DrawerField
+                  label="Contact last emailed (any deal)"
                   value={daysAgoLabel(lead?.days_since_outgoing)}
                 />
                 {lead?.send_sequence_id && (
@@ -1601,25 +1644,28 @@ function LeadRow({
           never as proof this lead was outreached (the contact-level email lives in the
           status badge + "Contact last emailed" column). */}
       <td className="px-4 py-3 align-top text-slate-600">
-        {lead.outreached_by ? (
-          <span title={lead.initiated_by === "automatic" ? "Auto-outreached by the engine" : "Outreached manually via this interface"}>
-            {lead.outreached_by}{" "}
-            <span className="text-xs text-slate-400">
-              · {lead.initiated_by === "automatic" ? "auto" : "manual"}
+        {(() => {
+          const a = outreachAttribution(lead);
+          if (!a) return <span className="text-slate-300" title="No send recorded for this lead">—</span>;
+          return (
+            <span title={a.title}>
+              {a.who} <span className="text-xs text-slate-400">· {a.src}</span>
             </span>
-          </span>
-        ) : (
-          // Not outreached by our system. We deliberately do NOT show the lead owner here
-          // (Derek owns ~99% of leads, so it read as "Derek outreached everything").
-          <span className="text-slate-300" title="Not outreached through this interface yet">—</span>
-        )}
+          );
+        })()}
       </td>
-      {/* Contact last emailed (person-level signal from Pipedrive) */}
+      {/* Last outreach — latest real send for THIS lead (sdr_outreach_log), lead-level
+          truth. Replaces the person-level "Contact emailed (any deal)" that bled across
+          every lead a contact sits on. Person-level signal now lives in the drawer. */}
       <td
         className="px-4 py-3 align-top text-slate-600"
-        title="Last time this CONTACT was emailed in Pipedrive — across any project, not just this lead. Used for dedup."
+        title={lead.outreach_sent_at ? `${formatDate(lead.outreach_sent_at)} · ${lead.outreach_source}` : "No send recorded for this lead"}
       >
-        {daysAgoLabel(lead.days_since_outgoing)}
+        {lead.outreach_sent_at ? (
+          daysAgoLabel(daysFromIso(lead.outreach_sent_at))
+        ) : (
+          <span className="text-slate-300">Not outreached</span>
+        )}
       </td>
       {/* Action */}
       <td className="px-4 py-3 align-top text-right">

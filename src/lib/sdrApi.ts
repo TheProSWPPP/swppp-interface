@@ -99,6 +99,12 @@ export interface SdrLead {
   outreached_by: string | null;
   outreached_status: string | null;
   initiated_by: string | null;
+  // Per-lead outreach ledger (sdr_outreach_log): the latest real send for THIS lead,
+  // by source. Replaces the person-level last_outgoing_mail_time as the outreach signal.
+  outreach_sent_at: string | null;
+  outreach_source: "pipedrive" | "interface" | null;
+  outreach_sender_name: string | null;
+  outreach_sender_email: string | null;
   bid_date: string | null;
   start_date: string | null;
   trigger_override: string | null;
