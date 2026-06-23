@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { Building2, Mail, Send } from "lucide-react";
 import OperatorWorkspace from "./OperatorWorkspace";
 import MsgpCopyView from "./MsgpCopyView";
-import PermitQueueView from "./PermitQueueView";
+import PermitSentView from "./PermitSentView";
 import PermitsGuide from "./PermitsGuide";
 import { getPermitSettings, patchPermitSettings, patchPermitMailbox, type PermitSettings, type PermitMailbox } from "../../lib/permitApi";
 
-type PermitSub = "leads" | "queue" | "email";
+type PermitSub = "leads" | "sent" | "email";
 
 export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: "success" | "error") => void }) {
   const [sub, setSub] = useState<PermitSub>("leads");
@@ -29,15 +29,13 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
 
   const toggleActive = async () => {
     if (!settings) return;
-    if (!settings.active && !window.confirm("Turn ON permit email sending? Approved drafts can then be sent.")) return;
-    await patch({ active: !settings.active }, `Permit email sending ${!settings.active ? "ON" : "OFF"}`);
+    if (!settings.active && !window.confirm(
+      "Turn ON permit auto-outreach? It will find emails and send the renewal email automatically, within your daily cap and each inbox's limit.",
+    )) return;
+    await patch({ active: !settings.active }, `Permit auto-outreach ${!settings.active ? "ON" : "OFF"}`);
   };
 
-  const toggleAutoSend = async () => {
-    if (!settings) return;
-    if (!settings.auto_send_enabled && !window.confirm("Turn ON auto-send? Approved drafts will send on their own within each inbox's daily cap.")) return;
-    await patch({ auto_send_enabled: !settings.auto_send_enabled });
-  };
+  const enabledCount = mailboxes.filter((m) => m.permit_enabled).length;
 
   const btn = (v: PermitSub, label: string, icon: React.ReactNode) => (
     <button onClick={() => setSub(v)}
@@ -49,7 +47,7 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
 
   const renderSub = () => {
     if (sub === "leads") return <OperatorWorkspace pushToast={pushToast} />;
-    if (sub === "queue") return <PermitQueueView pushToast={pushToast} />;
+    if (sub === "sent") return <PermitSentView pushToast={pushToast} />;
     return <MsgpCopyView pushToast={pushToast} />;
   };
 
@@ -58,60 +56,27 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
       <PermitsGuide />
       {settings && (
         <div className="mb-3 space-y-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm">
-          {/* Master switch */}
+          {/* One master switch: find + send, fully automatic */}
           <div>
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={settings.active} onChange={toggleActive} />
-              <span className="font-medium">Permit email sending {settings.active ? "ON" : "OFF"}</span>
+              <span className="font-medium">Permit auto-outreach {settings.active ? "ON" : "OFF"}</span>
             </label>
             <p className="mt-1 text-xs text-slate-500">
-              Master switch. Off = nothing sends, even approved drafts. Finding emails still works either way.
+              On = finds emails and sends the renewal email automatically. Off = nothing runs.
+              Obviously-wrong matches are skipped, not sent.
             </p>
-          </div>
-
-          {/* Auto-find emails */}
-          <div className="border-t border-slate-200 pt-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={!!settings.auto_find_enabled}
-                onChange={() => patch({ auto_find_enabled: !settings.auto_find_enabled })} />
-              <span className="font-medium">Auto-find emails</span>
+            <label className="mt-2 flex items-center gap-1.5 text-xs text-slate-600">
+              Max emails per day
+              <input type="number" min={1} max={500} defaultValue={settings.auto_find_daily_cap ?? 50}
+                onBlur={(e) => patch({ auto_find_daily_cap: Number(e.target.value) })}
+                className="w-16 rounded border border-slate-300 px-1.5 py-0.5" />
+              <span className="text-slate-400">(stays under each inbox's own limit)</span>
             </label>
-            <p className="mt-1 text-xs text-slate-500">
-              Checks picked companies for emails on a schedule (~1 credit each).
-            </p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
-              <label className="flex items-center gap-1.5">
-                Max per day
-                <input type="number" min={1} max={500} defaultValue={settings.auto_find_daily_cap ?? 50}
-                  onBlur={(e) => patch({ auto_find_daily_cap: Number(e.target.value) })}
-                  className="w-16 rounded border border-slate-300 px-1.5 py-0.5" />
-              </label>
-              <label className="flex items-center gap-1.5">
-                Pause when backlog over
-                <input type="number" min={1} max={5000} defaultValue={settings.auto_find_backlog_max ?? 200}
-                  onBlur={(e) => patch({ auto_find_backlog_max: Number(e.target.value) })}
-                  className="w-20 rounded border border-slate-300 px-1.5 py-0.5" />
-                found-but-unsent
-              </label>
-            </div>
-          </div>
-
-          {/* Auto-send approved */}
-          <div className="border-t border-slate-200 pt-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={!!settings.auto_send_enabled} onChange={toggleAutoSend} />
-              <span className="font-medium">Auto-send approved drafts</span>
-            </label>
-            <p className="mt-1 text-xs text-slate-500">
-              On = approved drafts send on their own within each inbox's daily cap (needs the master switch on too).
-              Off = you send each with “Send now”.
-            </p>
           </div>
 
           <details className="border-t border-slate-200 pt-2">
-            <summary className="cursor-pointer text-slate-600">
-              Sending mailboxes ({mailboxes.filter((m) => m.permit_enabled).length} enabled · shares the daily limit with regular outreach)
-            </summary>
+            <summary className="cursor-pointer text-slate-600">Sending inboxes ({enabledCount} on)</summary>
             {mailboxes.map((m) => (
               <label key={m.id} className="flex items-center gap-2 py-0.5 cursor-pointer">
                 <input type="checkbox" checked={m.permit_enabled}
@@ -119,23 +84,19 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
                     try {
                       const { mailbox } = await patchPermitMailbox(m.id, !m.permit_enabled);
                       setMailboxes((xs) => xs.map((x) => x.id === mailbox.id ? { ...x, permit_enabled: mailbox.permit_enabled } : x));
-                    } catch {
-                      pushToast?.("Failed to update mailbox", "error");
-                    }
+                    } catch { pushToast?.("Failed to update mailbox", "error"); }
                   }} />
                 <span>{m.email}</span>
-                <span className="text-xs text-slate-400">{m.daily_send_limit ?? "—"}/day shared</span>
+                <span className="text-xs text-slate-400">up to {m.daily_send_limit ?? "—"}/day</span>
               </label>
             ))}
-            <p className="mt-1 text-xs text-slate-400">
-              Permit emails draw from each mailbox's daily cap (set in SDR → Mailboxes) — not a separate quota.
-            </p>
+            <p className="mt-1 text-xs text-slate-400">Each inbox obeys its own daily limit (set in SDR → Mailboxes).</p>
           </details>
         </div>
       )}
       <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
         {btn("leads", "Leads", <Building2 className="h-4 w-4" />)}
-        {btn("queue", "Email Queue", <Send className="h-4 w-4" />)}
+        {btn("sent", "Sent", <Send className="h-4 w-4" />)}
         {btn("email", "Email Copy", <Mail className="h-4 w-4" />)}
       </div>
       {renderSub()}

@@ -20,6 +20,7 @@ import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
+import { runPermitAutoOutreach } from "./lib/permitAuto.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
@@ -1188,6 +1189,20 @@ if (process.env.DATABASE_URL && process.env.PERMIT_REFRESH_ENABLED === "true") {
     } catch (e) { console.error("[permit-refresh] failed:", e.message); }
   };
   setInterval(runPermitRefresh, 30 * 24 * 60 * 60 * 1000); // ~monthly
+}
+
+// Permit auto-outreach loop (~every 15 min). No-ops unless the master switch is on
+// (permit_engine_settings.active). First fire is one interval after boot.
+if (process.env.DATABASE_URL) {
+  const tickPermitAuto = async () => {
+    try {
+      const r = await runPermitAutoOutreach(pool);
+      if (!r.skipped && (r.sent || r.skippedBad || r.errors?.length)) {
+        console.log(`[permit-auto] ${JSON.stringify(r)}`);
+      }
+    } catch (e) { console.error("[permit-auto] failed:", e.message); }
+  };
+  setInterval(tickPermitAuto, 15 * 60 * 1000);
 }
 
 // Fallback in-memory store if no DB is connected (for local dev)

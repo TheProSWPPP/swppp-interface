@@ -127,6 +127,22 @@ export interface PermitMailbox { id: string; email: string; display_name: string
 export async function getPermitSettings(): Promise<{ settings: PermitSettings; mailboxes: PermitMailbox[] }> {
   return j<{ settings: PermitSettings; mailboxes: PermitMailbox[] }>(`/api/permits/settings`);
 }
+
+export interface PermitSend {
+  operator_key: string;
+  operator_name: string | null;
+  email: string | null;
+  status: "emailed" | "skipped";
+  note: string | null;
+  created_at: string;
+}
+export interface PermitSentResponse {
+  sends: PermitSend[];
+  counts: { total_sent: number; sent_today: number; skipped: number };
+}
+export function getPermitSent(): Promise<PermitSentResponse> {
+  return j<PermitSentResponse>(`/api/permits/sent`);
+}
 export async function patchPermitSettings(body: Partial<PermitSettings>): Promise<{ settings: PermitSettings }> {
   return j<{ settings: PermitSettings }>(`/api/permits/settings`, {
     method: "PATCH",
