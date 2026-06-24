@@ -2123,6 +2123,50 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
   }
 });
 
+// SDR outbox — what's enrolled in Apollo and SCHEDULED to send but hasn't gone out yet
+// (Apollo holds each step until its schedule + the mailbox's daily limit allow). This is
+// "next to be sent", which the Queue can't show because send-mode enrolls straight to Apollo.
+app.get("/api/sdr/outbox", async (req, res) => {
+  if (!process.env.APOLLO_API_KEY) return res.json({ scheduled: [] });
+  try {
+    const seqIds = ["AGC", "CM", "LBA", "PB"]
+      .map((t) => process.env[`APOLLO_SEQ_${t}`])
+      .filter(Boolean);
+    if (!seqIds.length) return res.json({ scheduled: [] });
+    const data = await apolloClient.searchEmailerMessages({ campaignIds: seqIds, perPage: 100 });
+    const msgs = (data.emailer_messages || []).filter((m) => m.status === "scheduled");
+    // Map recipient → our lead (for the title). Restrict to the requester's visible mailboxes
+    // so a non-admin only sees their own queue.
+    const vis = await visibleMailboxes(req.sdrUser).catch(() => null);
+    const allowed = vis ? new Set(vis.map((v) => v.email.toLowerCase())) : null;
+    const scoped = msgs.filter((m) => !allowed || allowed.has(String(m.from_email || "").toLowerCase()));
+    const emails = [...new Set(scoped.map((m) => String(m.to_email || "").toLowerCase()).filter(Boolean))];
+    const leadMap = {};
+    if (emails.length) {
+      const { rows } = await pool.query(
+        `SELECT lower(person_email) e, pipedrive_lead_id, lead_title, trigger_type
+           FROM sdr_lead_state WHERE lower(person_email) = ANY($1)`,
+        [emails],
+      );
+      for (const r of rows) leadMap[r.e] = r;
+    }
+    const scheduled = scoped
+      .map((m) => {
+        const lead = leadMap[String(m.to_email || "").toLowerCase()] || null;
+        return {
+          to_email: m.to_email,
+          from_email: m.from_email,
+          due_at: m.due_at || null,
+          lead: lead ? { lead_id: lead.pipedrive_lead_id, lead_title: lead.lead_title, trigger_type: lead.trigger_type } : null,
+        };
+      })
+      .sort((a, b) => (Date.parse(a.due_at || "") || Infinity) - (Date.parse(b.due_at || "") || Infinity));
+    res.json({ scheduled });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // SDR engagement — on-demand Apollo replies/bounces poll (admin only). Returns scan counts.
 app.post("/api/sdr/engagement/poll", async (req, res) => {
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });

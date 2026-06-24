@@ -10,6 +10,7 @@ import {
   ChevronsUpDown,
   ExternalLink,
   FileSearch,
+  Clock,
   Flame,
   Inbox,
   LayoutGrid,
@@ -1853,6 +1854,7 @@ function QueueView({
   pushToast: (kind: "success" | "error", text: string) => void;
 }) {
   const [drafts, setDrafts] = useState<SdrDraft[] | null>(null);
+  const [scheduled, setScheduled] = useState<Awaited<ReturnType<typeof sdrApi.getOutbox>>["scheduled"]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -1866,6 +1868,8 @@ function QueueView({
     } catch (e) {
       setError((e as Error).message);
     }
+    // Apollo "scheduled but not yet sent" queue — best-effort, never blocks the drafts view.
+    sdrApi.getOutbox().then((o) => setScheduled(o.scheduled)).catch(() => {});
   }, []);
 
   // Initial load + poll + refresh when the tab regains focus
@@ -2003,6 +2007,37 @@ function QueueView({
           <StatTile label="Awaiting review" value={counts.pending} icon={<ListChecks className="h-4 w-4" />} tone="slate" />
           <StatTile label="Sent" value={counts.sent} icon={<Send className="h-4 w-4" />} tone="emerald" />
           <StatTile label="Failed" value={counts.failed} icon={<XCircle className="h-4 w-4" />} tone="rose" />
+        </div>
+      )}
+
+      {/* Scheduled to send — enrolled in Apollo, waiting on the sending schedule / daily cap. */}
+      {scheduled.length > 0 && (
+        <div className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+            <Clock className="h-4 w-4 text-amber-500" />
+            <span className="text-sm font-semibold text-slate-900">Scheduled to send</span>
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">{scheduled.length}</span>
+            <span className="ml-auto text-xs text-slate-400">Enrolled in Apollo, waiting on the schedule + daily cap</span>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {scheduled.slice(0, 25).map((s, i) => (
+              <li key={i} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                {s.lead?.trigger_type && (
+                  <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset", TRIGGER_COLORS[s.lead.trigger_type])}>
+                    {s.lead.trigger_type}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1 truncate text-slate-800">
+                  {s.lead?.lead_title || s.to_email || "(unknown)"}
+                </span>
+                <span className="hidden shrink-0 truncate text-xs text-slate-400 sm:block">{s.to_email}</span>
+                <span className="shrink-0 text-xs text-slate-500">{s.from_email?.split("@")[0]}</span>
+                <span className="shrink-0 text-xs font-medium text-amber-600" title={s.due_at || ""}>
+                  {s.due_at ? formatRelative(s.due_at) : "soon"}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       <div className="flex items-center justify-between mb-4">

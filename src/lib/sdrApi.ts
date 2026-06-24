@@ -412,6 +412,16 @@ export const sdrApi = {
   listTemplates: () =>
     sdrFetch<{ templates: Record<SdrTriggerType, SdrTemplate> }>("/api/sdr/templates"),
 
+  getOutbox: () =>
+    sdrFetch<{
+      scheduled: {
+        to_email: string | null;
+        from_email: string | null;
+        due_at: string | null;
+        lead: { lead_id: string; lead_title: string | null; trigger_type: SdrTriggerType | null } | null;
+      }[];
+    }>("/api/sdr/outbox"),
+
   listDrafts: (status?: SdrDraftStatus) => {
     const q = status ? `?status=${status}` : "";
     return sdrFetch<{ drafts: SdrDraft[] }>(`/api/sdr/drafts${q}`);
