@@ -21,6 +21,7 @@ import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplate
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
 import { registerPermitExportRoutes } from "./lib/permitExportRoutes.js";
+import { runPermitAutoOutreach } from "./lib/permitAuto.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
@@ -1210,6 +1211,20 @@ if (process.env.DATABASE_URL && process.env.PERMIT_REFRESH_ENABLED === "true") {
     } catch (e) { console.error("[permit-refresh] failed:", e.message); }
   };
   setInterval(runPermitRefresh, 30 * 24 * 60 * 60 * 1000); // ~monthly
+}
+
+// Permit auto-outreach: send the MSGP renewal email to email-able operators, capped at each
+// mailbox's 20% daily share (Pipedrive/SDR keeps the rest). Gated by the master switch
+// (permit_engine_settings.active = OFF by default), so this is inert until turned on.
+if (process.env.DATABASE_URL) {
+  const tickPermitAuto = async () => {
+    try {
+      const r = await runPermitAutoOutreach(pool);
+      if (r.sent) console.log(`[permit-auto] sent=${r.sent} skippedBad=${r.skippedBad || 0} candidates=${r.candidates}`);
+      else if (r.skipped && r.skipped !== "off") console.log(`[permit-auto] skipped: ${r.skipped}`);
+    } catch (e) { console.error("[permit-auto] failed:", e.message); }
+  };
+  setInterval(tickPermitAuto, 2 * 60 * 60 * 1000); // every 2h; the 20%/mailbox/day budget caps volume
 }
 
 // Fallback in-memory store if no DB is connected (for local dev)
