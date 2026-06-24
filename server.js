@@ -2092,19 +2092,37 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
           [candidateEmails],
         ),
       ]);
-      for (const r of sdrRes.rows) leadMap[r.e] = r;
+      for (const r of sdrRes.rows) (leadMap[r.e] ||= []).push(r);
       for (const r of permitRes.rows) permitMap[r.e] = r;
     }
     const repliedLeads = new Set();
     const repliedOps = new Set();
     const replyThreads = [];
+    // When one contact email belongs to several leads (the same GC contact across multiple
+    // projects), pick the lead whose title best overlaps the thread subject — otherwise the
+    // reply surfaces under an arbitrary sibling lead and reads as "missing".
+    const scoreTitle = (title, subject) => {
+      const toks = (s) => new Set(String(s || "").toLowerCase().match(/[a-z0-9]{4,}/g) || []);
+      const subjToks = toks(subject);
+      let n = 0;
+      for (const w of toks(title)) if (subjToks.has(w)) n++;
+      return n;
+    };
     for (const t of all) {
-      // First participant that resolves to a lead wins; SDR lead takes priority over permit.
-      let sdr = null;
+      // Gather every lead any participant maps to, then disambiguate by subject. SDR lead
+      // takes priority over permit.
+      const leadCands = [];
       let permit = null;
       for (const p of partsOf(t)) {
-        if (!sdr && leadMap[p]) sdr = leadMap[p];
+        if (leadMap[p]) leadCands.push(...leadMap[p]);
         if (!permit && permitMap[p]) permit = permitMap[p];
+      }
+      let sdr = null;
+      if (leadCands.length) {
+        sdr = leadCands.reduce(
+          (best, c) => (scoreTitle(c.lead_title, t.subject) > scoreTitle(best.lead_title, t.subject) ? c : best),
+          leadCands[0],
+        );
       }
       if (sdr) {
         repliedLeads.add(sdr.pipedrive_lead_id);
