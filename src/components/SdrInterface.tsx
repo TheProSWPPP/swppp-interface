@@ -707,6 +707,7 @@ function LeadsView({
   const [statusFilter, setStatusFilter] = useState<LeadStatusFilter>("all");
   const [triggerFilter, setTriggerFilter] = useState<LeadTriggerFilter>("all");
   const [stageFilter, setStageFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [query, setQuery] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [sort, setSort] = useState<LeadSortKey>("last_contact");
@@ -727,7 +728,7 @@ function LeadsView({
   // Reset to page 1 whenever a filter/sort changes.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, triggerFilter, stageFilter, debouncedQ, sort, dir]);
+  }, [statusFilter, triggerFilter, stageFilter, sourceFilter, debouncedQ, sort, dir]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -737,6 +738,7 @@ function LeadsView({
         status: statusFilter === "all" ? undefined : statusFilter,
         trigger: triggerFilter === "all" ? undefined : triggerFilter,
         stage: stageFilter === "all" ? undefined : stageFilter,
+        source: sourceFilter === "all" ? undefined : sourceFilter,
         q: debouncedQ || undefined,
         sort,
         dir,
@@ -749,7 +751,7 @@ function LeadsView({
         setError((e as Error).message || "Failed to load leads");
       })
       .finally(() => setLoading(false));
-  }, [statusFilter, triggerFilter, stageFilter, debouncedQ, sort, dir, page]);
+  }, [statusFilter, triggerFilter, stageFilter, sourceFilter, debouncedQ, sort, dir, page]);
 
   useEffect(() => {
     load();
@@ -836,7 +838,7 @@ function LeadsView({
   const firstRow = total === 0 ? 0 : (page - 1) * LEAD_PAGE_SIZE + 1;
   const lastRow = Math.min(page * LEAD_PAGE_SIZE, total);
 
-  const filtersActive = statusFilter !== "all" || triggerFilter !== "all" || stageFilter !== "all" || !!debouncedQ;
+  const filtersActive = statusFilter !== "all" || triggerFilter !== "all" || stageFilter !== "all" || sourceFilter !== "all" || !!debouncedQ;
 
   return (
     <div className="space-y-6">
@@ -931,6 +933,19 @@ function LeadsView({
           ))}
         </select>
 
+        <select
+          value={sourceFilter}
+          onChange={(e) => setSourceFilter(e.target.value)}
+          className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700"
+          aria-label="Outreach source filter"
+          title="Filter by who last outreached this lead"
+        >
+          <option value="all">Any outreach</option>
+          <option value="interface">Outreached · Interface</option>
+          <option value="pipedrive">Outreached · Pipedrive</option>
+          <option value="none">Not outreached</option>
+        </select>
+
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -950,6 +965,7 @@ function LeadsView({
               setStatusFilter("all");
               setTriggerFilter("all");
               setStageFilter("all");
+              setSourceFilter("all");
               setQuery("");
             }}
             className="font-semibold text-brand-700 hover:text-brand-800"
@@ -1151,9 +1167,17 @@ function LeadDetailDrawer({
   // Merge sends + engagement events into one timeline, newest first.
   const timeline = useMemo(() => {
     if (!detail) return [];
-    const items: { kind: string; label: string; at: string | null; tone: string }[] = [];
+    const items: { kind: string; label: string; at: string | null; tone: string; subject?: string | null; body?: string | null }[] = [];
     for (const d of detail.drafts) {
-      items.push({ kind: "draft", label: `Draft ${d.status}${d.assigned_to ? ` · ${d.assigned_to}` : ""}`, at: d.created_at, tone: "slate" });
+      const sent = d.status === "sent";
+      items.push({
+        kind: "draft",
+        label: sent ? `Email sent${d.assigned_to ? ` · ${d.assigned_to}` : ""}` : `Draft ${d.status}${d.assigned_to ? ` · ${d.assigned_to}` : ""}`,
+        at: sent ? (d.sent_at || d.created_at) : d.created_at,
+        tone: sent ? "brand" : "slate",
+        subject: d.subject,
+        body: sent ? d.body : null, // show the exact email that went out
+      });
     }
     for (const s of detail.sends) {
       const seq = s.apollo_sequence_id ? SEQUENCE_LABEL[s.apollo_sequence_id] : null;
@@ -1305,15 +1329,34 @@ function LeadDetailDrawer({
                 ) : (
                   <ul className="space-y-2">
                     {timeline.map((t, i) => (
-                      <li key={i} className="flex items-center gap-3 rounded-xl border border-slate-100 px-3 py-2">
-                        <span
-                          className={cn(
-                            "h-2 w-2 flex-shrink-0 rounded-full",
-                            t.tone === "brand" ? "bg-brand-500" : t.tone === "emerald" ? "bg-emerald-500" : "bg-slate-300",
-                          )}
-                        />
-                        <span className="flex-1 text-sm text-slate-700">{t.label}</span>
-                        <span className="text-xs text-slate-400">{formatRelative(t.at)}</span>
+                      <li key={i} className="rounded-xl border border-slate-100 px-3 py-2">
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={cn(
+                              "h-2 w-2 flex-shrink-0 rounded-full",
+                              t.tone === "brand" ? "bg-brand-500" : t.tone === "emerald" ? "bg-emerald-500" : "bg-slate-300",
+                            )}
+                          />
+                          <span className="flex-1 text-sm text-slate-700">{t.label}</span>
+                          <span className="text-xs text-slate-400">{formatRelative(t.at)}</span>
+                        </div>
+                        {/* Show the exact email that was sent (subject + body), so it's clear what went out. */}
+                        {t.subject && (
+                          <div className="mt-1.5 pl-5">
+                            <div className="text-xs font-medium text-slate-600">Subject: {t.subject}</div>
+                            {t.body && (
+                              <details className="mt-1">
+                                <summary className="cursor-pointer text-xs text-brand-600 hover:underline">View email</summary>
+                                <div
+                                  className="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-800"
+                                  style={{ fontFamily: 'Georgia, "Times New Roman", serif', color: "#1a5276" }}
+                                  dangerouslySetInnerHTML={{ __html: firstTouchPreview(t.body) }}
+                                />
+                                <div className="mt-1 text-[10px] text-slate-400">+ sender signature appended by Apollo on send</div>
+                              </details>
+                            )}
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -2690,7 +2733,7 @@ function emailFromHeader(s: string | null | undefined): string {
   return (m ? m[1] : s).trim();
 }
 
-type OverviewThread = SdrInboxThread & { mailbox: string; to?: string | null; outreached?: boolean; direction?: "in" | "out"; kind?: "sdr" | "permit"; permit?: { operator_key: string; contact_name: string | null } };
+type OverviewThread = SdrInboxThread & { mailbox: string; to?: string | null; openable?: boolean; outreached?: boolean; direction?: "in" | "out"; kind?: "sdr" | "permit"; permit?: { operator_key: string; contact_name: string | null } };
 
 function nameFromHeader(s: string | null | undefined): string {
   if (!s) return "";
@@ -2865,8 +2908,13 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
               threads.map((t) => (
                 <button
                   key={`${t.mailbox}:${t.id}`}
-                  onClick={() => openThread(t.id, t.mailbox)}
-                  className={cn("block w-full px-3 py-2.5 text-left hover:bg-slate-50", openId === t.id && "bg-brand-50")}
+                  // Ledger-sourced sends have no Gmail thread to open (openable === false).
+                  onClick={() => { if (t.openable !== false && t.id) openThread(t.id, t.mailbox); }}
+                  className={cn(
+                    "block w-full px-3 py-2.5 text-left",
+                    t.openable === false ? "cursor-default" : "hover:bg-slate-50",
+                    openId === t.id && "bg-brand-50",
+                  )}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className={cn("truncate text-sm text-slate-800", t.unread && "font-semibold")}>

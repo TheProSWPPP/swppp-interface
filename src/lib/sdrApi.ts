@@ -126,6 +126,7 @@ export interface SdrLeadDetail {
     trigger_type: SdrTriggerType;
     status: string;
     subject: string | null;
+    body: string | null;
     created_at: string;
     sent_at: string | null;
     assigned_to: string | null;
@@ -155,6 +156,7 @@ export interface SdrLeadsQuery {
   status?: string;
   trigger?: string;
   stage?: string;
+  source?: string; // outreach source: pipedrive | interface | none
   q?: string;
   sort?: string;
   dir?: "asc" | "desc";
@@ -361,6 +363,7 @@ export const sdrApi = {
       threads: (SdrInboxThread & {
         mailbox: string;
         to?: string | null;
+        openable?: boolean;
         outreached?: boolean;
         direction?: "in" | "out";
         kind?: "sdr" | "permit";
@@ -456,6 +459,7 @@ export const sdrApi = {
     if (params?.status) qs.set("status", params.status);
     if (params?.trigger) qs.set("trigger", params.trigger);
     if (params?.stage) qs.set("stage", params.stage);
+    if (params?.source) qs.set("source", params.source);
     if (params?.q) qs.set("q", params.q);
     if (params?.sort) qs.set("sort", params.sort);
     if (params?.dir) qs.set("dir", params.dir);

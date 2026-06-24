@@ -1515,6 +1515,13 @@ app.get("/api/sdr/leads", async (req, res) => {
       else addFilter("s.trigger_type = $$", req.query.trigger);
     }
     if (req.query.stage) addFilter("s.project_stage = $$", req.query.stage);
+    // Outreach source filter (references the `ol` LATERAL below, which is in scope by the
+    // time WHERE is evaluated): pipedrive | interface | none (never outreached).
+    if (req.query.source) {
+      const src = String(req.query.source);
+      if (src === "none") where.push("ol.source IS NULL");
+      else addFilter("ol.source = $$", src);
+    }
     if (req.query.q) {
       params.push(`%${req.query.q}%`);
       const p = `$${params.length}`;
@@ -1657,10 +1664,24 @@ app.get("/api/sdr/leads/:leadId/detail", async (req, res) => {
   const { leadId } = req.params;
   try {
     const { rows: leadRows } = await pool.query(
-      `SELECT *,
-              CASE WHEN last_outgoing_mail_time IS NULL THEN NULL
-                   ELSE FLOOR(EXTRACT(EPOCH FROM (NOW() - last_outgoing_mail_time)) / 86400)::int END AS days_since_outgoing
-       FROM sdr_lead_state WHERE pipedrive_lead_id = $1`,
+      `SELECT s.*,
+              CASE WHEN s.last_outgoing_mail_time IS NULL THEN NULL
+                   ELSE FLOOR(EXTRACT(EPOCH FROM (NOW() - s.last_outgoing_mail_time)) / 86400)::int END AS days_since_outgoing,
+              ob.outreached_by, ob.outreached_status, ob.initiated_by,
+              ol.sent_at AS outreach_sent_at, ol.source AS outreach_source,
+              ol.sender_name AS outreach_sender_name, ol.sender_email AS outreach_sender_email
+       FROM sdr_lead_state s
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(u.display_name, u.username) AS outreached_by, d.status AS outreached_status, d.initiated_by
+         FROM sdr_drafts d LEFT JOIN sdr_users u ON u.id = d.assigned_user_id
+         WHERE d.pipedrive_lead_id = s.pipedrive_lead_id AND d.status = 'sent'
+         ORDER BY d.sent_at DESC NULLS LAST, d.created_at DESC LIMIT 1
+       ) ob ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT sent_at, source, sender_name, sender_email FROM sdr_outreach_log
+         WHERE pipedrive_lead_id = s.pipedrive_lead_id ORDER BY sent_at DESC LIMIT 1
+       ) ol ON TRUE
+       WHERE s.pipedrive_lead_id = $1`,
       [leadId],
     );
     const lead = leadRows[0] || null;
@@ -1668,7 +1689,7 @@ app.get("/api/sdr/leads/:leadId/detail", async (req, res) => {
 
     const [{ rows: drafts }, { rows: sends }, { rows: events }] = await Promise.all([
       pool.query(
-        `SELECT d.id, d.trigger_type, d.status, d.subject, d.created_at, d.sent_at, d.assigned_user_id,
+        `SELECT d.id, d.trigger_type, d.status, d.subject, d.body, d.created_at, d.sent_at, d.assigned_user_id,
                 COALESCE(u.display_name, u.username) AS assigned_to
          FROM sdr_drafts d LEFT JOIN sdr_users u ON u.id = d.assigned_user_id
          WHERE d.pipedrive_lead_id = $1 ORDER BY d.created_at DESC`,
@@ -1998,6 +2019,10 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
     const vis = await visibleMailboxes(req.sdrUser);
     const boxes = vis.filter((v) => v.connected).map((v) => v.email);
     if (!boxes.length) return res.json({ threads: [], mailboxes: [] });
+    // 1) Inbound REPLIES from the connected Gmail inboxes, matched to a known SDR lead or
+    //    permit operator by the From address. These are openable threads. (We do NOT read
+    //    in:sent — the mailboxes run Apollo warmup, which floods Sent with fake emails;
+    //    real sends come from our own records below.)
     const all = [];
     for (const mb of boxes) {
       let token;
@@ -2007,60 +2032,87 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
         continue;
       }
       try {
-        // Inbound replies (in:inbox) AND our own sends (in:sent), so the overview shows
-        // the full outreach conversation — SDR and TX05 permit, sends and replies.
-        const threads = await gmailInbox.listThreads(token, { q: "in:inbox OR in:sent", maxResults: 25 });
+        const threads = await gmailInbox.listThreads(token, { q: "in:inbox", maxResults: 25 });
         for (const t of threads) all.push({ ...t, mailbox: mb });
       } catch {
         /* skip a mailbox that errors, keep the rest */
       }
     }
-    // The counterparty can be on the From (a reply) or any of the To addresses (a send),
-    // so we collect both and match either against known SDR leads / permit operators.
-    const addrsFor = (t) => {
-      const out = [];
-      const f = parseEmailAddr(t.from);
-      if (f) out.push(f);
-      for (const part of String(t.to || "").split(",")) {
-        const a = parseEmailAddr(part);
-        if (a) out.push(a);
-      }
-      return out;
-    };
-    const candidates = [...new Set(all.flatMap(addrsFor).filter(Boolean))];
+    const froms = [...new Set(all.map((t) => parseEmailAddr(t.from)).filter(Boolean))];
     const leadMap = {};
     const permitMap = {};
-    if (candidates.length) {
+    if (froms.length) {
       const [sdrRes, permitRes] = await Promise.all([
         pool.query(
-          `SELECT lower(s.person_email) e, s.pipedrive_lead_id, s.lead_title,
-                  EXISTS(SELECT 1 FROM sdr_outreach_log o WHERE o.pipedrive_lead_id = s.pipedrive_lead_id) AS outreached
+          `SELECT lower(s.person_email) e, s.pipedrive_lead_id, s.lead_title
              FROM sdr_lead_state s WHERE lower(s.person_email) = ANY($1)`,
-          [candidates],
+          [froms],
         ),
         pool.query(
           `SELECT lower(email) e, contact_name, operator_key FROM permit_operator_email WHERE lower(email) = ANY($1)`,
-          [candidates],
+          [froms],
         ),
       ]);
       for (const r of sdrRes.rows) leadMap[r.e] = r;
       for (const r of permitRes.rows) permitMap[r.e] = r;
     }
-    const threads = all
-      .map((t) => {
-        // Find the counterparty among From + To; From (their reply) wins over To (our send).
-        let sdr = null;
-        let permit = null;
-        for (const a of addrsFor(t)) {
-          if (leadMap[a]) { sdr = leadMap[a]; break; }
-          if (permitMap[a]) { permit = permitMap[a]; break; }
-        }
-        if (!sdr && !permit) return null;
-        const direction = t.lastOutbound ? "out" : "in"; // out = we sent, in = they replied
-        if (sdr) return { ...t, kind: "sdr", direction, lead: { lead_id: sdr.pipedrive_lead_id, lead_title: sdr.lead_title }, outreached: sdr.outreached };
-        return { ...t, kind: "permit", direction, lead: null, permit: { operator_key: permit.operator_key, contact_name: permit.contact_name } };
-      })
-      .filter(Boolean)
+    const repliedLeads = new Set();
+    const repliedOps = new Set();
+    const replyThreads = [];
+    for (const t of all) {
+      const e = parseEmailAddr(t.from);
+      const sdr = e ? leadMap[e] : null;
+      const permit = e ? permitMap[e] : null;
+      if (sdr) {
+        repliedLeads.add(sdr.pipedrive_lead_id);
+        replyThreads.push({ ...t, openable: true, kind: "sdr", direction: "in", lead: { lead_id: sdr.pipedrive_lead_id, lead_title: sdr.lead_title } });
+      } else if (permit) {
+        repliedOps.add(permit.operator_key);
+        replyThreads.push({ ...t, openable: true, kind: "permit", direction: "in", lead: null, permit: { operator_key: permit.operator_key, contact_name: permit.contact_name } });
+      }
+    }
+
+    // 2) Recent SENDS from our own send records (reliable; no warmup noise). A lead/operator
+    //    that already has a reply above is shown as that thread, not duplicated as a send row.
+    const sendItems = [];
+    const [sdrSends, permitSends] = await Promise.all([
+      pool.query(
+        `SELECT o.pipedrive_lead_id, o.sender_name, o.sender_email, o.subject, o.sent_at, s.lead_title, s.person_email
+           FROM sdr_outreach_log o JOIN sdr_lead_state s ON s.pipedrive_lead_id = o.pipedrive_lead_id
+          WHERE o.source = 'interface' ORDER BY o.sent_at DESC LIMIT 40`,
+      ),
+      pool.query(
+        `SELECT ps.operator_key, ps.sent_at, po.operator_name, m.email AS mailbox_email,
+                pe.email AS op_email, pe.contact_name
+           FROM permit_sends ps
+           LEFT JOIN permit_operators po ON po.operator_key = ps.operator_key
+           LEFT JOIN sdr_mailboxes m ON m.id = ps.mailbox_id
+           LEFT JOIN LATERAL (SELECT email, contact_name FROM permit_operator_email pe
+                               WHERE pe.operator_key = ps.operator_key LIMIT 1) pe ON TRUE
+          ORDER BY ps.sent_at DESC LIMIT 40`,
+      ),
+    ]);
+    for (const r of sdrSends.rows) {
+      if (repliedLeads.has(r.pipedrive_lead_id)) continue;
+      sendItems.push({
+        id: `sent:sdr:${r.pipedrive_lead_id}`, openable: false, mailbox: r.sender_email || "",
+        kind: "sdr", direction: "out", subject: r.subject, from: r.sender_email, to: r.person_email,
+        date: r.sent_at ? new Date(r.sent_at).toISOString() : null, snippet: "", messageCount: 1, unread: false,
+        sender_name: r.sender_name, lead: { lead_id: r.pipedrive_lead_id, lead_title: r.lead_title },
+      });
+    }
+    for (const r of permitSends.rows) {
+      if (repliedOps.has(r.operator_key)) continue;
+      sendItems.push({
+        id: `sent:permit:${r.operator_key}`, openable: false, mailbox: r.mailbox_email || "",
+        kind: "permit", direction: "out", subject: r.operator_name ? `MSGP outreach · ${r.operator_name}` : "MSGP outreach",
+        from: r.mailbox_email, to: r.op_email, date: r.sent_at ? new Date(r.sent_at).toISOString() : null,
+        snippet: "", messageCount: 1, unread: false, lead: null,
+        permit: { operator_key: r.operator_key, contact_name: r.contact_name || r.operator_name },
+      });
+    }
+
+    const threads = [...replyThreads, ...sendItems]
       .sort((a, b) => (Date.parse(b.date || "") || 0) - (Date.parse(a.date || "") || 0));
     res.json({ threads, mailboxes: boxes });
   } catch (e) {
