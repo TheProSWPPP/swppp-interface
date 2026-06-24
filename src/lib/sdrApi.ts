@@ -29,6 +29,7 @@ export interface SdrMailbox {
   deliverability_score: number | null;
   last_health_check_at: string | null;
   active: boolean;
+  signature_html: string | null;
   created_at: string;
   updated_at: string;
   sent_today: number;
@@ -98,6 +99,13 @@ export interface SdrLead {
   days_since_outgoing: number | null;
   outreached_by: string | null;
   outreached_status: string | null;
+  initiated_by: string | null;
+  // Per-lead outreach ledger (sdr_outreach_log): the latest real send for THIS lead,
+  // by source. Replaces the person-level last_outgoing_mail_time as the outreach signal.
+  outreach_sent_at: string | null;
+  outreach_source: "pipedrive" | "interface" | null;
+  outreach_sender_name: string | null;
+  outreach_sender_email: string | null;
   bid_date: string | null;
   start_date: string | null;
   trigger_override: string | null;
@@ -118,6 +126,7 @@ export interface SdrLeadDetail {
     trigger_type: SdrTriggerType;
     status: string;
     subject: string | null;
+    body: string | null;
     created_at: string;
     sent_at: string | null;
     assigned_to: string | null;
@@ -147,6 +156,7 @@ export interface SdrLeadsQuery {
   status?: string;
   trigger?: string;
   stage?: string;
+  source?: string; // outreach source: pipedrive | interface | none
   q?: string;
   sort?: string;
   dir?: "asc" | "desc";
@@ -178,6 +188,21 @@ export interface SdrSequence {
   active: boolean;
   num_steps: number;
   steps: SdrSequenceStep[];
+}
+
+export interface SdrFirstTouchTemplate {
+  trigger_type: SdrTriggerType;
+  body: string;
+  updated_at?: string | null;
+  updated_by?: string | null;
+}
+
+export interface SdrSettings {
+  auto_outreach_enabled: boolean;
+  auto_outreach_mode: "queue" | "send";
+  auto_min_score: number | null;
+  updated_at?: string | null;
+  updated_by?: string | null;
 }
 
 export interface SdrEngagementLead {
@@ -265,6 +290,34 @@ export async function sdrFetch<T>(path: string, opts: RequestInit & { auth?: boo
   return data as T;
 }
 
+export interface SdrInboxAccount {
+  email: string;
+  connected: boolean;
+  connected_at: string | null;
+  owner_name: string | null;
+}
+export interface SdrInboxThread {
+  id: string;
+  subject: string | null;
+  from: string | null;
+  date: string | null;
+  snippet: string;
+  messageCount: number;
+  unread: boolean;
+  lead: { lead_id: string; lead_title: string | null } | null;
+}
+export interface SdrInboxMessage {
+  id: string;
+  from: string | null;
+  to: string | null;
+  subject: string | null;
+  date: string | null;
+  messageId: string | null;
+  references: string | null;
+  unread: boolean;
+  body: string;
+}
+
 export const sdrApi = {
   listUsers: () => sdrFetch<{ users: SdrUserPublic[] }>("/api/sdr/auth/users", { auth: false }),
 
@@ -285,11 +338,74 @@ export const sdrApi = {
       { method: "POST" },
     ),
 
+  updateMailboxSignature: (id: string, signature_html: string) =>
+    sdrFetch<{ mailbox: { id: string; email: string; signature_html: string | null } }>(
+      `/api/sdr/mailboxes/${id}/signature`,
+      { method: "PUT", body: JSON.stringify({ signature_html }) },
+    ),
+
+  // Unified inbox (Gmail per .co mailbox)
+  getInboxAccounts: () =>
+    sdrFetch<{ accounts: SdrInboxAccount[]; isAdmin: boolean; configured: boolean }>("/api/sdr/inbox/accounts"),
+  startInboxOAuth: (mailbox?: string) =>
+    sdrFetch<{ url: string }>(`/api/sdr/inbox/oauth/start${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ""}`),
+  getInboxThreads: (mailbox?: string, q?: string) => {
+    const p = new URLSearchParams();
+    if (mailbox) p.set("mailbox", mailbox);
+    if (q) p.set("q", q);
+    const qs = p.toString();
+    return sdrFetch<{ mailbox: string | null; threads: SdrInboxThread[]; note?: string }>(
+      `/api/sdr/inbox/threads${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getInboxOverview: () =>
+    sdrFetch<{
+      threads: (SdrInboxThread & {
+        mailbox: string;
+        to?: string | null;
+        openable?: boolean;
+        outreached?: boolean;
+        direction?: "in" | "out";
+        kind?: "sdr" | "permit";
+        permit?: { operator_key: string; contact_name: string | null };
+      })[];
+      mailboxes: string[];
+    }>("/api/sdr/inbox/overview"),
+  getInboxThread: (id: string, mailbox?: string) =>
+    sdrFetch<{ mailbox: string; id: string; messages: SdrInboxMessage[] }>(
+      `/api/sdr/inbox/threads/${id}${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ""}`,
+    ),
+  replyInboxThread: (
+    id: string,
+    payload: { mailbox?: string; to: string; subject?: string; body: string; inReplyTo?: string | null; references?: string | null },
+  ) =>
+    sdrFetch<{ ok: boolean; id: string }>(`/api/sdr/inbox/threads/${id}/reply`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   setMailboxActive: (id: string, active: boolean) =>
     sdrFetch<{ mailbox: { id: string; email: string; active: boolean } }>(
       `/api/sdr/mailboxes/${id}`,
       { method: "PATCH", body: JSON.stringify({ active }) },
     ),
+
+  getFirstTouchTemplates: () =>
+    sdrFetch<{ templates: Record<SdrTriggerType, SdrFirstTouchTemplate> }>("/api/sdr/first-touch-templates"),
+
+  updateFirstTouchTemplate: (trigger: SdrTriggerType, body: string) =>
+    sdrFetch<{ template: SdrFirstTouchTemplate }>(`/api/sdr/first-touch-templates/${trigger}`, {
+      method: "PUT",
+      body: JSON.stringify({ body }),
+    }),
+
+  getSettings: () => sdrFetch<{ settings: SdrSettings }>("/api/sdr/settings"),
+
+  updateSettings: (patch: Partial<Pick<SdrSettings, "auto_outreach_enabled" | "auto_outreach_mode" | "auto_min_score">>) =>
+    sdrFetch<{ settings: SdrSettings }>("/api/sdr/settings", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
 
   listTemplates: () =>
     sdrFetch<{ templates: Record<SdrTriggerType, SdrTemplate> }>("/api/sdr/templates"),
@@ -343,6 +459,7 @@ export const sdrApi = {
     if (params?.status) qs.set("status", params.status);
     if (params?.trigger) qs.set("trigger", params.trigger);
     if (params?.stage) qs.set("stage", params.stage);
+    if (params?.source) qs.set("source", params.source);
     if (params?.q) qs.set("q", params.q);
     if (params?.sort) qs.set("sort", params.sort);
     if (params?.dir) qs.set("dir", params.dir);
