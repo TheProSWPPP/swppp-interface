@@ -2046,6 +2046,56 @@ app.post("/api/sdr/inbox/threads/:id/reply", express.json(), async (req, res) =>
   }
 });
 
+// Gmail-style compose: reply / reply-all / forward in one endpoint. The client sends the
+// final recipients (To/Cc/Bcc) + note; the server pulls the thread to quote the original
+// (reply) or build the forwarded block with its HTML (forward), and to set the threading
+// headers. Reply/reply-all stay in-thread; forward starts a fresh conversation.
+app.post("/api/sdr/inbox/threads/:id/compose", express.json({ limit: "4mb" }), async (req, res) => {
+  try {
+    const mailbox = await resolveMailbox(req.sdrUser, req.body?.mailbox || req.query.mailbox);
+    if (!mailbox) return res.status(409).json({ error: "No connected mailbox" });
+    const token = await accessTokenForMailbox(mailbox);
+    const { mode = "reply", to, cc, bcc, subject, body } = req.body || {};
+    if (!to || !String(to).trim()) return res.status(400).json({ error: "At least one recipient is required" });
+    if (mode !== "forward" && !String(body || "").trim()) {
+      return res.status(400).json({ error: "Message body is required" });
+    }
+
+    const thread = await gmailInbox.getThread(token, req.params.id);
+    const msgs = thread.messages || [];
+    const last = msgs[msgs.length - 1] || {};
+    const baseSubject = (last.subject || subject || "").replace(/^(re|fwd?):\s*/i, "").trim();
+
+    let r;
+    if (mode === "forward") {
+      r = await gmailInbox.sendMail(token, {
+        from: mailbox,
+        to,
+        cc,
+        bcc,
+        subject: /^fwd:/i.test(subject || "") ? subject : `Fwd: ${baseSubject}`,
+        bodyText: gmailInbox.buildForwardText(body, last),
+        bodyHtml: gmailInbox.buildForwardHtml(body, last),
+      });
+    } else {
+      r = await gmailInbox.sendMail(token, {
+        threadId: req.params.id,
+        from: mailbox,
+        to,
+        cc,
+        bcc,
+        subject: /^re:/i.test(last.subject || "") ? last.subject : `Re: ${baseSubject}`,
+        bodyText: gmailInbox.buildReplyText(body, last),
+        inReplyTo: last.messageId,
+        references: [last.references, last.messageId].filter(Boolean).join(" ").trim() || undefined,
+      });
+    }
+    res.json({ ok: true, id: r.id });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // Cross-mailbox OUTREACH overview: the signal-only view. Aggregates inbox threads
 // across every mailbox the user can see, keeps only conversations whose counterpart
 // is a lead in our book (i.e. tied to outreach), and tags each with its mailbox + lead.

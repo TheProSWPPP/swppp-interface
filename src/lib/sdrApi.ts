@@ -312,6 +312,7 @@ export interface SdrInboxMessage {
   id: string;
   from: string | null;
   to: string | null;
+  cc?: string | null;
   subject: string | null;
   date: string | null;
   messageId: string | null;
@@ -383,6 +384,25 @@ export const sdrApi = {
     payload: { mailbox?: string; to: string; subject?: string; body: string; inReplyTo?: string | null; references?: string | null },
   ) =>
     sdrFetch<{ ok: boolean; id: string }>(`/api/sdr/inbox/threads/${id}/reply`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // Gmail-style compose: reply / reply-all / forward. The server quotes/forwards the
+  // original and sets threading; the client supplies the final recipients + note.
+  composeInboxThread: (
+    id: string,
+    payload: {
+      mailbox?: string;
+      mode: "reply" | "replyAll" | "forward";
+      to: string;
+      cc?: string;
+      bcc?: string;
+      subject?: string;
+      body: string;
+    },
+  ) =>
+    sdrFetch<{ ok: boolean; id: string }>(`/api/sdr/inbox/threads/${id}/compose`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),

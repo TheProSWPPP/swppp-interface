@@ -21,6 +21,9 @@ import {
   Phone,
   RefreshCw,
   Reply,
+  ReplyAll,
+  Forward,
+  Copy,
   Send,
   ShieldCheck,
   Snowflake,
@@ -2835,6 +2838,52 @@ function nameFromHeader(s: string | null | undefined): string {
   return (m ? m[1] : emailFromHeader(s)).trim();
 }
 
+// Pull every email address out of a header value ("A <a@x>, b@y" → ["a@x","b@y"]).
+function parseEmails(s: string | null | undefined): string[] {
+  if (!s) return [];
+  return String(s)
+    .split(/[,;\n]+/)
+    .map((part) => emailFromHeader(part.trim()).toLowerCase())
+    .filter((e) => e.includes("@"));
+}
+function uniqueEmails(list: string[]): string[] {
+  return [...new Set(list.filter(Boolean))];
+}
+function isEmail(s: string): boolean {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.trim());
+}
+
+// Small "copy this address" affordance — used on message senders so a rep can grab a
+// contact's email in one click.
+function CopyEmailButton({
+  email,
+  pushToast,
+  className,
+}: {
+  email: string | null | undefined;
+  pushToast: (kind: "success" | "error", msg: string) => void;
+  className?: string;
+}) {
+  const addr = emailFromHeader(email);
+  if (!addr || !addr.includes("@")) return null;
+  return (
+    <button
+      type="button"
+      title={`Copy ${addr}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard?.writeText(addr).then(
+          () => pushToast("success", `Copied ${addr}`),
+          () => pushToast("error", "Couldn't copy to clipboard"),
+        );
+      }}
+      className={cn("inline-flex items-center text-slate-400 hover:text-brand-700", className)}
+    >
+      <Copy className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
 // Render an email message body. When the message carries real HTML, render it inside a
 // sandboxed iframe so it looks like the actual email (fonts, signatures, layout) while
 // staying safe: sandbox without `allow-scripts` neutralizes any JS in the email; we keep
@@ -2887,6 +2936,14 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
   const [thread, setThread] = useState<SdrInboxMessage[] | null>(null);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
+  // Gmail-style composer: null = collapsed (show Reply/Reply all/Forward buttons).
+  const [composeMode, setComposeMode] = useState<"reply" | "replyAll" | "forward" | null>(null);
+  const [to, setTo] = useState("");
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
+  const [subject, setSubject] = useState("");
+  const [showCc, setShowCc] = useState(false);
+  const [showBcc, setShowBcc] = useState(false);
 
   useEffect(() => {
     sdrApi
@@ -2917,11 +2974,22 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
     if (accounts) loadList();
   }, [accounts, loadList]);
 
+  const resetComposer = () => {
+    setComposeMode(null);
+    setReply("");
+    setTo("");
+    setCc("");
+    setBcc("");
+    setSubject("");
+    setShowCc(false);
+    setShowBcc(false);
+  };
+
   const openThread = (id: string, mb: string) => {
     setOpenId(id);
     setOpenMailbox(mb);
     setThread(null);
-    setReply("");
+    resetComposer();
     sdrApi
       .getInboxThread(id, mb)
       .then((d) => {
@@ -2940,27 +3008,66 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
       .catch((e) => pushToast("error", e.message));
   };
 
-  const doReply = () => {
-    if (!thread || !openId || !openMailbox || !reply.trim()) return;
+  // Open the composer in a given mode and pre-fill recipients + subject the way Gmail does.
+  const startCompose = (mode: "reply" | "replyAll" | "forward") => {
+    if (!thread || !thread.length) return;
+    const self = (openMailbox || "").toLowerCase();
     const last = thread[thread.length - 1];
-    const to = emailFromHeader(last?.from);
-    if (!to) {
-      pushToast("error", "No recipient address found in the thread");
+    // Reply targets the most recent message that ISN'T from us (the counterparty).
+    const counterpart = [...thread].reverse().find((m) => emailFromHeader(m.from).toLowerCase() !== self) || last;
+    const base = (last?.subject || "").replace(/^(re|fwd?):\s*/i, "").trim();
+    const notSelf = (list: string[]) => list.filter((e) => e !== self);
+
+    if (mode === "reply") {
+      setTo(emailFromHeader(counterpart?.from));
+      setCc("");
+      setBcc("");
+      setSubject(`Re: ${base}`);
+      setShowCc(false);
+      setShowBcc(false);
+    } else if (mode === "replyAll") {
+      const toList = uniqueEmails(notSelf([emailFromHeader(counterpart?.from), ...parseEmails(counterpart?.to)]));
+      const ccList = uniqueEmails(notSelf(parseEmails(counterpart?.cc))).filter((e) => !toList.includes(e));
+      setTo(toList.join(", "));
+      setCc(ccList.join(", "));
+      setBcc("");
+      setSubject(`Re: ${base}`);
+      setShowCc(ccList.length > 0);
+      setShowBcc(false);
+    } else {
+      setTo("");
+      setCc("");
+      setBcc("");
+      setSubject(`Fwd: ${base}`);
+      setShowCc(false);
+      setShowBcc(false);
+    }
+    setReply("");
+    setComposeMode(mode);
+  };
+
+  const doSend = () => {
+    if (!openId || !openMailbox || !composeMode) return;
+    const recipients = parseEmails(to);
+    if (!recipients.length) {
+      pushToast("error", "Add at least one recipient");
+      return;
+    }
+    const bad = [...parseEmails(to), ...parseEmails(cc), ...parseEmails(bcc)].find((e) => !isEmail(e));
+    if (bad) {
+      pushToast("error", `Invalid email address: ${bad}`);
+      return;
+    }
+    if (composeMode !== "forward" && !reply.trim()) {
+      pushToast("error", "Write a message before sending");
       return;
     }
     setSending(true);
     sdrApi
-      .replyInboxThread(openId, {
-        mailbox: openMailbox,
-        to,
-        subject: last?.subject ?? "",
-        body: reply,
-        inReplyTo: last?.messageId,
-        references: last?.references,
-      })
+      .composeInboxThread(openId, { mailbox: openMailbox, mode: composeMode, to, cc, bcc, subject, body: reply })
       .then(() => {
-        pushToast("success", "Reply sent");
-        setReply("");
+        pushToast("success", composeMode === "forward" ? "Forwarded" : "Sent");
+        resetComposer();
         openThread(openId, openMailbox);
       })
       .catch((e) => pushToast("error", e.message))
@@ -3112,32 +3219,130 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
                       )}
                     >
                       <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                        <span className="truncate font-medium text-slate-700">{mine ? "You" : nameFromHeader(m.from)}</span>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="shrink-0 font-medium text-slate-700">{mine ? "You" : nameFromHeader(m.from)}</span>
+                          {emailFromHeader(m.from) && emailFromHeader(m.from) !== nameFromHeader(m.from) && (
+                            <span className="truncate text-slate-400">&lt;{emailFromHeader(m.from)}&gt;</span>
+                          )}
+                          <CopyEmailButton email={m.from} pushToast={pushToast} className="shrink-0" />
+                        </div>
                         <span className="shrink-0 text-slate-400">{m.date ? new Date(m.date).toLocaleString() : ""}</span>
                       </div>
                       <MessageBody html={m.html} body={m.body} />
                     </div>
                   );
                 })}
-                <div className="space-y-2 border-t border-slate-100 pt-3">
-                  <textarea
-                    value={reply}
-                    onChange={(e) => setReply(e.target.value)}
-                    rows={4}
-                    placeholder={`Reply as ${openMailbox}…`}
-                    className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:border-brand-400 focus:outline-none"
-                  />
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-400">Sends from {openMailbox}</span>
+                {composeMode ? (
+                  <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+                        {composeMode === "forward" ? (
+                          <Forward className="h-4 w-4" />
+                        ) : composeMode === "replyAll" ? (
+                          <ReplyAll className="h-4 w-4" />
+                        ) : (
+                          <Reply className="h-4 w-4" />
+                        )}
+                        {composeMode === "forward" ? "Forward" : composeMode === "replyAll" ? "Reply all" : "Reply"}
+                      </div>
+                      <button onClick={resetComposer} title="Discard" className="text-slate-400 hover:text-slate-700">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="w-14 shrink-0 text-xs font-medium text-slate-500">To</label>
+                      <input
+                        value={to}
+                        onChange={(e) => setTo(e.target.value)}
+                        placeholder="name@company.com, …"
+                        className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+                      />
+                      <div className="flex shrink-0 gap-2 text-xs font-medium text-brand-700">
+                        {!showCc && <button onClick={() => setShowCc(true)} className="hover:underline">Cc</button>}
+                        {!showBcc && <button onClick={() => setShowBcc(true)} className="hover:underline">Bcc</button>}
+                      </div>
+                    </div>
+                    {showCc && (
+                      <div className="flex items-center gap-2">
+                        <label className="w-14 shrink-0 text-xs font-medium text-slate-500">Cc</label>
+                        <input
+                          value={cc}
+                          onChange={(e) => setCc(e.target.value)}
+                          placeholder="cc@company.com"
+                          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+                        />
+                      </div>
+                    )}
+                    {showBcc && (
+                      <div className="flex items-center gap-2">
+                        <label className="w-14 shrink-0 text-xs font-medium text-slate-500">Bcc</label>
+                        <input
+                          value={bcc}
+                          onChange={(e) => setBcc(e.target.value)}
+                          placeholder="bcc@company.com"
+                          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+                        />
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <label className="w-14 shrink-0 text-xs font-medium text-slate-500">Subject</label>
+                      <input
+                        value={subject}
+                        onChange={(e) => setSubject(e.target.value)}
+                        className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
+                      />
+                    </div>
+                    <textarea
+                      value={reply}
+                      onChange={(e) => setReply(e.target.value)}
+                      rows={composeMode === "forward" ? 5 : 6}
+                      placeholder={composeMode === "forward" ? "Add a note (optional)…" : "Write your reply…"}
+                      className="w-full rounded-lg border border-slate-300 p-2.5 text-sm focus:border-brand-400 focus:outline-none"
+                    />
+                    {composeMode === "forward" && (
+                      <p className="text-xs text-slate-400">The original message is included below your note.</p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-400">Sends from {openMailbox}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={resetComposer}
+                          className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-100"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={doSend}
+                          disabled={sending}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-50"
+                        >
+                          <Send className="h-4 w-4" /> {sending ? "Sending…" : composeMode === "forward" ? "Forward" : "Send"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
                     <button
-                      onClick={doReply}
-                      disabled={sending || !reply.trim()}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                      onClick={() => startCompose("reply")}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
                     >
-                      <Send className="h-4 w-4" /> {sending ? "Sending…" : "Send reply"}
+                      <Reply className="h-4 w-4" /> Reply
+                    </button>
+                    <button
+                      onClick={() => startCompose("replyAll")}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <ReplyAll className="h-4 w-4" /> Reply all
+                    </button>
+                    <button
+                      onClick={() => startCompose("forward")}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <Forward className="h-4 w-4" /> Forward
                     </button>
                   </div>
-                </div>
+                )}
               </div>
             )}
           </div>
