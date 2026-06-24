@@ -29,6 +29,7 @@ import { sweepSentOutreach, upsertOutreach } from "./lib/outreachSync.js";
 import * as gmailInbox from "./lib/gmailInbox.js";
 import { dailyCap, rampDay } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
+import { pollInboxReplies } from "./lib/inboxReplyWatch.js";
 import { runAutoOutreach, pruneStaleQueuedDrafts } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
@@ -1189,6 +1190,19 @@ if (process.env.DATABASE_URL && process.env.APOLLO_API_KEY) {
       .catch((e) => console.error("[engagement-poll] failed:", e.message));
   setTimeout(runEngPoll, 60_000);
   setInterval(runEngPoll, 2 * 60 * 1000);
+}
+
+// Inbox reply watch: a safety net that turns lead replies Apollo can't see (permit
+// channel, off-contact replies) into a Pipedrive task. Reads the Gmail inboxes directly;
+// defers to the Apollo poll for sequenced replies. Every ~5 min, first run 90s after boot.
+if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
+  const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
+  const runInboxWatch = () =>
+    pollInboxReplies(pool, { getToken: accessTokenForMailbox, appBase })
+      .then((r) => { if (r && r.created) console.log("[inbox-reply-watch]", JSON.stringify(r)); })
+      .catch((e) => console.error("[inbox-reply-watch] failed:", e.message));
+  setTimeout(runInboxWatch, 90_000);
+  setInterval(runInboxWatch, 5 * 60 * 1000);
 }
 
 // Permit engine monthly refresh: EPA pool re-pull + bulk ECHO compliance refresh.

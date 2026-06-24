@@ -462,6 +462,25 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
     return () => { stop = true; clearInterval(iv); window.removeEventListener("sdr:priority-seen", recompute); };
   }, []);
 
+  // Inbox tab badge = threads where a lead replied and we haven't answered yet. Polled
+  // independently of the Inbox view so the count shows from any tab.
+  const [inboxNeedsReply, setInboxNeedsReply] = useState(0);
+  useEffect(() => {
+    let stop = false;
+    const load = () =>
+      sdrApi
+        .getInboxOverview()
+        .then((d) => {
+          if (!stop) setInboxNeedsReply((d.threads || []).filter(needsReply).length);
+        })
+        .catch(() => {});
+    load();
+    const iv = setInterval(load, 60_000);
+    const onRefresh = () => load();
+    window.addEventListener("sdr:inbox-refresh", onRefresh);
+    return () => { stop = true; clearInterval(iv); window.removeEventListener("sdr:inbox-refresh", onRefresh); };
+  }, []);
+
   const { toasts, push, dismiss } = useToasts();
 
   function switchLane(l: OutreachLane) {
@@ -530,7 +549,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             <TabButton current={tab} value="leads" onClick={setTab} icon={<Target className="h-4 w-4" />}>Leads</TabButton>
             <TabButton current={tab} value="queue" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Queue</TabButton>
             <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />} badge={hotCount}>Priority</TabButton>
-            <TabButton current={tab} value="inbox" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Inbox</TabButton>
+            <TabButton current={tab} value="inbox" onClick={setTab} icon={<Inbox className="h-4 w-4" />} badge={inboxNeedsReply}>Inbox</TabButton>
             <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
             <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
             <TabButton current={tab} value="templates" onClick={setTab} icon={<ListChecks className="h-4 w-4" />}>Templates</TabButton>
@@ -2830,7 +2849,13 @@ function emailFromHeader(s: string | null | undefined): string {
   return (m ? m[1] : s).trim();
 }
 
-type OverviewThread = SdrInboxThread & { mailbox: string; to?: string | null; openable?: boolean; outreached?: boolean; direction?: "in" | "out"; kind?: "sdr" | "permit"; permit?: { operator_key: string; contact_name: string | null } };
+type OverviewThread = SdrInboxThread & { mailbox: string; to?: string | null; openable?: boolean; outreached?: boolean; direction?: "in" | "out"; lastOutbound?: boolean; kind?: "sdr" | "permit"; permit?: { operator_key: string; contact_name: string | null } };
+
+// A thread is "waiting on us" when the lead replied and our latest message isn't the last
+// one in the thread. Used for the Inbox badge + the Needs-reply filter.
+function needsReply(t: OverviewThread): boolean {
+  return t.direction === "in" && t.openable === true && t.lastOutbound !== true;
+}
 
 function nameFromHeader(s: string | null | undefined): string {
   if (!s) return "";
@@ -2929,6 +2954,7 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
   const [accounts, setAccounts] = useState<SdrInboxAccount[] | null>(null);
   const [view, setView] = useState<"outreach" | "mailbox">("outreach");
   const [mailbox, setMailbox] = useState<string | null>(null);
+  const [needsOnly, setNeedsOnly] = useState(false);
   const [threads, setThreads] = useState<OverviewThread[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -3069,6 +3095,8 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
         pushToast("success", composeMode === "forward" ? "Forwarded" : "Sent");
         resetComposer();
         openThread(openId, openMailbox);
+        loadList();
+        window.dispatchEvent(new Event("sdr:inbox-refresh")); // drop the Inbox tab badge live
       })
       .catch((e) => pushToast("error", e.message))
       .finally(() => setSending(false));
@@ -3077,6 +3105,11 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
   if (!accounts) return <div className="p-8 text-sm text-slate-400">Loading inbox…</div>;
   const connected = accounts.filter((a) => a.connected);
   const unconnected = accounts.filter((a) => !a.connected);
+  const needCount = (threads || []).filter(needsReply).length;
+  // Needs-reply threads always float to the top; the toggle hides everything else.
+  const displayThreads = (needsOnly ? (threads || []).filter(needsReply) : threads || [])
+    .slice()
+    .sort((a, b) => Number(needsReply(b)) - Number(needsReply(a)));
 
   return (
     <div className="space-y-4">
@@ -3115,6 +3148,21 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
         >
           <RefreshCw className="h-4 w-4" />
         </button>
+        <button
+          onClick={() => setNeedsOnly((v) => !v)}
+          title="Threads where a lead replied and you haven't answered yet"
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm font-medium",
+            needsOnly
+              ? "border-cta-300 bg-cta-50 text-cta-700"
+              : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50",
+          )}
+        >
+          <Reply className="h-4 w-4" /> Needs reply
+          {needCount > 0 && (
+            <span className="rounded-full bg-cta-500 px-1.5 text-[11px] font-semibold text-white">{needCount}</span>
+          )}
+        </button>
         <div className="ml-auto flex flex-wrap gap-2">
           {unconnected.map((a) => (
             <button
@@ -3142,12 +3190,12 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
           <div className="min-w-0 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
             {loading ? (
               <div className="p-6 text-sm text-slate-400">Loading…</div>
-            ) : !threads?.length ? (
+            ) : !displayThreads.length ? (
               <div className="p-6 text-sm text-slate-400">
-                {view === "outreach" ? "No outreach sends or replies yet." : "No messages."}
+                {needsOnly ? "Nothing waiting on a reply." : view === "outreach" ? "No outreach sends or replies yet." : "No messages."}
               </div>
             ) : (
-              threads.map((t) => (
+              displayThreads.map((t) => (
                 <button
                   key={`${t.mailbox}:${t.id}`}
                   // Ledger-sourced sends have no Gmail thread to open (openable === false).
@@ -3172,6 +3220,11 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
                   </div>
                   <div className="truncate text-xs text-slate-400">{t.snippet}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-1">
+                    {needsReply(t) && (
+                      <span className="inline-block rounded bg-cta-100 px-1.5 py-0.5 text-[11px] font-semibold text-cta-700">
+                        Needs reply
+                      </span>
+                    )}
                     {view === "outreach" && t.direction && (
                       <span className={cn(
                         "inline-block rounded px-1.5 py-0.5 text-[11px] font-medium",

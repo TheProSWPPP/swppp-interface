@@ -370,6 +370,7 @@ export const sdrApi = {
         openable?: boolean;
         outreached?: boolean;
         direction?: "in" | "out";
+        lastOutbound?: boolean;
         kind?: "sdr" | "permit";
         permit?: { operator_key: string; contact_name: string | null };
       })[];
