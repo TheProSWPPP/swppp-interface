@@ -1872,6 +1872,7 @@ function QueueView({
 }) {
   const [drafts, setDrafts] = useState<SdrDraft[] | null>(null);
   const [scheduled, setScheduled] = useState<Awaited<ReturnType<typeof sdrApi.getOutbox>>["scheduled"]>([]);
+  const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -2038,7 +2039,11 @@ function QueueView({
           </div>
           <ul className="divide-y divide-slate-100">
             {scheduled.slice(0, 25).map((s, i) => (
-              <li key={i} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+              <li
+                key={i}
+                onClick={() => s.lead && setDetailLeadId(s.lead.lead_id)}
+                className={cn("flex items-center gap-3 px-4 py-2.5 text-sm", s.lead && "cursor-pointer hover:bg-slate-50")}
+              >
                 {s.lead?.trigger_type && (
                   <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset", TRIGGER_COLORS[s.lead.trigger_type])}>
                     {s.lead.trigger_type}
@@ -2129,6 +2134,15 @@ function QueueView({
           />
         ))}
       </div>
+
+      {detailLeadId && (
+        <LeadDetailDrawer
+          leadId={detailLeadId}
+          onClose={() => setDetailLeadId(null)}
+          onChanged={load}
+          pushToast={pushToast}
+        />
+      )}
     </div>
   );
 }

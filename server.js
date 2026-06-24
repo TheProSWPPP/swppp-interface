@@ -2043,21 +2043,19 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
     //    permit operator by the From address. These are openable threads. (We do NOT read
     //    in:sent — the mailboxes run Apollo warmup, which floods Sent with fake emails;
     //    real sends come from our own records below.)
-    const all = [];
-    for (const mb of boxes) {
-      let token;
-      try {
-        token = await accessTokenForMailbox(mb);
-      } catch {
-        continue;
-      }
-      try {
-        const threads = await gmailInbox.listThreads(token, { q: "in:inbox", maxResults: 25 });
-        for (const t of threads) all.push({ ...t, mailbox: mb });
-      } catch {
-        /* skip a mailbox that errors, keep the rest */
-      }
-    }
+    // Read all mailboxes in PARALLEL (was sequential — the main source of the slow load).
+    const perBox = await Promise.all(
+      boxes.map(async (mb) => {
+        try {
+          const token = await accessTokenForMailbox(mb);
+          const threads = await gmailInbox.listThreads(token, { q: "in:inbox", maxResults: 12 });
+          return threads.map((t) => ({ ...t, mailbox: mb }));
+        } catch {
+          return []; // skip a mailbox that errors, keep the rest
+        }
+      }),
+    );
+    const all = perBox.flat();
     const froms = [...new Set(all.map((t) => parseEmailAddr(t.from)).filter(Boolean))];
     const leadMap = {};
     const permitMap = {};
