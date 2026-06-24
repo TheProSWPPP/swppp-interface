@@ -1211,7 +1211,7 @@ function LeadDetailDrawer({
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-[480px] flex-col bg-white shadow-2xl"
+        className="flex h-full w-full max-w-[680px] flex-col bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -1234,7 +1234,7 @@ function LeadDetailDrawer({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-6 py-5">
           {error ? (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
           ) : !detail ? (
@@ -1242,7 +1242,7 @@ function LeadDetailDrawer({
           ) : (
             <div className="space-y-5">
               {/* Snapshot */}
-              <dl className="grid grid-cols-2 gap-3 text-sm">
+              <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
                 <DrawerField label="Contact" value={lead?.person_name} />
                 <DrawerField label="Email" value={lead?.person_email} />
                 <DrawerField
@@ -1410,14 +1410,26 @@ function LeadDetailDrawer({
                 >
                   <Phone className="h-4 w-4" /> Log activity
                 </button>
-                {onOutreach && lead.trigger_type && (
-                  <button
-                    onClick={() => { onOutreach(lead); onClose(); }}
-                    className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-cta-500 px-3 py-2 text-sm font-semibold text-white hover:bg-cta-600"
-                  >
-                    Outreach <ChevronRight className="h-4 w-4" />
-                  </button>
-                )}
+                {onOutreach && lead.trigger_type && (() => {
+                  const alreadyOutreached =
+                    lead.send_status === "enrolled" || lead.send_status === "sent" || !!lead.outreach_sent_at;
+                  return (
+                    <button
+                      onClick={() => { onOutreach(lead); onClose(); }}
+                      disabled={alreadyOutreached}
+                      title={alreadyOutreached ? "Already outreached — won't re-send" : undefined}
+                      className={cn(
+                        "ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold",
+                        alreadyOutreached
+                          ? "cursor-not-allowed bg-slate-100 text-slate-400"
+                          : "bg-cta-500 text-white hover:bg-cta-600",
+                      )}
+                    >
+                      {alreadyOutreached ? "Outreached" : "Outreach"}
+                      {!alreadyOutreached && <ChevronRight className="h-4 w-4" />}
+                    </button>
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -1642,6 +1654,10 @@ function LeadRow({
 }) {
   const fresh = lead.outreach_status === "clear";
   const hasTrigger = !!lead.trigger_type;
+  // Already-outreached = we enrolled them in Apollo (enrolled/sent) or any send is on
+  // record. Block the button so a lead can't be re-outreached.
+  const alreadyOutreached =
+    lead.send_status === "enrolled" || lead.send_status === "sent" || !!lead.outreach_sent_at;
   // NOTE: half-wired (Ivan WIP) — declared but not yet referenced in JSX, which fails
   // `tsc -b` (noUnusedLocals) and blocks the build/deploy. Commented to unblock; re-enable
   // when the "contacted manually" indicator is wired in.
@@ -1771,11 +1787,17 @@ function LeadRow({
           </button>
           <button
             onClick={(e) => { stop(e); onOutreach(); }}
-            disabled={!hasTrigger || busy}
-            title={hasTrigger ? undefined : "Set a Trigger (AGC/LBA/CM/PB) on this lead in Pipedrive first."}
+            disabled={!hasTrigger || busy || alreadyOutreached}
+            title={
+              alreadyOutreached
+                ? "Already outreached — won't re-send"
+                : hasTrigger
+                  ? undefined
+                  : "Set a Trigger (AGC/LBA/CM/PB) on this lead in Pipedrive first."
+            }
             className={cn(
               "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors",
-              !hasTrigger
+              alreadyOutreached || !hasTrigger
                 ? "cursor-not-allowed bg-slate-100 text-slate-400"
                 : fresh
                   ? "bg-cta-500 text-white hover:bg-cta-600"
@@ -1783,8 +1805,8 @@ function LeadRow({
               busy && "opacity-60",
             )}
           >
-            {busy ? "Creating…" : fresh ? "Outreach" : "Review"}
-            {!busy && <ChevronRight className="h-4 w-4" />}
+            {busy ? "Creating…" : alreadyOutreached ? "Outreached" : fresh ? "Outreach" : "Review"}
+            {!busy && !alreadyOutreached && <ChevronRight className="h-4 w-4" />}
           </button>
         </div>
       </td>

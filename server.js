@@ -2071,19 +2071,25 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
       }),
     );
     const all = perBox.flat();
-    const froms = [...new Set(all.map((t) => parseEmailAddr(t.from)).filter(Boolean))];
+    // Match on EVERY participant of each thread, not just the last message's From. A B2B
+    // reply often comes from a different person than the one we emailed (we email Todd,
+    // his colleague Kyle replies on the same thread) — that thread still belongs to the
+    // lead we outreached. participants is collected per-thread in gmailInbox.listThreads.
+    const partsOf = (t) =>
+      t.participants && t.participants.length ? t.participants : [parseEmailAddr(t.from)].filter(Boolean);
+    const candidateEmails = [...new Set(all.flatMap((t) => partsOf(t)))];
     const leadMap = {};
     const permitMap = {};
-    if (froms.length) {
+    if (candidateEmails.length) {
       const [sdrRes, permitRes] = await Promise.all([
         pool.query(
           `SELECT lower(s.person_email) e, s.pipedrive_lead_id, s.lead_title
              FROM sdr_lead_state s WHERE lower(s.person_email) = ANY($1)`,
-          [froms],
+          [candidateEmails],
         ),
         pool.query(
           `SELECT lower(email) e, contact_name, operator_key FROM permit_operator_email WHERE lower(email) = ANY($1)`,
-          [froms],
+          [candidateEmails],
         ),
       ]);
       for (const r of sdrRes.rows) leadMap[r.e] = r;
@@ -2093,9 +2099,13 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
     const repliedOps = new Set();
     const replyThreads = [];
     for (const t of all) {
-      const e = parseEmailAddr(t.from);
-      const sdr = e ? leadMap[e] : null;
-      const permit = e ? permitMap[e] : null;
+      // First participant that resolves to a lead wins; SDR lead takes priority over permit.
+      let sdr = null;
+      let permit = null;
+      for (const p of partsOf(t)) {
+        if (!sdr && leadMap[p]) sdr = leadMap[p];
+        if (!permit && permitMap[p]) permit = permitMap[p];
+      }
       if (sdr) {
         repliedLeads.add(sdr.pipedrive_lead_id);
         replyThreads.push({ ...t, openable: true, kind: "sdr", direction: "in", lead: { lead_id: sdr.pipedrive_lead_id, lead_title: sdr.lead_title } });
@@ -2426,7 +2436,7 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
       const { rows } = await pool.query(sql, params);
       return rows[0] || null;
     };
-    const SEND_COLS = `s.id, s.pipedrive_lead_id, s.draft_id, s.apollo_sequence_id, s.apollo_contact_id, d.pipedrive_contact_id, d.contact_email_snapshot`;
+    const SEND_COLS = `s.id, s.pipedrive_lead_id, s.draft_id, s.apollo_sequence_id, s.apollo_contact_id, s.mailbox_id, d.pipedrive_contact_id, d.contact_email_snapshot`;
     if (emailerMessageId) {
       sendRow = await pickSend(
         `SELECT ${SEND_COLS} FROM sdr_sends s JOIN sdr_drafts d ON d.id = s.draft_id
@@ -2536,6 +2546,30 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
               leadId,
               content:
                 `[Auto] Apollo: REPLY received${contactEmail ? ` from ${contactEmail}` : ""} — hot lead, follow up.` +
+                `\nOpen in interface: ${appBase}/#/sdr?lead=${leadId}`,
+            });
+            // Also create a follow-up Activity assigned to the rep who sent the outreach
+            // (dc/jg/mh/th → their Pipedrive user; falls back to Derek if unmapped) so the
+            // reply lands on someone's task list, not just a passive note. Still gated on
+            // newlyInserted above, so exactly one activity per reply.
+            let pdSenderId = null;
+            let replyMailbox = mailboxEmail;
+            if (sendRow?.mailbox_id) {
+              const { rows: mbRows } = await pool.query(
+                `SELECT pipedrive_sender_id, email FROM sdr_mailboxes WHERE id = $1`,
+                [sendRow.mailbox_id],
+              );
+              pdSenderId = mbRows[0]?.pipedrive_sender_id || null;
+              replyMailbox = mbRows[0]?.email || mailboxEmail;
+            }
+            await pipedriveClient.addActivity({
+              leadId,
+              subject: `Reply received${contactEmail ? ` from ${contactEmail}` : ""} — follow up`,
+              type: "task",
+              done: false,
+              userId: pdSenderId || 19499202, // Derek Chinners fallback
+              note:
+                `Replied to ${replyMailbox || "outreach"} outreach — follow up.` +
                 `\nOpen in interface: ${appBase}/#/sdr?lead=${leadId}`,
             });
           } catch (e) {
@@ -3169,7 +3203,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
 
     // Resolve mailbox → apollo_mailbox_id
     const { rows: mbRows } = await pool.query(
-      `SELECT id, email, apollo_mailbox_id, warmup_started_at FROM sdr_mailboxes WHERE id = $1`,
+      `SELECT id, email, apollo_mailbox_id, warmup_started_at, signature_html FROM sdr_mailboxes WHERE id = $1`,
       [draft.assigned_mailbox_id],
     );
     const mailbox = mbRows[0];
@@ -3330,13 +3364,23 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           [pdSequenceStartedKey]: `Apollo:${draft.trigger_type} ${new Date().toISOString().slice(0, 10)}`,
         });
         const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
+        // Append the full sent email (subject + body + signature) so the timeline note
+        // shows exactly what went out. Pipedrive notes render HTML; escape the user text
+        // and turn body newlines into <br>, then append the signature HTML verbatim.
+        const escHtml = (s) =>
+          String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const sentEmailBlock =
+          `<br><br>--- Email sent ---<br><b>Subject:</b> ${escHtml(draft.subject)}<br>` +
+          `${escHtml(draft.body).replace(/\n/g, "<br>")}` +
+          (mailbox.signature_html ? `<br>${mailbox.signature_html}` : "");
         await pipedriveClient.addNote({
           leadId: draft.pipedrive_lead_id,
           content:
             `[Auto] Apollo: enrolled in ${draft.trigger_type} sequence (${draft.apollo_sequence_id}) by ${req.sdrUser?.username || "system"}. ` +
             `Sender: ${mailbox.email}. Sequence_Started set.` +
             (overrideContext ? ` ⚠️ ${overrideContext}.` : "") +
-            `\nOpen in interface: ${appBase}/#/sdr?lead=${draft.pipedrive_lead_id}`,
+            `\nOpen in interface: ${appBase}/#/sdr?lead=${draft.pipedrive_lead_id}` +
+            sentEmailBlock,
         });
         await pipedriveClient.addActivity({
           leadId: draft.pipedrive_lead_id,
