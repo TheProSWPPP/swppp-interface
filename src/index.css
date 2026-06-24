@@ -23,3 +23,44 @@
   --color-cta-600: #c75c12;
   --color-cta-700: #a14910;
 }
+
+/* ---------------------------------------------------------------------------
+   SDR console readability layer
+   The console is a dense, all-day data tool, and most of it was pinned to the
+   small end of the scale (12px text-xs on ~235 nodes per view, 10–11px badges)
+   with low-contrast slate-400 labels that miss WCAG AA on white. Rather than
+   touch hundreds of utility classes, lift the small end of the type scale and
+   the lightest label greys in ONE scoped place. These selectors are
+   higher-specificity than Tailwind's single-class utilities, so they win, and
+   they're scoped to `.sdr-root` so the rest of the app is untouched. Tune here.
+   --------------------------------------------------------------------------- */
+.sdr-root {
+  font-size: 15px;
+}
+.sdr-root .text-\[10px\] {
+  font-size: 11px;
+  line-height: 1rem;
+}
+.sdr-root .text-\[11px\] {
+  font-size: 12px;
+  line-height: 1.05rem;
+}
+.sdr-root .text-xs {
+  font-size: 0.8125rem; /* 12 → 13 */
+  line-height: 1.15rem;
+}
+.sdr-root .text-sm {
+  font-size: 0.9375rem; /* 14 → 15 */
+  line-height: 1.4rem;
+}
+.sdr-root .text-base {
+  font-size: 1.0625rem; /* 16 → 17 */
+}
+/* Lift the two lightest label greys — slate-400 misses AA contrast on white at
+   small sizes; nudge each one step darker so metadata stays legible. */
+.sdr-root .text-slate-400 {
+  color: #64748b; /* slate-400 → slate-500 */
+}
+.sdr-root .text-slate-300 {
+  color: #94a3b8; /* slate-300 → slate-400 */
+}

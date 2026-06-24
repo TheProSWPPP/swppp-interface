@@ -470,7 +470,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   }
 
   return (
-    <div>
+    <div className="sdr-root">
       <ToastStack toasts={toasts} dismiss={dismiss} />
       <div className="flex items-center justify-between mb-5 rounded-2xl bg-gradient-to-r from-brand-800 to-brand-600 px-6 py-5 text-white shadow-sm">
         <div>
@@ -1670,7 +1670,7 @@ function LeadRow({
   return (
     <tr className="cursor-pointer text-sm hover:bg-brand-50/40" onClick={onOpen}>
       {/* Company / Project */}
-      <td className="px-4 py-3 align-top">
+      <td className="px-4 py-3.5 align-top">
         <div className="font-semibold text-slate-900">{lead.lead_title || "Untitled lead"}</div>
         <a
           href={pipedriveLeadUrl(lead.pipedrive_lead_id)}
@@ -1683,14 +1683,14 @@ function LeadRow({
         </a>
       </td>
       {/* Contact */}
-      <td className="px-4 py-3 align-top">
+      <td className="px-4 py-3.5 align-top">
         <div className="text-slate-800">{lead.person_name || "—"}</div>
         {lead.person_email && <div className="text-xs text-slate-400">{lead.person_email}</div>}
       </td>
       {/* Stage */}
-      <td className="px-4 py-3 align-top text-slate-600">{lead.project_stage || "—"}</td>
+      <td className="px-4 py-3.5 align-top text-slate-600">{lead.project_stage || "—"}</td>
       {/* Lead score (Pipedrive) — priority signal */}
-      <td className="px-4 py-3 align-top whitespace-nowrap">
+      <td className="px-4 py-3.5 align-top whitespace-nowrap">
         {lead.lead_score == null ? (
           <span className="text-slate-300">—</span>
         ) : (
@@ -1711,11 +1711,11 @@ function LeadRow({
         )}
       </td>
       {/* Bid date */}
-      <td className="px-4 py-3 align-top whitespace-nowrap text-slate-600">{formatDate(lead.bid_date)}</td>
+      <td className="px-4 py-3.5 align-top whitespace-nowrap text-slate-600">{formatDate(lead.bid_date)}</td>
       {/* Start date */}
-      <td className="px-4 py-3 align-top whitespace-nowrap text-slate-600">{formatDate(lead.start_date)}</td>
+      <td className="px-4 py-3.5 align-top whitespace-nowrap text-slate-600">{formatDate(lead.start_date)}</td>
       {/* Contact status (+ sequence stage when enrolled via our system) */}
-      <td className="px-4 py-3 align-top">
+      <td className="px-4 py-3.5 align-top">
         <OutreachBadge status={lead.outreach_status} days={lead.days_since_outgoing} sendStatus={lead.send_status} />
         {stageLabel && (
           <div className="mt-1 text-xs font-medium text-brand-700">
@@ -1732,7 +1732,7 @@ function LeadRow({
         )}
       </td>
       {/* Trigger */}
-      <td className="px-4 py-3 align-top">
+      <td className="px-4 py-3.5 align-top">
         {lead.trigger_type ? (
           <span
             title={TRIGGER_LABELS[lead.trigger_type] ?? undefined}
@@ -1751,7 +1751,7 @@ function LeadRow({
           truth). Otherwise we only know the Pipedrive owner — shown clearly as owner,
           never as proof this lead was outreached (the contact-level email lives in the
           status badge + "Contact last emailed" column). */}
-      <td className="px-4 py-3 align-top text-slate-600">
+      <td className="px-4 py-3.5 align-top text-slate-600">
         {(() => {
           const a = outreachAttribution(lead);
           if (!a) return <span className="text-slate-300" title="No send recorded for this lead">—</span>;
@@ -1766,7 +1766,7 @@ function LeadRow({
           truth. Replaces the person-level "Contact emailed (any deal)" that bled across
           every lead a contact sits on. Person-level signal now lives in the drawer. */}
       <td
-        className="px-4 py-3 align-top text-slate-600"
+        className="px-4 py-3.5 align-top text-slate-600"
         title={lead.outreach_sent_at ? `${formatDate(lead.outreach_sent_at)} · ${lead.outreach_source}` : "No send recorded for this lead"}
       >
         {lead.outreach_sent_at ? (
@@ -1776,7 +1776,7 @@ function LeadRow({
         )}
       </td>
       {/* Action */}
-      <td className="px-4 py-3 align-top text-right">
+      <td className="px-4 py-3.5 align-top text-right">
         <div className="inline-flex items-center gap-1.5">
           <button
             onClick={(e) => { stop(e); onNote(); }}
