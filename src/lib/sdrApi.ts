@@ -357,9 +357,17 @@ export const sdrApi = {
     );
   },
   getInboxOverview: () =>
-    sdrFetch<{ threads: (SdrInboxThread & { mailbox: string; outreached?: boolean })[]; mailboxes: string[] }>(
-      "/api/sdr/inbox/overview",
-    ),
+    sdrFetch<{
+      threads: (SdrInboxThread & {
+        mailbox: string;
+        to?: string | null;
+        outreached?: boolean;
+        direction?: "in" | "out";
+        kind?: "sdr" | "permit";
+        permit?: { operator_key: string; contact_name: string | null };
+      })[];
+      mailboxes: string[];
+    }>("/api/sdr/inbox/overview"),
   getInboxThread: (id: string, mailbox?: string) =>
     sdrFetch<{ mailbox: string; id: string; messages: SdrInboxMessage[] }>(
       `/api/sdr/inbox/threads/${id}${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ""}`,

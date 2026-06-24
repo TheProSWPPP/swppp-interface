@@ -2007,30 +2007,58 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
         continue;
       }
       try {
-        const threads = await gmailInbox.listThreads(token, { q: "in:inbox", maxResults: 15 });
+        // Inbound replies (in:inbox) AND our own sends (in:sent), so the overview shows
+        // the full outreach conversation — SDR and TX05 permit, sends and replies.
+        const threads = await gmailInbox.listThreads(token, { q: "in:inbox OR in:sent", maxResults: 25 });
         for (const t of threads) all.push({ ...t, mailbox: mb });
       } catch {
         /* skip a mailbox that errors, keep the rest */
       }
     }
-    const froms = [...new Set(all.map((t) => parseEmailAddr(t.from)).filter(Boolean))];
+    // The counterparty can be on the From (a reply) or any of the To addresses (a send),
+    // so we collect both and match either against known SDR leads / permit operators.
+    const addrsFor = (t) => {
+      const out = [];
+      const f = parseEmailAddr(t.from);
+      if (f) out.push(f);
+      for (const part of String(t.to || "").split(",")) {
+        const a = parseEmailAddr(part);
+        if (a) out.push(a);
+      }
+      return out;
+    };
+    const candidates = [...new Set(all.flatMap(addrsFor).filter(Boolean))];
     const leadMap = {};
-    if (froms.length) {
-      const { rows } = await pool.query(
-        `SELECT lower(s.person_email) e, s.pipedrive_lead_id, s.lead_title,
-                EXISTS(SELECT 1 FROM sdr_outreach_log o WHERE o.pipedrive_lead_id = s.pipedrive_lead_id) AS outreached
-           FROM sdr_lead_state s WHERE lower(s.person_email) = ANY($1)`,
-        [froms],
-      );
-      for (const r of rows) leadMap[r.e] = r;
+    const permitMap = {};
+    if (candidates.length) {
+      const [sdrRes, permitRes] = await Promise.all([
+        pool.query(
+          `SELECT lower(s.person_email) e, s.pipedrive_lead_id, s.lead_title,
+                  EXISTS(SELECT 1 FROM sdr_outreach_log o WHERE o.pipedrive_lead_id = s.pipedrive_lead_id) AS outreached
+             FROM sdr_lead_state s WHERE lower(s.person_email) = ANY($1)`,
+          [candidates],
+        ),
+        pool.query(
+          `SELECT lower(email) e, contact_name, operator_key FROM permit_operator_email WHERE lower(email) = ANY($1)`,
+          [candidates],
+        ),
+      ]);
+      for (const r of sdrRes.rows) leadMap[r.e] = r;
+      for (const r of permitRes.rows) permitMap[r.e] = r;
     }
     const threads = all
       .map((t) => {
-        const e = parseEmailAddr(t.from);
-        const m = e ? leadMap[e] : null;
-        return m
-          ? { ...t, lead: { lead_id: m.pipedrive_lead_id, lead_title: m.lead_title }, outreached: m.outreached }
-          : null;
+        // Find the counterparty among From + To; From (their reply) wins over To (our send).
+        let sdr = null;
+        let permit = null;
+        for (const a of addrsFor(t)) {
+          if (leadMap[a]) { sdr = leadMap[a]; break; }
+          if (permitMap[a]) { permit = permitMap[a]; break; }
+        }
+        if (!sdr && !permit) return null;
+        const direction = t.lastOutbound ? "out" : "in"; // out = we sent, in = they replied
+        if (sdr) return { ...t, kind: "sdr", direction, lead: { lead_id: sdr.pipedrive_lead_id, lead_title: sdr.lead_title }, outreached: sdr.outreached };
+        return { ...t, kind: "permit", direction, lead: null, permit: { operator_key: permit.operator_key, contact_name: permit.contact_name } };
       })
       .filter(Boolean)
       .sort((a, b) => (Date.parse(b.date || "") || 0) - (Date.parse(a.date || "") || 0));

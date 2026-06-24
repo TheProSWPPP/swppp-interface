@@ -79,8 +79,8 @@ function setLaneStored(l: OutreachLane) {
 const TRIGGER_LABELS: Record<SdrTriggerType, string> = {
   AGC: "Awarded GC",
   LBA: "Low Bid Apparent",
-  CM: "Customer Match",
-  PB: "Project Bid",
+  CM: "Construction Manager",
+  PB: "Project Bidder",
 };
 
 const TRIGGER_COLORS: Record<SdrTriggerType, string> = {
@@ -419,20 +419,29 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   // Hot-lead count for the Priority tab badge — surfaces leads someone has been
   // engaging with (clicked, replied, or opened 3+ times) without opening the tab.
   const [hotCount, setHotCount] = useState(0);
+  const hotLeadsRef = useRef<SdrEngagementSummary["leads"]>([]);
   useEffect(() => {
     let stop = false;
+    // Badge = hot leads not yet dismissed AND not yet seen (clicked into). Recompute
+    // from the cached leads whenever a priority is clicked, so the count drops live.
+    const recompute = () => {
+      const dismissed = loadDismissed();
+      const seen = loadSeen();
+      setHotCount(hotLeadsRef.current.filter((l) => isHot(l) && !dismissed.has(l.draft_id) && !seen.has(l.draft_id)).length);
+    };
     const load = () =>
       sdrApi
         .engagementSummary()
         .then((s) => {
           if (stop) return;
-          const dismissed = loadDismissed();
-          setHotCount(s.leads.filter((l) => isHot(l) && !dismissed.has(l.draft_id)).length);
+          hotLeadsRef.current = s.leads;
+          recompute();
         })
         .catch(() => {});
     load();
     const iv = setInterval(load, 60_000);
-    return () => { stop = true; clearInterval(iv); };
+    window.addEventListener("sdr:priority-seen", recompute);
+    return () => { stop = true; clearInterval(iv); window.removeEventListener("sdr:priority-seen", recompute); };
   }, []);
 
   const { toasts, push, dismiss } = useToasts();
@@ -506,7 +515,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             <TabButton current={tab} value="inbox" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Inbox</TabButton>
             <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
             <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
-            <TabButton current={tab} value="templates" onClick={setTab} icon={<ListChecks className="h-4 w-4" />}>Messaging</TabButton>
+            <TabButton current={tab} value="templates" onClick={setTab} icon={<ListChecks className="h-4 w-4" />}>Templates</TabButton>
             <TabButton current={tab} value="permits" onClick={setTab} icon={<FileSearch className="h-4 w-4" />}>Permits</TabButton>
           </div>
           {tab === "leads" && <LeadsView user={user} pushToast={push} onGenerated={() => setTab("queue")} />}
@@ -2315,6 +2324,30 @@ function saveDismissed(s: Set<string>) {
   }
 }
 
+// Priority items the rep has SEEN (clicked into). Distinct from dismissed: a seen item
+// stays in the list, it just stops counting toward the tab's notification badge. Persisted
+// per browser so the badge stays cleared across reloads.
+const PRIORITY_SEEN_KEY = "sdr.priority.seen";
+function loadSeen(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(PRIORITY_SEEN_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+// Mark a priority lead seen and notify the badge to recompute live (no refetch).
+function markPrioritySeen(id: string) {
+  try {
+    const s = loadSeen();
+    if (s.has(id)) return;
+    s.add(id);
+    localStorage.setItem(PRIORITY_SEEN_KEY, JSON.stringify([...s]));
+    window.dispatchEvent(new Event("sdr:priority-seen"));
+  } catch {
+    /* localStorage unavailable — badge just won't persist as cleared */
+  }
+}
+
 function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", text: string) => void }) {
   const [summary, setSummary] = useState<SdrEngagementSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2412,7 +2445,7 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
             {visible.map((l) => (
               <li
                 key={l.draft_id}
-                onClick={() => setDetailLeadId(l.pipedrive_lead_id)}
+                onClick={() => { markPrioritySeen(l.draft_id); setDetailLeadId(l.pipedrive_lead_id); }}
                 className={cn("px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-brand-50/40", isHot(l) && "bg-amber-50/50")}
               >
                 {isHot(l) ? (
@@ -2657,7 +2690,7 @@ function emailFromHeader(s: string | null | undefined): string {
   return (m ? m[1] : s).trim();
 }
 
-type OverviewThread = SdrInboxThread & { mailbox: string; outreached?: boolean };
+type OverviewThread = SdrInboxThread & { mailbox: string; to?: string | null; outreached?: boolean; direction?: "in" | "out"; kind?: "sdr" | "permit"; permit?: { operator_key: string; contact_name: string | null } };
 
 function nameFromHeader(s: string | null | undefined): string {
   if (!s) return "";
@@ -2811,7 +2844,7 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
       </div>
       <p className="text-xs text-slate-500">
         {view === "outreach"
-          ? "Replies from leads you've outreached, across every connected mailbox. Open one to see the full thread and reply."
+          ? "Outreach across every connected mailbox — sends and replies, SDR leads and TX05 permit operators. Open one to see the full thread and reply."
           : "Everything in this mailbox's inbox."}
       </p>
 
@@ -2826,7 +2859,7 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
               <div className="p-6 text-sm text-slate-400">Loading…</div>
             ) : !threads?.length ? (
               <div className="p-6 text-sm text-slate-400">
-                {view === "outreach" ? "No replies from outreached leads yet." : "No messages."}
+                {view === "outreach" ? "No outreach sends or replies yet." : "No messages."}
               </div>
             ) : (
               threads.map((t) => (
@@ -2837,7 +2870,8 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className={cn("truncate text-sm text-slate-800", t.unread && "font-semibold")}>
-                      {nameFromHeader(t.from) || "(unknown)"}
+                      {/* Show the counterparty: their From on a reply, the To on a send. */}
+                      {(t.direction === "out" ? nameFromHeader(t.to) : nameFromHeader(t.from)) || "(unknown)"}
                     </span>
                     <span className="shrink-0 text-xs text-slate-400">
                       {t.date ? formatRelative(new Date(t.date).toISOString()) : ""}
@@ -2848,6 +2882,19 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
                   </div>
                   <div className="truncate text-xs text-slate-400">{t.snippet}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-1">
+                    {view === "outreach" && t.direction && (
+                      <span className={cn(
+                        "inline-block rounded px-1.5 py-0.5 text-[11px] font-medium",
+                        t.direction === "in" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500",
+                      )}>
+                        {t.direction === "in" ? "↩ Reply" : "→ Sent"}
+                      </span>
+                    )}
+                    {t.kind === "permit" && (
+                      <span className="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-700">
+                        Permit{t.permit?.contact_name ? ` · ${t.permit.contact_name}` : ""}
+                      </span>
+                    )}
                     {t.lead && (
                       <span className="inline-block rounded bg-brand-100 px-1.5 py-0.5 text-[11px] text-brand-700">
                         {t.lead.lead_title || "Linked lead"}
@@ -3241,14 +3288,19 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A representative signature for the preview only. Apollo appends each sender's own
+  // signature at send time; we show one (dc@ if present, else the first non-empty) so
+  // the preview reads as a full email.
+  const [sampleSig, setSampleSig] = useState<string>("");
   const isAdmin = user.role === "admin";
 
   useEffect(() => {
     Promise.all([
       sdrApi.getFirstTouchTemplates(),
       sdrApi.listSequences().catch(() => ({ sequences: [] as SdrSequence[] })),
+      sdrApi.listMailboxes().catch(() => ({ mailboxes: [] as SdrMailbox[] })),
     ])
-      .then(([ft, sq]) => {
+      .then(([ft, sq, mb]) => {
         setTemplates(ft.templates);
         const init: Record<string, string> = {};
         (Object.keys(ft.templates) as SdrTriggerType[]).forEach((t) => {
@@ -3256,6 +3308,9 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
         });
         setDrafts(init);
         setSequences(sq.sequences || []);
+        const boxes = mb.mailboxes || [];
+        const withSig = boxes.find((b) => b.email.startsWith("dc@") && b.signature_html) || boxes.find((b) => b.signature_html);
+        setSampleSig(withSig?.signature_html || "");
       })
       .catch((e) => setError(e.message));
   }, []);
@@ -3285,9 +3340,10 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
   return (
     <div className="space-y-4">
       <p className="text-xs text-slate-500">
-        One sequence per trigger. Step 1 is the first-touch email built per lead (merge fields{" "}
-        <span className="font-mono text-slate-600">{"{First} {ENV} {SWPPP} {Sig}"}</span>); the later steps are the live
-        Apollo follow-ups. {isAdmin ? "Edits save immediately." : "Admins edit these."}
+        One template per trigger. Step 1 is the first-touch email built per lead (merge fields{" "}
+        <span className="font-mono text-slate-600">{"{First} {ENV} {SWPPP}"}</span>); the later steps are the live
+        Apollo follow-ups. The signature is added by Apollo per sender, so it isn't edited here — it shows in the
+        preview only. {isAdmin ? "Edits save immediately." : "Admins edit these."}
       </p>
       {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
       {!templates || !sequences ? (
@@ -3351,11 +3407,11 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
                       />
                     </div>
                     <div>
-                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Preview (how it sends)</div>
+                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Preview · full email sample (placeholders filled, signature from Apollo)</div>
                       <div
                         className="min-h-[180px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-800"
-                        style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
-                        dangerouslySetInnerHTML={{ __html: firstTouchPreview(drafts[t] ?? "") }}
+                        style={{ fontFamily: 'Georgia, "Times New Roman", serif', color: "#1a5276" }}
+                        dangerouslySetInnerHTML={{ __html: firstTouchPreview(drafts[t] ?? "", sampleSig) }}
                       />
                     </div>
                   </div>
@@ -3396,9 +3452,20 @@ function preservePixel(originalHtml: string, editedHtml: string): string {
 
 // First-touch bodies are plain text + merge fields; on send they get the brand wrapper
 // (Georgia, blue). Render that look as a preview so step 1 reads like steps 2+.
-function firstTouchPreview(body: string): string {
-  const esc = (body || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return esc.replace(/\n/g, "<br>");
+// Render a realistic email sample: merge fields replaced with sample values, the
+// body HTML-escaped (it sends as plain text wrapped in the brand style), and the
+// sender's Apollo signature appended raw at the end. {Sig} is dropped — Apollo
+// appends the real signature per sender, so it only shows in this preview.
+function firstTouchPreview(body: string, signatureHtml?: string): string {
+  const filled = (body || "")
+    .replace(/\{First\}/g, "Matt")
+    .replace(/\{ENV\}/g, "EPA")
+    .replace(/\{SWPPP\}/g, "SWPPP")
+    .replace(/\s*\{Sig\}/g, "");
+  const esc = filled.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const bodyHtml = esc.replace(/\n/g, "<br>");
+  const sig = (signatureHtml || "").trim();
+  return sig ? `${bodyHtml}<br><br>${sig}` : bodyHtml;
 }
 
 const RTE_COLORS: { label: string; value: string }[] = [
