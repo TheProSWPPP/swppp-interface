@@ -1412,7 +1412,7 @@ function LeadDetailDrawer({
                 </button>
                 {onOutreach && lead.trigger_type && (() => {
                   const alreadyOutreached =
-                    lead.send_status === "enrolled" || lead.send_status === "sent" || !!lead.outreach_sent_at;
+                    ["enrolled", "sent", "replied", "bounced", "unsubscribed"].includes(lead.send_status || "") || !!lead.outreach_sent_at;
                   return (
                     <button
                       onClick={() => { onOutreach(lead); onClose(); }}
@@ -1657,7 +1657,7 @@ function LeadRow({
   // Already-outreached = we enrolled them in Apollo (enrolled/sent) or any send is on
   // record. Block the button so a lead can't be re-outreached.
   const alreadyOutreached =
-    lead.send_status === "enrolled" || lead.send_status === "sent" || !!lead.outreach_sent_at;
+    ["enrolled", "sent", "replied", "bounced", "unsubscribed"].includes(lead.send_status || "") || !!lead.outreach_sent_at;
   // NOTE: half-wired (Ivan WIP) — declared but not yet referenced in JSX, which fails
   // `tsc -b` (noUnusedLocals) and blocks the build/deploy. Commented to unblock; re-enable
   // when the "contacted manually" indicator is wired in.
@@ -2835,6 +2835,47 @@ function nameFromHeader(s: string | null | undefined): string {
   return (m ? m[1] : emailFromHeader(s)).trim();
 }
 
+// Render an email message body. When the message carries real HTML, render it inside a
+// sandboxed iframe so it looks like the actual email (fonts, signatures, layout) while
+// staying safe: sandbox without `allow-scripts` neutralizes any JS in the email; we keep
+// `allow-same-origin` only so we can measure the content height and auto-size the frame.
+// Plain-text messages fall back to the pre-wrapped text view.
+function MessageBody({ html, body }: { html?: string | null; body?: string }) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = useState(0);
+  const clean = (html || "").trim();
+  const srcDoc = clean
+    ? `<!doctype html><html><head><meta charset="utf-8"><base target="_blank">` +
+      `<style>html,body{margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1e293b;word-break:break-word;overflow-wrap:anywhere}` +
+      `img{max-width:100%;height:auto}a{color:#1d4ed8}blockquote{margin:0 0 0 .5rem;padding-left:.75rem;border-left:2px solid #e2e8f0;color:#64748b}table{max-width:100%}</style></head>` +
+      `<body>${clean}</body></html>`
+    : "";
+
+  const onLoad = useCallback(() => {
+    const doc = ref.current?.contentDocument;
+    if (doc?.body) setHeight(Math.min(doc.body.scrollHeight + 8, 1400));
+  }, []);
+
+  if (!clean) {
+    return (
+      <div className="overflow-hidden whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
+        {body?.trim() || "(no text)"}
+      </div>
+    );
+  }
+  return (
+    <iframe
+      ref={ref}
+      title="email"
+      sandbox="allow-same-origin allow-popups"
+      srcDoc={srcDoc}
+      onLoad={onLoad}
+      className="w-full border-0"
+      style={{ height: height ? `${height}px` : "120px" }}
+    />
+  );
+}
+
 function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "success" | "error", msg: string) => void }) {
   const [accounts, setAccounts] = useState<SdrInboxAccount[] | null>(null);
   const [view, setView] = useState<"outreach" | "mailbox">("outreach");
@@ -3074,7 +3115,7 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
                         <span className="truncate font-medium text-slate-700">{mine ? "You" : nameFromHeader(m.from)}</span>
                         <span className="shrink-0 text-slate-400">{m.date ? new Date(m.date).toLocaleString() : ""}</span>
                       </div>
-                      <div className="overflow-hidden whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">{m.body?.trim() || "(no text)"}</div>
+                      <MessageBody html={m.html} body={m.body} />
                     </div>
                   );
                 })}

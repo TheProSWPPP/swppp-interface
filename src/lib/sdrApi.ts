@@ -318,6 +318,7 @@ export interface SdrInboxMessage {
   references: string | null;
   unread: boolean;
   body: string;
+  html?: string | null;
 }
 
 export const sdrApi = {
