@@ -112,19 +112,33 @@ const OUTREACH_BADGE: Record<string, { label: string; cls: string }> = {
   clear: { label: "Not contacted", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
 };
 
-function OutreachBadge({ status, days }: { status?: string | null; days?: number | null }) {
-  if (!status || !OUTREACH_BADGE[status]) return null;
-  const { label, cls } = OUTREACH_BADGE[status];
+// "In sequence" must mean OUR active Apollo enrollment (send_status), not Pipedrive's
+// Sequence_Started field — that field stays set after a Pipedrive sequence finishes, so it
+// falsely reads "In sequence". Interface sends keep the badge; everything else falls back to
+// the contact-emailed (dedup) status by recency.
+function effectiveContactStatus(status?: string | null, sendStatus?: string | null, days?: number | null): string | null {
+  if (sendStatus === "enrolled" || sendStatus === "sent") return "sequenced";
+  if (status === "sequenced") {
+    if (days == null) return "clear";
+    return days <= 60 ? "contacted_recent" : "contacted_stale";
+  }
+  return status ?? null;
+}
+
+function OutreachBadge({ status, days, sendStatus }: { status?: string | null; days?: number | null; sendStatus?: string | null }) {
+  const eff = effectiveContactStatus(status, sendStatus, days);
+  if (!eff || !OUTREACH_BADGE[eff]) return null;
+  const { label, cls } = OUTREACH_BADGE[eff];
   const title =
-    status === "clear"
+    eff === "clear"
       ? "No prior email to this contact found in Pipedrive"
-      : status === "sequenced"
-        ? "This lead is in an active sequence (Sequence_Started)"
+      : eff === "sequenced"
+        ? "In an active Apollo sequence via our interface"
         : `This CONTACT was emailed ${days ?? "?"}d ago in Pipedrive — across any project, not proof this lead was outreached. Dedup hint.`;
   return (
     <span title={title} className={cn("text-xs font-semibold px-2 py-0.5 rounded-full ring-1 ring-inset", cls)}>
       {label}
-      {typeof days === "number" && status !== "clear" && status !== "sequenced"
+      {typeof days === "number" && eff !== "clear" && eff !== "sequenced"
         ? ` · ${daysAgoLabel(days)}`
         : ""}
     </span>
@@ -1245,7 +1259,10 @@ function LeadDetailDrawer({
                 />
                 <DrawerField
                   label="Contact status"
-                  value={lead?.outreach_status ? OUTREACH_BADGE[lead.outreach_status]?.label ?? lead.outreach_status : "—"}
+                  value={(() => {
+                    const eff = effectiveContactStatus(lead?.outreach_status, lead?.send_status, lead?.days_since_outgoing);
+                    return eff ? OUTREACH_BADGE[eff]?.label ?? eff : "—";
+                  })()}
                 />
                 <DrawerField label="Bid date" value={formatDate(lead?.bid_date ?? null)} />
                 <DrawerField label="Start date" value={formatDate(lead?.start_date ?? null)} />
@@ -1683,7 +1700,7 @@ function LeadRow({
       <td className="px-4 py-3 align-top whitespace-nowrap text-slate-600">{formatDate(lead.start_date)}</td>
       {/* Contact status (+ sequence stage when enrolled via our system) */}
       <td className="px-4 py-3 align-top">
-        <OutreachBadge status={lead.outreach_status} days={lead.days_since_outgoing} />
+        <OutreachBadge status={lead.outreach_status} days={lead.days_since_outgoing} sendStatus={lead.send_status} />
         {stageLabel && (
           <div className="mt-1 text-xs font-medium text-brand-700">
             {seqLabel ? `${seqLabel} · ` : ""}
