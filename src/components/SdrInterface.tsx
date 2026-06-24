@@ -24,6 +24,7 @@ import {
   ReplyAll,
   Forward,
   Copy,
+  Bell,
   Send,
   ShieldCheck,
   Snowflake,
@@ -387,6 +388,72 @@ function readLeadParam(): string | null {
   return new URLSearchParams(q).get("lead");
 }
 
+// Pipedrive-style notification bell: a count of replies waiting on us, with a dropdown that
+// jumps straight to the thread. Fed by the same needs-reply list as the Inbox tab badge.
+function NotificationBell({
+  threads,
+  onOpen,
+}: {
+  threads: OverviewThread[];
+  onOpen: (t: { threadId: string; mailbox: string }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const count = threads.length;
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Replies waiting on you"
+        aria-label={`Replies waiting on you${count ? `: ${count}` : ""}`}
+        className="relative rounded-xl border border-white/30 bg-white/10 p-2 text-white hover:bg-white/20"
+      >
+        <Bell className="h-4 w-4" />
+        {count > 0 && (
+          <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-cta-500 px-1 text-[10px] font-bold text-white">
+            {count > 9 ? "9+" : count}
+          </span>
+        )}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-800 shadow-xl">
+            <div className="border-b border-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Replies waiting on you{count ? ` · ${count}` : ""}
+            </div>
+            {count === 0 ? (
+              <div className="px-3 py-6 text-center text-sm text-slate-400">All caught up.</div>
+            ) : (
+              <div className="max-h-80 divide-y divide-slate-100 overflow-y-auto">
+                {threads.map((t) => (
+                  <button
+                    key={`${t.mailbox}:${t.id}`}
+                    onClick={() => { setOpen(false); onOpen({ threadId: t.id, mailbox: t.mailbox }); }}
+                    className="block w-full px-3 py-2.5 text-left hover:bg-slate-50"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-slate-800">
+                        {t.lead?.lead_title || t.permit?.contact_name || nameFromHeader(t.from) || "(unknown)"}
+                      </span>
+                      <span className="shrink-0 text-xs text-slate-400">
+                        {t.date ? formatRelative(new Date(t.date).toISOString()) : ""}
+                      </span>
+                    </div>
+                    <div className="truncate text-xs text-slate-500">{t.subject || "(no subject)"}</div>
+                    <div className="truncate text-xs text-slate-400">
+                      {nameFromHeader(t.from)} · {t.mailbox.split("@")[0]}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void }) {
   const [lane, setLane] = useState<OutreachLane>(() => getLane());
   const [tab, setTab] = useState<SdrTab>("leads");
@@ -462,24 +529,39 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
     return () => { stop = true; clearInterval(iv); window.removeEventListener("sdr:priority-seen", recompute); };
   }, []);
 
-  // Inbox tab badge = threads where a lead replied and we haven't answered yet. Polled
-  // independently of the Inbox view so the count shows from any tab.
-  const [inboxNeedsReply, setInboxNeedsReply] = useState(0);
+  // Replies waiting on us, polled independently of the Inbox view so the bell + tab badge
+  // show from anywhere. We keep the full thread list (not just a count) so the notification
+  // bell can list them.
+  const [needsReplyThreads, setNeedsReplyThreads] = useState<OverviewThread[]>([]);
+  const [pendingInbox, setPendingInbox] = useState<{ threadId?: string; mailbox?: string; leadId?: string } | null>(null);
+  const goInbox = useCallback((target: { threadId?: string; mailbox?: string; leadId?: string }) => {
+    setPendingInbox(target);
+    setTab("inbox");
+  }, []);
   useEffect(() => {
     let stop = false;
     const load = () =>
       sdrApi
         .getInboxOverview()
         .then((d) => {
-          if (!stop) setInboxNeedsReply((d.threads || []).filter(needsReply).length);
+          if (!stop) setNeedsReplyThreads((d.threads || []).filter(needsReply));
         })
         .catch(() => {});
     load();
     const iv = setInterval(load, 60_000);
     const onRefresh = () => load();
+    // The lead drawer (and anything else) asks to jump to a thread via this event.
+    const onOpen = (e: Event) => { const t = (e as CustomEvent).detail; if (t) goInbox(t); };
     window.addEventListener("sdr:inbox-refresh", onRefresh);
-    return () => { stop = true; clearInterval(iv); window.removeEventListener("sdr:inbox-refresh", onRefresh); };
-  }, []);
+    window.addEventListener("sdr:open-inbox", onOpen as EventListener);
+    return () => {
+      stop = true;
+      clearInterval(iv);
+      window.removeEventListener("sdr:inbox-refresh", onRefresh);
+      window.removeEventListener("sdr:open-inbox", onOpen as EventListener);
+    };
+  }, [goInbox]);
+  const inboxNeedsReply = needsReplyThreads.length;
 
   const { toasts, push, dismiss } = useToasts();
 
@@ -500,6 +582,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           <h2 className="text-2xl font-bold text-white">Outreach console</h2>
         </div>
         <div className="flex items-center gap-3">
+          <NotificationBell threads={needsReplyThreads} onOpen={goInbox} />
           <div className="text-right">
             <div className="text-sm font-semibold text-white">{user.display_name}</div>
             <div className="text-xs text-brand-100 flex items-center justify-end gap-1">
@@ -558,7 +641,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {tab === "leads" && <LeadsView user={user} pushToast={push} onGenerated={() => setTab("queue")} />}
           {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
           {tab === "engaged" && <EngagedView pushToast={push} />}
-          {tab === "inbox" && <InboxView user={user} pushToast={push} />}
+          {tab === "inbox" && <InboxView user={user} pushToast={push} pending={pendingInbox} onConsumed={() => setPendingInbox(null)} />}
           {tab === "dashboard" && <DashboardView />}
           {tab === "mailboxes" && <MailboxesView user={user} />}
           {(tab === "templates" || tab === "sequences") && <MessagingView user={user} pushToast={push} />}
@@ -1204,7 +1287,7 @@ function LeadDetailDrawer({
   // Merge sends + engagement events into one timeline, newest first.
   const timeline = useMemo(() => {
     if (!detail) return [];
-    const items: { kind: string; label: string; at: string | null; tone: string; subject?: string | null; body?: string | null; from?: string | null; signature?: string | null }[] = [];
+    const items: { kind: string; label: string; at: string | null; tone: string; subject?: string | null; body?: string | null; from?: string | null; signature?: string | null; replied?: boolean }[] = [];
     for (const d of detail.drafts) {
       const sent = d.status === "sent";
       items.push({
@@ -1223,7 +1306,14 @@ function LeadDetailDrawer({
       items.push({ kind: "send", label: `${seq ? seq + " · " : ""}${SEND_STAGE_LABEL[s.status] || s.status}`, at: s.sent_at, tone: "brand" });
     }
     for (const e of detail.events) {
-      items.push({ kind: "event", label: e.event_type + (e.mailbox_email ? ` · ${e.mailbox_email}` : ""), at: e.occurred_at, tone: "emerald" });
+      const isReply = e.event_type === "email_replied" || e.event_type === "reply_received";
+      items.push({
+        kind: "event",
+        label: (isReply ? "Reply received" : e.event_type) + (e.mailbox_email ? ` · ${e.mailbox_email}` : ""),
+        at: e.occurred_at,
+        tone: isReply ? "rose" : "emerald",
+        replied: isReply,
+      });
     }
     return items.sort((a, b) => (new Date(b.at || 0).getTime()) - (new Date(a.at || 0).getTime()));
   }, [detail]);
@@ -1376,12 +1466,28 @@ function LeadDetailDrawer({
                           <span
                             className={cn(
                               "h-2 w-2 flex-shrink-0 rounded-full",
-                              t.tone === "brand" ? "bg-brand-500" : t.tone === "emerald" ? "bg-emerald-500" : "bg-slate-300",
+                              t.tone === "brand"
+                                ? "bg-brand-500"
+                                : t.tone === "rose"
+                                  ? "bg-rose-500"
+                                  : t.tone === "emerald"
+                                    ? "bg-emerald-500"
+                                    : "bg-slate-300",
                             )}
                           />
-                          <span className="flex-1 text-sm text-slate-700">{t.label}</span>
+                          <span className={cn("flex-1 text-sm", t.replied ? "font-semibold text-rose-700" : "text-slate-700")}>{t.label}</span>
                           <span className="text-xs text-slate-400">{formatRelative(t.at)}</span>
                         </div>
+                        {t.replied && (
+                          <div className="mt-1 pl-5">
+                            <button
+                              onClick={() => window.dispatchEvent(new CustomEvent("sdr:open-inbox", { detail: { leadId } }))}
+                              className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                            >
+                              <Reply className="h-3.5 w-3.5" /> View reply in inbox
+                            </button>
+                          </div>
+                        )}
                         {/* Show the exact email that was sent (from, subject + body + signature). */}
                         {t.subject && (
                           <div className="mt-1.5 pl-5">
@@ -2950,7 +3056,17 @@ function MessageBody({ html, body }: { html?: string | null; body?: string }) {
   );
 }
 
-function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "success" | "error", msg: string) => void }) {
+function InboxView({
+  user,
+  pushToast,
+  pending,
+  onConsumed,
+}: {
+  user: SdrUser;
+  pushToast: (kind: "success" | "error", msg: string) => void;
+  pending?: { threadId?: string; mailbox?: string; leadId?: string } | null;
+  onConsumed?: () => void;
+}) {
   const [accounts, setAccounts] = useState<SdrInboxAccount[] | null>(null);
   const [view, setView] = useState<"outreach" | "mailbox">("outreach");
   const [mailbox, setMailbox] = useState<string | null>(null);
@@ -3024,6 +3140,32 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
       })
       .catch((e) => pushToast("error", e.message));
   };
+
+  // A jump-to-thread request from the bell or the lead drawer. The bell hands us a
+  // thread id + mailbox directly; the drawer only knows the lead, so we resolve it against
+  // the loaded overview (forcing the outreach view, which is where lead threads live).
+  useEffect(() => {
+    if (!pending || !accounts) return; // wait until the view is mounted + accounts loaded
+    if (pending.threadId && pending.mailbox) {
+      openThread(pending.threadId, pending.mailbox);
+      onConsumed?.();
+      return;
+    }
+    if (pending.leadId) {
+      if (view !== "outreach") { setView("outreach"); return; } // wait for the outreach list to load
+      const match = (threads || []).find((t) => t.lead?.lead_id === pending.leadId && t.openable !== false && t.id);
+      if (match) {
+        openThread(match.id, match.mailbox);
+        onConsumed?.();
+      } else if (threads) {
+        // Overview loaded but this lead has no openable thread (e.g. the reply was logged but
+        // the Gmail thread isn't in the recent window). Tell the user instead of hanging.
+        pushToast("error", "No inbox thread found for this lead yet");
+        onConsumed?.();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, threads, view, accounts]);
 
   const connect = (mb: string) => {
     sdrApi
