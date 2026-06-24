@@ -2027,6 +2027,9 @@ function QueueView({
                     {s.lead.trigger_type}
                   </span>
                 )}
+                {s.step != null && (
+                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">Step {s.step}</span>
+                )}
                 <span className="min-w-0 flex-1 truncate text-slate-800">
                   {s.lead?.lead_title || s.to_email || "(unknown)"}
                 </span>

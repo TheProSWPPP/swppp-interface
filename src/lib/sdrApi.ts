@@ -418,6 +418,8 @@ export const sdrApi = {
         to_email: string | null;
         from_email: string | null;
         due_at: string | null;
+        step: number | null;
+        sequence: string | null;
         lead: { lead_id: string; lead_title: string | null; trigger_type: SdrTriggerType | null } | null;
       }[];
     }>("/api/sdr/outbox"),

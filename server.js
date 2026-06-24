@@ -2134,7 +2134,17 @@ app.get("/api/sdr/outbox", async (req, res) => {
       .filter(Boolean);
     if (!seqIds.length) return res.json({ scheduled: [] });
     const data = await apolloClient.searchEmailerMessages({ campaignIds: seqIds, perPage: 100 });
-    const msgs = (data.emailer_messages || []).filter((m) => m.status === "scheduled");
+    const allMsgs = data.emailer_messages || [];
+    // A contact who replied anywhere in the sequence should stop receiving follow-ups —
+    // drop every pending step for any recipient Apollo has flagged as replied.
+    const repliedEmails = new Set(
+      allMsgs
+        .filter((m) => m.replied || m.reply_class)
+        .map((m) => String(m.to_email || "").toLowerCase()),
+    );
+    const msgs = allMsgs.filter(
+      (m) => m.status === "scheduled" && !repliedEmails.has(String(m.to_email || "").toLowerCase()),
+    );
     // Map recipient → our lead (for the title). Restrict to the requester's visible mailboxes
     // so a non-admin only sees their own queue.
     const vis = await visibleMailboxes(req.sdrUser).catch(() => null);
@@ -2157,6 +2167,8 @@ app.get("/api/sdr/outbox", async (req, res) => {
           to_email: m.to_email,
           from_email: m.from_email,
           due_at: m.due_at || null,
+          step: m.campaign_position || null, // which step of the sequence is next (1 / 2 / 3)
+          sequence: m.campaign_name || null,
           lead: lead ? { lead_id: lead.pipedrive_lead_id, lead_title: lead.lead_title, trigger_type: lead.trigger_type } : null,
         };
       })
