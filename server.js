@@ -2500,85 +2500,94 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
       }
     } else if (eventType === "email_replied" || eventType === "reply_received") {
       sideEffect = "reply";
-      if (sendRow) {
-        await pool.query(
-          `UPDATE sdr_sends SET status = 'replied', last_status_at = NOW(), updated_at = NOW()
-           WHERE id = $1`,
-          [sendRow.id],
-        );
-      }
-      // Clear Pipedrive Sequence_Started so the lead is no longer "in" a sequence
-      if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
-        try {
-          await pipedriveClient.updateLead(leadId, {
-            [pdSequenceStartedKey]: "",
-          });
-          await pipedriveClient.addNote({
-            leadId,
-            content: `[Auto] Apollo: REPLY received${contactEmail ? ` from ${contactEmail}` : ""}. Sequence_Started cleared.`,
-          });
-        } catch (e) {
-          console.error("Pipedrive sync on reply failed:", e.message);
+      // CRITICAL: only run the side effects the FIRST time we see this reply. The poll
+      // re-emits the same reply (stable apollo_event_id) every cycle; without this gate it
+      // was writing a Pipedrive note + clearing Sequence_Started + calling Apollo every 2
+      // minutes — spamming the lead. `newlyInserted` is false on every repeat.
+      if (newlyInserted) {
+        if (sendRow) {
+          await pool.query(
+            `UPDATE sdr_sends SET status = 'replied', last_status_at = NOW(), updated_at = NOW()
+             WHERE id = $1`,
+            [sendRow.id],
+          );
         }
-      }
-      // Remove from Apollo sequence to stop further follow-ups
-      // (Apollo usually auto-pauses on reply, but we belt-and-suspender)
-      const replySeqId = sendRow?.apollo_sequence_id || sequenceId;
-      if (sendRow?.apollo_contact_id && replySeqId && process.env.APOLLO_API_KEY) {
-        try {
-          await apolloClient.removeContactsFromSequence(replySeqId, [sendRow.apollo_contact_id], "remove");
-        } catch (e) {
-          console.error("Apollo remove-from-sequence on reply failed:", e.message);
+        // Clear Pipedrive Sequence_Started + drop ONE reply note with the interface link.
+        if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
+          try {
+            await pipedriveClient.updateLead(leadId, { [pdSequenceStartedKey]: "" });
+            const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
+            await pipedriveClient.addNote({
+              leadId,
+              content:
+                `[Auto] Apollo: REPLY received${contactEmail ? ` from ${contactEmail}` : ""} — hot lead, follow up.` +
+                `\nOpen in interface: ${appBase}/#/sdr?lead=${leadId}`,
+            });
+          } catch (e) {
+            console.error("Pipedrive sync on reply failed:", e.message);
+          }
+        }
+        // Remove from Apollo sequence to stop further follow-ups (belt-and-suspender; Apollo
+        // usually auto-pauses on reply).
+        const replySeqId = sendRow?.apollo_sequence_id || sequenceId;
+        if (sendRow?.apollo_contact_id && replySeqId && process.env.APOLLO_API_KEY) {
+          try {
+            await apolloClient.removeContactsFromSequence(replySeqId, [sendRow.apollo_contact_id], "remove");
+          } catch (e) {
+            console.error("Apollo remove-from-sequence on reply failed:", e.message);
+          }
         }
       }
     } else if (eventType === "email_bounced" || eventType === "bounce") {
       sideEffect = "bounce";
-      if (sendRow) {
-        await pool.query(
-          `UPDATE sdr_sends SET status = 'bounced', last_status_at = NOW(), updated_at = NOW()
-           WHERE id = $1`,
-          [sendRow.id],
-        );
-      }
-      if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
-        try {
-          await pipedriveClient.addNote({
-            leadId,
-            content: `[Auto] Apollo: bounce${contactEmail ? ` on ${contactEmail}` : ""}.`,
-          });
-        } catch (e) {
-          console.error("Pipedrive note on bounce failed:", e.message);
+      if (newlyInserted) {
+        if (sendRow) {
+          await pool.query(
+            `UPDATE sdr_sends SET status = 'bounced', last_status_at = NOW(), updated_at = NOW()
+             WHERE id = $1`,
+            [sendRow.id],
+          );
+        }
+        if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
+          try {
+            await pipedriveClient.addNote({
+              leadId,
+              content: `[Auto] Apollo: bounce${contactEmail ? ` on ${contactEmail}` : ""}.`,
+            });
+          } catch (e) {
+            console.error("Pipedrive note on bounce failed:", e.message);
+          }
         }
       }
     } else if (eventType === "lead_unsubscribed" || eventType === "unsubscribed" || eventType === "email_unsubscribed") {
       sideEffect = "unsubscribe";
-      if (sendRow) {
-        await pool.query(
-          `UPDATE sdr_sends SET status = 'unsubscribed', last_status_at = NOW(), updated_at = NOW()
-           WHERE id = $1`,
-          [sendRow.id],
-        );
-      }
-      if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
-        try {
-          await pipedriveClient.updateLead(leadId, {
-            [pdSequenceStartedKey]: "",
-          });
-          await pipedriveClient.addNote({
-            leadId,
-            content: `[Auto] Apollo: unsubscribed${contactEmail ? ` (${contactEmail})` : ""}. Sequence_Started cleared.`,
-          });
-        } catch (e) {
-          console.error("Pipedrive sync on unsubscribe failed:", e.message);
+      if (newlyInserted) {
+        if (sendRow) {
+          await pool.query(
+            `UPDATE sdr_sends SET status = 'unsubscribed', last_status_at = NOW(), updated_at = NOW()
+             WHERE id = $1`,
+            [sendRow.id],
+          );
         }
-      }
-      // Hard-stop any remaining Apollo follow-ups for an unsubscribed contact
-      const unsubSeqId = sendRow?.apollo_sequence_id || sequenceId;
-      if (sendRow?.apollo_contact_id && unsubSeqId && process.env.APOLLO_API_KEY) {
-        try {
-          await apolloClient.removeContactsFromSequence(unsubSeqId, [sendRow.apollo_contact_id], "remove");
-        } catch (e) {
-          console.error("Apollo remove-from-sequence on unsubscribe failed:", e.message);
+        if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
+          try {
+            await pipedriveClient.updateLead(leadId, { [pdSequenceStartedKey]: "" });
+            await pipedriveClient.addNote({
+              leadId,
+              content: `[Auto] Apollo: unsubscribed${contactEmail ? ` (${contactEmail})` : ""}. Sequence_Started cleared.`,
+            });
+          } catch (e) {
+            console.error("Pipedrive sync on unsubscribe failed:", e.message);
+          }
+        }
+        // Hard-stop any remaining Apollo follow-ups for an unsubscribed contact
+        const unsubSeqId = sendRow?.apollo_sequence_id || sequenceId;
+        if (sendRow?.apollo_contact_id && unsubSeqId && process.env.APOLLO_API_KEY) {
+          try {
+            await apolloClient.removeContactsFromSequence(unsubSeqId, [sendRow.apollo_contact_id], "remove");
+          } catch (e) {
+            console.error("Apollo remove-from-sequence on unsubscribe failed:", e.message);
+          }
         }
       }
     }
