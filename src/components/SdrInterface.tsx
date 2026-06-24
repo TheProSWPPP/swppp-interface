@@ -2050,7 +2050,8 @@ function QueueView({
           <Inbox className="h-8 w-8 text-slate-300 mx-auto mb-3" />
           <div className="text-sm font-semibold text-slate-700">No drafts to review</div>
           <p className="text-xs text-slate-500 mt-1">
-            New drafts will appear here as n8n detects qualifying Pipedrive leads.
+            Drafts appear here for approval when auto-outreach runs in queue mode, or when you queue one from a lead.
+            In send mode it enrolls leads directly, so there's nothing to review.
           </p>
         </div>
       )}
