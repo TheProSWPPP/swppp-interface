@@ -1506,9 +1506,15 @@ app.get("/api/sdr/leads", async (req, res) => {
     };
     if (req.query.status) {
       const st = String(req.query.status);
-      if (st === "fresh" || st === "clear") addFilter("s.outreach_status = $$", "clear");
-      else if (st === "contacted") where.push("s.outreach_status IN ('contacted_recent','contacted_stale')");
-      else addFilter("s.outreach_status = $$", st); // sequenced | exact value
+      // "In sequence" = OUR active Apollo enrollment (the `snd` LATERAL below), NOT Pipedrive's
+      // Sequence_Started. Pipedrive-only 'sequenced' counts as contacted. `snd` is in scope by
+      // the time WHERE evaluates (it's joined before whereSql is appended).
+      const inSeq = "snd.send_status IN ('enrolled','sent')";
+      const notInSeq = "(snd.send_status IS NULL OR snd.send_status NOT IN ('enrolled','sent'))";
+      if (st === "sequenced") where.push(inSeq);
+      else if (st === "fresh" || st === "clear") where.push(`${notInSeq} AND s.outreach_status = 'clear'`);
+      else if (st === "contacted") where.push(`${notInSeq} AND s.outreach_status IN ('contacted_recent','contacted_stale','sequenced')`);
+      else addFilter("s.outreach_status = $$", st);
     }
     if (req.query.trigger) {
       if (req.query.trigger === "none") where.push("s.trigger_type IS NULL");
@@ -1597,11 +1603,22 @@ app.get("/api/sdr/leads", async (req, res) => {
     const total = rows.length ? Number(rows[0]._total) : 0;
     for (const r of rows) delete r._total;
 
-    // Global facet counts (whole table) for the summary tiles.
+    // Global facet counts (whole table) for the summary tiles. "sequenced" is OUR active
+    // Apollo enrollment, not Pipedrive's Sequence_Started — a finished Pipedrive sequence
+    // counts as contacted, not in-sequence. Keys match what the leads view reads
+    // (clear / contacted_recent / contacted_stale / sequenced).
     const { rows: facetRows } = await pool.query(
-      `SELECT outreach_status, COUNT(*)::int n FROM sdr_lead_state GROUP BY 1`,
+      `SELECT CASE
+                WHEN EXISTS(SELECT 1 FROM sdr_sends x
+                             WHERE x.pipedrive_lead_id = s.pipedrive_lead_id
+                               AND x.status IN ('enrolled','sent')) THEN 'sequenced'
+                WHEN s.outreach_status = 'clear' THEN 'clear'
+                WHEN s.outreach_status = 'contacted_stale' THEN 'contacted_stale'
+                ELSE 'contacted_recent'
+              END AS k, COUNT(*)::int n
+         FROM sdr_lead_state s GROUP BY 1`,
     );
-    const byStatus = Object.fromEntries(facetRows.map((r) => [r.outreach_status, r.n]));
+    const byStatus = Object.fromEntries(facetRows.map((r) => [r.k, r.n]));
     const grandTotal = facetRows.reduce((a, r) => a + r.n, 0);
 
     res.json({
