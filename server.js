@@ -2110,6 +2110,58 @@ app.post("/api/sdr/inbox/threads/:id/compose", express.json({ limit: "4mb" }), a
   }
 });
 
+// Resolve a lead to its inbox thread by searching the lead's sending mailbox for the
+// contact's address. The lead drawer's "View reply" uses this so it works for ANY reply,
+// not only ones still in the recent-inbox window the overview scans.
+app.get("/api/sdr/leads/:leadId/thread", async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const { rows: leadRows } = await pool.query(
+      `SELECT lower(person_email) email FROM sdr_lead_state WHERE pipedrive_lead_id = $1`,
+      [leadId],
+    );
+    const contactEmail = leadRows[0]?.email;
+    if (!contactEmail) return res.json({ mailbox: null, threadId: null });
+
+    // Prefer the mailbox(es) we actually outreached from; fall back to any connected mailbox.
+    const { rows: sendMb } = await pool.query(
+      `SELECT m.email, MAX(s.sent_at) last FROM sdr_sends s JOIN sdr_mailboxes m ON m.id = s.mailbox_id
+        WHERE s.pipedrive_lead_id = $1 GROUP BY m.email ORDER BY last DESC NULLS LAST`,
+      [leadId],
+    );
+    let candidates = sendMb.map((r) => r.email);
+    if (!candidates.length) {
+      const vis = await visibleMailboxes(req.sdrUser);
+      candidates = vis.filter((v) => v.connected).map((v) => v.email);
+    }
+
+    for (const mb of candidates) {
+      let token;
+      try {
+        token = await accessTokenForMailbox(mb);
+      } catch {
+        continue;
+      }
+      let threads = [];
+      try {
+        threads = await gmailInbox.listThreads(token, {
+          q: `(from:${contactEmail} OR to:${contactEmail})`,
+          maxResults: 5,
+        });
+      } catch {
+        continue;
+      }
+      if (threads.length) {
+        const t = threads.sort((a, b) => (Date.parse(b.date || "") || 0) - (Date.parse(a.date || "") || 0))[0];
+        return res.json({ mailbox: mb, threadId: t.id });
+      }
+    }
+    res.json({ mailbox: null, threadId: null });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // Cross-mailbox OUTREACH overview: the signal-only view. Aggregates inbox threads
 // across every mailbox the user can see, keeps only conversations whose counterpart
 // is a lead in our book (i.e. tied to outreach), and tags each with its mailbox + lead.

@@ -392,19 +392,25 @@ function readLeadParam(): string | null {
 // jumps straight to the thread. Fed by the same needs-reply list as the Inbox tab badge.
 function NotificationBell({
   threads,
-  onOpen,
+  hotLeads,
+  onOpenThread,
+  onOpenLead,
 }: {
   threads: OverviewThread[];
-  onOpen: (t: { threadId: string; mailbox: string }) => void;
+  hotLeads: SdrEngagementSummary["leads"];
+  onOpenThread: (t: { threadId: string; mailbox: string }) => void;
+  onOpenLead: (l: SdrEngagementSummary["leads"][number]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const count = threads.length;
+  const count = threads.length + hotLeads.length;
+  const reason = (l: SdrEngagementSummary["leads"][number]) =>
+    l.replies > 0 ? "replied" : l.clicks > 0 ? "clicked a link" : `opened ${l.opens}×`;
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        title="Replies waiting on you"
-        aria-label={`Replies waiting on you${count ? `: ${count}` : ""}`}
+        title="Replies + priority leads"
+        aria-label={`Notifications${count ? `: ${count}` : ""}`}
         className="relative rounded-xl border border-white/30 bg-white/10 p-2 text-white hover:bg-white/20"
       >
         <Bell className="h-4 w-4" />
@@ -418,33 +424,69 @@ function NotificationBell({
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-800 shadow-xl">
-            <div className="border-b border-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Replies waiting on you{count ? ` · ${count}` : ""}
-            </div>
             {count === 0 ? (
               <div className="px-3 py-6 text-center text-sm text-slate-400">All caught up.</div>
             ) : (
-              <div className="max-h-80 divide-y divide-slate-100 overflow-y-auto">
-                {threads.map((t) => (
-                  <button
-                    key={`${t.mailbox}:${t.id}`}
-                    onClick={() => { setOpen(false); onOpen({ threadId: t.id, mailbox: t.mailbox }); }}
-                    className="block w-full px-3 py-2.5 text-left hover:bg-slate-50"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium text-slate-800">
-                        {t.lead?.lead_title || t.permit?.contact_name || nameFromHeader(t.from) || "(unknown)"}
-                      </span>
-                      <span className="shrink-0 text-xs text-slate-400">
-                        {t.date ? formatRelative(new Date(t.date).toISOString()) : ""}
-                      </span>
+              <div className="max-h-[28rem] overflow-y-auto">
+                {threads.length > 0 && (
+                  <>
+                    <div className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Replies waiting · {threads.length}
                     </div>
-                    <div className="truncate text-xs text-slate-500">{t.subject || "(no subject)"}</div>
-                    <div className="truncate text-xs text-slate-400">
-                      {nameFromHeader(t.from)} · {t.mailbox.split("@")[0]}
+                    <div className="divide-y divide-slate-100">
+                      {threads.map((t) => (
+                        <button
+                          key={`${t.mailbox}:${t.id}`}
+                          onClick={() => { setOpen(false); onOpenThread({ threadId: t.id, mailbox: t.mailbox }); }}
+                          className="block w-full px-3 py-2.5 text-left hover:bg-slate-50"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-sm font-medium text-slate-800">
+                              {t.lead?.lead_title || t.permit?.contact_name || nameFromHeader(t.from) || "(unknown)"}
+                            </span>
+                            <span className="shrink-0 text-xs text-slate-400">
+                              {t.date ? formatRelative(new Date(t.date).toISOString()) : ""}
+                            </span>
+                          </div>
+                          <div className="truncate text-xs text-slate-500">{t.subject || "(no subject)"}</div>
+                          <div className="truncate text-xs text-slate-400">
+                            {nameFromHeader(t.from)} · {t.mailbox.split("@")[0]}
+                          </div>
+                        </button>
+                      ))}
                     </div>
-                  </button>
-                ))}
+                  </>
+                )}
+                {hotLeads.length > 0 && (
+                  <>
+                    <div className="border-y border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Priority leads · {hotLeads.length}
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {hotLeads.map((l) => (
+                        <button
+                          key={l.draft_id}
+                          onClick={() => { setOpen(false); onOpenLead(l); }}
+                          className="block w-full px-3 py-2.5 text-left hover:bg-slate-50"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-sm font-medium text-slate-800">
+                              {l.lead_title || `Lead ${l.pipedrive_lead_id}`}
+                            </span>
+                            <span className="shrink-0 text-xs text-slate-400">
+                              {l.last_event_at ? formatRelative(l.last_event_at) : ""}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <Flame className="h-3.5 w-3.5 text-cta-600" />
+                            <span className="text-cta-700">{reason(l)}</span>
+                            <span className="text-slate-400">· {l.contact_email_snapshot}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -504,15 +546,18 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   // Hot-lead count for the Priority tab badge — surfaces leads someone has been
   // engaging with (clicked, replied, or opened 3+ times) without opening the tab.
   const [hotCount, setHotCount] = useState(0);
+  const [hotLeads, setHotLeads] = useState<SdrEngagementSummary["leads"]>([]);
   const hotLeadsRef = useRef<SdrEngagementSummary["leads"]>([]);
   useEffect(() => {
     let stop = false;
-    // Badge = hot leads not yet dismissed AND not yet seen (clicked into). Recompute
+    // Badge + bell = hot leads not yet dismissed AND not yet seen (clicked into). Recompute
     // from the cached leads whenever a priority is clicked, so the count drops live.
     const recompute = () => {
       const dismissed = loadDismissed();
       const seen = loadSeen();
-      setHotCount(hotLeadsRef.current.filter((l) => isHot(l) && !dismissed.has(l.draft_id) && !seen.has(l.draft_id)).length);
+      const visible = hotLeadsRef.current.filter((l) => isHot(l) && !dismissed.has(l.draft_id) && !seen.has(l.draft_id));
+      setHotCount(visible.length);
+      setHotLeads(visible);
     };
     const load = () =>
       sdrApi
@@ -537,6 +582,11 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   const goInbox = useCallback((target: { threadId?: string; mailbox?: string; leadId?: string }) => {
     setPendingInbox(target);
     setTab("inbox");
+  }, []);
+  // Open a hot lead's drawer from the bell and mark it seen, so it drops off the bell.
+  const openHotLead = useCallback((l: SdrEngagementSummary["leads"][number]) => {
+    markPrioritySeen(l.draft_id);
+    setDeepLeadId(l.pipedrive_lead_id);
   }, []);
   useEffect(() => {
     let stop = false;
@@ -582,7 +632,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           <h2 className="text-2xl font-bold text-white">Outreach console</h2>
         </div>
         <div className="flex items-center gap-3">
-          <NotificationBell threads={needsReplyThreads} onOpen={goInbox} />
+          <NotificationBell threads={needsReplyThreads} hotLeads={hotLeads} onOpenThread={goInbox} onOpenLead={openHotLead} />
           <div className="text-right">
             <div className="text-sm font-semibold text-white">{user.display_name}</div>
             <div className="text-xs text-brand-100 flex items-center justify-end gap-1">
@@ -1320,6 +1370,21 @@ function LeadDetailDrawer({
 
   const lead = detail?.lead;
 
+  // Jump to the lead's inbox thread. Resolve it server-side (search the sending mailbox by
+  // the contact's address) so it works for any reply; fall back to the overview match.
+  const viewReply = async () => {
+    try {
+      const r = await sdrApi.findLeadThread(leadId);
+      if (r.threadId && r.mailbox) {
+        window.dispatchEvent(new CustomEvent("sdr:open-inbox", { detail: { threadId: r.threadId, mailbox: r.mailbox } }));
+        return;
+      }
+    } catch {
+      /* fall through to the overview-based resolution */
+    }
+    window.dispatchEvent(new CustomEvent("sdr:open-inbox", { detail: { leadId } }));
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={onClose}>
       <div
@@ -1481,7 +1546,7 @@ function LeadDetailDrawer({
                         {t.replied && (
                           <div className="mt-1 pl-5">
                             <button
-                              onClick={() => window.dispatchEvent(new CustomEvent("sdr:open-inbox", { detail: { leadId } }))}
+                              onClick={viewReply}
                               className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
                             >
                               <Reply className="h-3.5 w-3.5" /> View reply in inbox

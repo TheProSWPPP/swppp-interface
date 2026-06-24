@@ -380,6 +380,9 @@ export const sdrApi = {
     sdrFetch<{ mailbox: string; id: string; messages: SdrInboxMessage[] }>(
       `/api/sdr/inbox/threads/${id}${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ""}`,
     ),
+  // Resolve a lead to its inbox thread (searches the sending mailbox by contact address).
+  findLeadThread: (leadId: string) =>
+    sdrFetch<{ mailbox: string | null; threadId: string | null }>(`/api/sdr/leads/${leadId}/thread`),
   replyInboxThread: (
     id: string,
     payload: { mailbox?: string; to: string; subject?: string; body: string; inReplyTo?: string | null; references?: string | null },
