@@ -130,6 +130,8 @@ export interface SdrLeadDetail {
     created_at: string;
     sent_at: string | null;
     assigned_to: string | null;
+    sent_from: string | null;
+    sender_signature: string | null;
   }[];
   sends: { id: string; apollo_sequence_id: string | null; status: string; sent_at: string | null }[];
   events: { event_type: string; occurred_at: string; mailbox_email: string | null }[];

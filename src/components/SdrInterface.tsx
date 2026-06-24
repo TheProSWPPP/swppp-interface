@@ -1167,7 +1167,7 @@ function LeadDetailDrawer({
   // Merge sends + engagement events into one timeline, newest first.
   const timeline = useMemo(() => {
     if (!detail) return [];
-    const items: { kind: string; label: string; at: string | null; tone: string; subject?: string | null; body?: string | null }[] = [];
+    const items: { kind: string; label: string; at: string | null; tone: string; subject?: string | null; body?: string | null; from?: string | null; signature?: string | null }[] = [];
     for (const d of detail.drafts) {
       const sent = d.status === "sent";
       items.push({
@@ -1177,6 +1177,8 @@ function LeadDetailDrawer({
         tone: sent ? "brand" : "slate",
         subject: d.subject,
         body: sent ? d.body : null, // show the exact email that went out
+        from: d.sent_from, // which mailbox it was sent from
+        signature: sent ? d.sender_signature : null, // append the real signature in the preview
       });
     }
     for (const s of detail.sends) {
@@ -1340,9 +1342,10 @@ function LeadDetailDrawer({
                           <span className="flex-1 text-sm text-slate-700">{t.label}</span>
                           <span className="text-xs text-slate-400">{formatRelative(t.at)}</span>
                         </div>
-                        {/* Show the exact email that was sent (subject + body), so it's clear what went out. */}
+                        {/* Show the exact email that was sent (from, subject + body + signature). */}
                         {t.subject && (
                           <div className="mt-1.5 pl-5">
+                            {t.from && <div className="text-xs text-slate-500">From: {t.from}</div>}
                             <div className="text-xs font-medium text-slate-600">Subject: {t.subject}</div>
                             {t.body && (
                               <details className="mt-1">
@@ -1350,9 +1353,8 @@ function LeadDetailDrawer({
                                 <div
                                   className="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-800"
                                   style={{ fontFamily: 'Georgia, "Times New Roman", serif', color: "#1a5276" }}
-                                  dangerouslySetInnerHTML={{ __html: firstTouchPreview(t.body) }}
+                                  dangerouslySetInnerHTML={{ __html: firstTouchPreview(t.body, t.signature || undefined) }}
                                 />
-                                <div className="mt-1 text-[10px] text-slate-400">+ sender signature appended by Apollo on send</div>
                               </details>
                             )}
                           </div>
@@ -2896,8 +2898,8 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
           No mailbox connected yet. Connect {user.role === "admin" ? "a mailbox" : "your mailbox"} above to read and reply here.
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,380px)_1fr]">
-          <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+          <div className="min-w-0 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
             {loading ? (
               <div className="p-6 text-sm text-slate-400">Loading…</div>
             ) : !threads?.length ? (
@@ -2959,7 +2961,7 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
             )}
           </div>
 
-          <div className="rounded-xl border border-slate-200 p-4">
+          <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 p-4">
             {!openId ? (
               <div className="text-sm text-slate-400">Select a conversation to read and reply.</div>
             ) : !thread ? (
@@ -2980,7 +2982,7 @@ function InboxView({ user, pushToast }: { user: SdrUser; pushToast: (kind: "succ
                         <span className="truncate font-medium text-slate-700">{mine ? "You" : nameFromHeader(m.from)}</span>
                         <span className="shrink-0 text-slate-400">{m.date ? new Date(m.date).toLocaleString() : ""}</span>
                       </div>
-                      <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{m.body?.trim() || "(no text)"}</div>
+                      <div className="overflow-hidden whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">{m.body?.trim() || "(no text)"}</div>
                     </div>
                   );
                 })}

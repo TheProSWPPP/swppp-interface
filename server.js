@@ -1690,8 +1690,11 @@ app.get("/api/sdr/leads/:leadId/detail", async (req, res) => {
     const [{ rows: drafts }, { rows: sends }, { rows: events }] = await Promise.all([
       pool.query(
         `SELECT d.id, d.trigger_type, d.status, d.subject, d.body, d.created_at, d.sent_at, d.assigned_user_id,
-                COALESCE(u.display_name, u.username) AS assigned_to
-         FROM sdr_drafts d LEFT JOIN sdr_users u ON u.id = d.assigned_user_id
+                COALESCE(u.display_name, u.username) AS assigned_to,
+                mb.email AS sent_from, mb.signature_html AS sender_signature
+         FROM sdr_drafts d
+         LEFT JOIN sdr_users u ON u.id = d.assigned_user_id
+         LEFT JOIN sdr_mailboxes mb ON mb.id = d.assigned_mailbox_id
          WHERE d.pipedrive_lead_id = $1 ORDER BY d.created_at DESC`,
         [leadId],
       ),
