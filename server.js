@@ -1199,7 +1199,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
   const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
   const runInboxWatch = () =>
     pollInboxReplies(pool, { getToken: accessTokenForMailbox, appBase })
-      .then((r) => { if (r && r.created) console.log("[inbox-reply-watch]", JSON.stringify(r)); })
+      .then((r) => { if (r && (r.created || r.forwarded)) console.log("[inbox-reply-watch]", JSON.stringify(r)); })
       .catch((e) => console.error("[inbox-reply-watch] failed:", e.message));
   setTimeout(runInboxWatch, 90_000);
   setInterval(runInboxWatch, 5 * 60 * 1000);
@@ -2676,36 +2676,46 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
           try {
             await pipedriveClient.updateLead(leadId, { [pdSequenceStartedKey]: "" });
             const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
-            await pipedriveClient.addNote({
-              leadId,
-              content:
-                `[Auto] Apollo: REPLY received${contactEmail ? ` from ${contactEmail}` : ""} — hot lead, follow up.` +
-                `\nOpen in interface: ${appBase}/#/sdr?lead=${leadId}`,
-            });
-            // Also create a follow-up Activity assigned to the rep who sent the outreach
-            // (dc/jg/mh/th → their Pipedrive user; falls back to Derek if unmapped) so the
-            // reply lands on someone's task list, not just a passive note. Still gated on
-            // newlyInserted above, so exactly one activity per reply.
-            let pdSenderId = null;
-            let replyMailbox = mailboxEmail;
-            if (sendRow?.mailbox_id) {
-              const { rows: mbRows } = await pool.query(
-                `SELECT pipedrive_sender_id, email FROM sdr_mailboxes WHERE id = $1`,
-                [sendRow.mailbox_id],
-              );
-              pdSenderId = mbRows[0]?.pipedrive_sender_id || null;
-              replyMailbox = mbRows[0]?.email || mailboxEmail;
+            // Skip the note + activity if another reply event already flagged this lead in
+            // the last 48h (e.g. the inbox reply-watch beat us to it). Shared 48h guard
+            // across both paths = exactly one follow-up task per reply.
+            const { rows: dupe } = await pool.query(
+              `SELECT 1 FROM sdr_engagement_events
+                WHERE pipedrive_lead_id = $1 AND event_type IN ('email_replied','reply_received')
+                  AND apollo_event_id IS DISTINCT FROM $2
+                  AND occurred_at > NOW() - INTERVAL '48 hours' LIMIT 1`,
+              [leadId, apolloEventId],
+            );
+            if (!dupe.length) {
+              await pipedriveClient.addNote({
+                leadId,
+                content:
+                  `[Auto] Apollo: REPLY received${contactEmail ? ` from ${contactEmail}` : ""} — hot lead, follow up.` +
+                  `\nOpen in interface: ${appBase}/#/sdr?lead=${leadId}`,
+              });
+              // Also create a follow-up Activity assigned to the rep who sent the outreach
+              // (dc/jg/mh/th → their Pipedrive user; falls back to Derek if unmapped).
+              let pdSenderId = null;
+              let replyMailbox = mailboxEmail;
+              if (sendRow?.mailbox_id) {
+                const { rows: mbRows } = await pool.query(
+                  `SELECT pipedrive_sender_id, email FROM sdr_mailboxes WHERE id = $1`,
+                  [sendRow.mailbox_id],
+                );
+                pdSenderId = mbRows[0]?.pipedrive_sender_id || null;
+                replyMailbox = mbRows[0]?.email || mailboxEmail;
+              }
+              await pipedriveClient.addActivity({
+                leadId,
+                subject: `Reply received${contactEmail ? ` from ${contactEmail}` : ""} — follow up`,
+                type: "task",
+                done: false,
+                userId: pdSenderId || 19499202, // Derek Chinners fallback
+                note:
+                  `Replied to ${replyMailbox || "outreach"} outreach — follow up.` +
+                  `\nOpen in interface: ${appBase}/#/sdr?lead=${leadId}`,
+              });
             }
-            await pipedriveClient.addActivity({
-              leadId,
-              subject: `Reply received${contactEmail ? ` from ${contactEmail}` : ""} — follow up`,
-              type: "task",
-              done: false,
-              userId: pdSenderId || 19499202, // Derek Chinners fallback
-              note:
-                `Replied to ${replyMailbox || "outreach"} outreach — follow up.` +
-                `\nOpen in interface: ${appBase}/#/sdr?lead=${leadId}`,
-            });
           } catch (e) {
             console.error("Pipedrive sync on reply failed:", e.message);
           }
