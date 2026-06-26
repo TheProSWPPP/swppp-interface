@@ -1141,7 +1141,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
           console.error("[outreach-sweep] failed:", e.message);
         }
         // Auto-switch: now that lead state is fresh, stop+switch any sequence whose lead changed
-        // bid stage / contact / company mid-flight. OFF unless SDR_AUTO_SWITCH=on.
+        // bid stage / contact / company mid-flight. ON by default; kill with SDR_AUTO_SWITCH=off.
         try {
           if (autoSwitchEnabled()) {
             const swres = await runAutoSwitch(pool, { enrollDrafts: (drafts) => enrollAutoDrafts(drafts, { override: true }) });
