@@ -16,6 +16,7 @@ import jwt from "jsonwebtoken";
 import * as apolloClient from "./lib/apolloClient.js";
 import * as pipedriveClient from "./lib/pipedriveClient.js";
 import * as emailVerify from "./lib/emailVerify.js";
+import { runAutoSwitch, autoSwitchEnabled } from "./lib/sdrAutoSwitch.js";
 import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
@@ -761,6 +762,20 @@ async function initDB() {
     await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS total_steps INT`);
     await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS next_send_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS step_status TEXT`);
+    // Auto-switch snapshot (added 2026-06-26): what the lead looked like WHEN enrolled, so a
+    // later sync can detect a mid-sequence change (bid stage → trigger, contact, or company)
+    // and stop+switch the sequence. Plus the 'switched' terminal status for a stopped send.
+    await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS enrolled_trigger TEXT`);
+    await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS enrolled_person_id TEXT`);
+    await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS enrolled_org_id TEXT`);
+    await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS enrolled_stage TEXT`);
+    await pool.query(`ALTER TABLE sdr_sends ADD COLUMN IF NOT EXISTS switched_at TIMESTAMPTZ`);
+    // Widen the status CHECK to allow 'switched' (idempotent: drop + re-add the named constraint).
+    await pool.query(`ALTER TABLE sdr_sends DROP CONSTRAINT IF EXISTS sdr_sends_status_check`);
+    await pool.query(
+      `ALTER TABLE sdr_sends ADD CONSTRAINT sdr_sends_status_check
+         CHECK (status IN ('enrolled','sent','bounced','replied','unsubscribed','failed','switched'))`,
+    );
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_lead ON sdr_sends(pipedrive_lead_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_sequence ON sdr_sends(apollo_sequence_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_sends_status ON sdr_sends(status)`);
@@ -877,6 +892,8 @@ async function initDB() {
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS owner_name TEXT`);
     // Pipedrive "Lead Score" (numeric, higher = better) — drives priority/ranked auto-enroll.
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS lead_score DOUBLE PRECISION`);
+    // Pipedrive organization id — lets the auto-switch engine detect a company change mid-sequence.
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS pipedrive_org_id TEXT`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_status ON sdr_lead_state(outreach_status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_person ON sdr_lead_state(pipedrive_person_id)`);
     // Who initiated a draft: a human ('manual') or the auto-outreach engine ('automatic').
@@ -1123,6 +1140,16 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
         } catch (e) {
           console.error("[outreach-sweep] failed:", e.message);
         }
+        // Auto-switch: now that lead state is fresh, stop+switch any sequence whose lead changed
+        // bid stage / contact / company mid-flight. OFF unless SDR_AUTO_SWITCH=on.
+        try {
+          if (autoSwitchEnabled()) {
+            const swres = await runAutoSwitch(pool, { enrollDrafts: (drafts) => enrollAutoDrafts(drafts, { override: true }) });
+            console.log("[auto-switch]", JSON.stringify(swres));
+          }
+        } catch (e) {
+          console.error("[auto-switch] failed:", e.message);
+        }
       })
       .catch((e) => console.error("[sync] sdr_lead_state failed:", e.message));
   setTimeout(runSync, 30_000);
@@ -1133,7 +1160,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
 // approve-and-send path a human uses (internal HTTP + a short-lived minted token). Reuses
 // its dedup + warmup cap + Apollo enroll + Pipedrive write-back untouched; a 409/429 just
 // means a guardrail correctly skipped that lead. Shared by the cron and the manual trigger.
-async function enrollAutoDrafts(createdDrafts) {
+async function enrollAutoDrafts(createdDrafts, { override = false } = {}) {
   const out = { enrolled: 0, skipped: 0 };
   for (const d of createdDrafts || []) {
     try {
@@ -1141,7 +1168,9 @@ async function enrollAutoDrafts(createdDrafts) {
       const resp = await fetch(`http://127.0.0.1:${port}/api/sdr/drafts/${d.id}/approve-and-send`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: "{}",
+        // override bypasses the recent-contact dedup guard — used by the auto-switch engine,
+        // where re-contacting a just-emailed lead in a NEW sequence is the intended behavior.
+        body: override ? JSON.stringify({ override: true }) : "{}",
       });
       if (resp.ok) {
         out.enrolled++;
@@ -3474,6 +3503,19 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       }
     }
 
+    // Snapshot the lead's current stage so the auto-switch engine can later detect a
+    // mid-sequence bid-stage change (trigger/contact/company are taken from the draft).
+    let enrolledStage = null;
+    try {
+      const { rows: stRows } = await pool.query(
+        `SELECT project_stage FROM sdr_lead_state WHERE pipedrive_lead_id = $1`,
+        [draft.pipedrive_lead_id],
+      );
+      enrolledStage = stRows[0]?.project_stage || null;
+    } catch {
+      /* non-fatal — snapshot is best-effort */
+    }
+
     // Per-lead lock + tx: match Apollo contact, enroll, record send, mark draft sent.
     // `enrolled` tracks whether the Apollo call succeeded — if it did and a later
     // DB write fails, we must NOT mark the draft 'failed' (re-approving would
@@ -3539,13 +3581,16 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           [draft.id, req.sdrUser.sub],
         );
 
-        // Record sdr_sends row
+        // Record sdr_sends row (+ auto-switch snapshot: what the lead looked like at enroll)
         const { rows: sendRows } = await client.query(
           `INSERT INTO sdr_sends (draft_id, pipedrive_lead_id, apollo_sequence_id,
-                                   apollo_contact_id, mailbox_id, status)
-           VALUES ($1, $2, $3, $4, $5, 'enrolled')
+                                   apollo_contact_id, mailbox_id, status,
+                                   enrolled_trigger, enrolled_person_id, enrolled_org_id, enrolled_stage)
+           VALUES ($1, $2, $3, $4, $5, 'enrolled', $6, $7, $8, $9)
            RETURNING *`,
-          [draft.id, draft.pipedrive_lead_id, draft.apollo_sequence_id, apolloContactId, mailbox.id],
+          [draft.id, draft.pipedrive_lead_id, draft.apollo_sequence_id, apolloContactId, mailbox.id,
+           draft.trigger_type, draft.pipedrive_contact_id != null ? String(draft.pipedrive_contact_id) : null,
+           draft.pipedrive_org_id != null ? String(draft.pipedrive_org_id) : null, enrolledStage],
         );
 
         // Start the warmup ramp clock on this mailbox's first-ever send.
@@ -3572,9 +3617,12 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       ).catch(() => ({ rows: [] }));
       const { rows: sendRows } = await pool.query(
         `INSERT INTO sdr_sends (draft_id, pipedrive_lead_id, apollo_sequence_id,
-                                 apollo_contact_id, mailbox_id, status)
-         VALUES ($1, $2, $3, $4, $5, 'enrolled') RETURNING *`,
-        [draft.id, draft.pipedrive_lead_id, draft.apollo_sequence_id, apolloContactId, mailbox.id],
+                                 apollo_contact_id, mailbox_id, status,
+                                 enrolled_trigger, enrolled_person_id, enrolled_org_id, enrolled_stage)
+         VALUES ($1, $2, $3, $4, $5, 'enrolled', $6, $7, $8, $9) RETURNING *`,
+        [draft.id, draft.pipedrive_lead_id, draft.apollo_sequence_id, apolloContactId, mailbox.id,
+         draft.trigger_type, draft.pipedrive_contact_id != null ? String(draft.pipedrive_contact_id) : null,
+         draft.pipedrive_org_id != null ? String(draft.pipedrive_org_id) : null, enrolledStage],
       ).catch(() => ({ rows: [] }));
       result = { draft: updRows[0] || { ...draft, status: "sent" }, send: sendRows[0] || null, apollo_response: enrollResponse, warning: warn };
     }
