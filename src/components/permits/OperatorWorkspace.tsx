@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Search, Phone, Mail, Home, Download } from "lucide-react";
+import { Search, Phone, Mail, Home, Download, UserCheck } from "lucide-react";
 import {
   getOperatorsList,
   logOutreach,
@@ -10,6 +10,7 @@ import OperatorDrawer from "./OperatorDrawer";
 
 type Stage = "todo" | "contacted" | "all";
 type Channel = "all" | "phone" | "email" | "mail";
+type Ehs = "all" | "enriched" | "missing";
 type Compliance = "all" | "violation" | "snc";
 
 const PAGE_SIZE = 50;
@@ -46,6 +47,7 @@ export default function OperatorWorkspace({
 
   const [stage, setStage] = useState<Stage>("todo");
   const [channel, setChannel] = useState<Channel>("all");
+  const [ehs, setEhs] = useState<Ehs>("all");
   const [compliance, setCompliance] = useState<Compliance>("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<string>("pain");
@@ -68,6 +70,7 @@ export default function OperatorWorkspace({
       getOperatorsList({
         stage: stage !== "all" ? stage : undefined,
         channel: channel !== "all" ? channel : undefined,
+        ehs: ehs !== "all" ? ehs : undefined,
         compliance: compliance !== "all" ? compliance : undefined,
         search: searchRef.current || undefined,
         sort: sort !== "pain" ? sort : undefined,
@@ -78,7 +81,7 @@ export default function OperatorWorkspace({
         .catch((e) => pushToast?.(`Load failed: ${(e as Error).message}`, "error"))
         .finally(() => setLoading(false));
     },
-    [stage, channel, compliance, sort, page, pushToast],
+    [stage, channel, ehs, compliance, sort, page, pushToast],
   );
 
   useEffect(() => { load(page); }, [load]);
@@ -108,7 +111,7 @@ export default function OperatorWorkspace({
     } finally { setBulkBusy(false); }
   }
 
-  const counts = data?.counts ?? { all: 0, todo: 0, contacted: 0, with_phone: 0, with_email: 0, with_address: 0 };
+  const counts = data?.counts ?? { all: 0, todo: 0, contacted: 0, with_phone: 0, with_email: 0, with_address: 0, with_ehs: 0 };
   const total = data?.total ?? 0;
   const operators = data?.operators ?? [];
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -187,6 +190,14 @@ export default function OperatorWorkspace({
           <option value="snc">Significant noncompliance</option>
         </select>
 
+        {/* EHS enrichment — find the EHS named contact, or isolate the un-enriched pool for a future top-up */}
+        <select value={ehs} onChange={(e) => { setEhs(e.target.value as Ehs); setPage(1); }}
+          className="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white" title="EHS named-contact enrichment status">
+          <option value="all">EHS: all</option>
+          <option value="enriched">Has EHS contact ({counts.with_ehs.toLocaleString()})</option>
+          <option value="missing">Missing EHS contact</option>
+        </select>
+
         <select value={sort} onChange={(e) => setSort(e.target.value)}
           className="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white" title="Sort companies">
           <option value="pain">Sort: violation severity</option>
@@ -246,6 +257,11 @@ export default function OperatorWorkspace({
                 <td className="p-2 font-medium text-slate-800">
                   {row.operator_name || "—"}
                   {row.possible_customer && <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-xs font-semibold text-amber-700" title="Possible existing customer">★</span>}
+                  {row.has_ehs && (
+                    <span className="ml-1.5 inline-flex items-center gap-0.5 rounded-full bg-blue-50 px-1.5 py-0.5 text-xs font-semibold text-blue-700" title="Has a named EHS/Environmental contact (Apollo)">
+                      <UserCheck className="h-3 w-3" /> EHS
+                    </span>
+                  )}
                 </td>
                 <td className="p-2 text-right text-slate-600">{row.permit_count}</td>
                 <td className="p-2"><ComplianceBadge tier={row.compliance_tier} /></td>

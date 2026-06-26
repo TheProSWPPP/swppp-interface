@@ -59,6 +59,7 @@ export interface OperatorRow {
   has_phone: boolean;
   has_email: boolean;
   has_address: boolean;
+  has_ehs: boolean;
   compliance_tier: "snc" | "violation" | "inspected" | "clean";
   possible_customer: boolean;
   possible_crm: boolean;
@@ -71,7 +72,7 @@ export interface OperatorsListResponse {
   total: number;
   page: number;
   pageSize: number;
-  counts: { all: number; todo: number; contacted: number; with_phone: number; with_email: number; with_address: number };
+  counts: { all: number; todo: number; contacted: number; with_phone: number; with_email: number; with_address: number; with_ehs: number };
   compliance_last_refreshed?: string | null;
 }
 
@@ -270,6 +271,7 @@ export function sendPermitDraftNow(
 export function getOperatorsList(params: {
   stage?: string;
   channel?: string;
+  ehs?: string;
   compliance?: string;
   search?: string;
   sort?: string;
