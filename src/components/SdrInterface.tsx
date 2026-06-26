@@ -13,6 +13,7 @@ import {
   Clock,
   Flame,
   Inbox,
+  Calendar,
   LayoutGrid,
   ListChecks,
   LogOut,
@@ -1337,7 +1338,7 @@ function LeadDetailDrawer({
   // Merge sends + engagement events into one timeline, newest first.
   const timeline = useMemo(() => {
     if (!detail) return [];
-    const items: { kind: string; label: string; at: string | null; tone: string; subject?: string | null; body?: string | null; from?: string | null; signature?: string | null; replied?: boolean }[] = [];
+    const items: { kind: string; label: string; at: string | null; tone: string; subject?: string | null; body?: string | null; from?: string | null; signature?: string | null; replied?: boolean; actType?: string; sub?: string | null }[] = [];
     for (const d of detail.drafts) {
       const sent = d.status === "sent";
       items.push({
@@ -1363,6 +1364,19 @@ function LeadDetailDrawer({
         at: e.occurred_at,
         tone: isReply ? "rose" : "emerald",
         replied: isReply,
+      });
+    }
+    // Pipedrive activities (calls / meetings / tasks) — the human-touch side of the outreach
+    // history, interleaved with the automated email events. LinkedIn DM touches will land here too.
+    for (const a of detail.pd_activities || []) {
+      const bits = [a.who, a.duration ? `${a.duration}` : null, a.outcome, a.done ? null : "open"].filter(Boolean);
+      items.push({
+        kind: "pd_activity",
+        label: a.subject || a.typeName,
+        at: a.at,
+        tone: "indigo",
+        actType: a.type,
+        sub: [bits.join(" · "), a.note].filter(Boolean).join(" — ") || null,
       });
     }
     return items.sort((a, b) => (new Date(b.at || 0).getTime()) - (new Date(a.at || 0).getTime()));
@@ -1528,21 +1542,40 @@ function LeadDetailDrawer({
                     {timeline.map((t, i) => (
                       <li key={i} className="rounded-xl border border-slate-100 px-3 py-2">
                         <div className="flex items-center gap-3">
-                          <span
-                            className={cn(
-                              "h-2 w-2 flex-shrink-0 rounded-full",
-                              t.tone === "brand"
-                                ? "bg-brand-500"
-                                : t.tone === "rose"
-                                  ? "bg-rose-500"
-                                  : t.tone === "emerald"
-                                    ? "bg-emerald-500"
-                                    : "bg-slate-300",
-                            )}
-                          />
+                          {t.actType ? (
+                            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-indigo-500">
+                              {(() => {
+                                const Icon =
+                                  t.actType === "call" || t.actType === "contact_attempt"
+                                    ? Phone
+                                    : t.actType === "meeting" || t.actType === "lunch"
+                                      ? Calendar
+                                      : t.actType === "email"
+                                        ? Mail
+                                        : t.actType === "task" || t.actType === "deadline"
+                                          ? ListChecks
+                                          : Clock;
+                                return <Icon className="h-4 w-4" />;
+                              })()}
+                            </span>
+                          ) : (
+                            <span
+                              className={cn(
+                                "h-2 w-2 flex-shrink-0 rounded-full",
+                                t.tone === "brand"
+                                  ? "bg-brand-500"
+                                  : t.tone === "rose"
+                                    ? "bg-rose-500"
+                                    : t.tone === "emerald"
+                                      ? "bg-emerald-500"
+                                      : "bg-slate-300",
+                              )}
+                            />
+                          )}
                           <span className={cn("flex-1 text-sm", t.replied ? "font-semibold text-rose-700" : "text-slate-700")}>{t.label}</span>
                           <span className="text-xs text-slate-400">{formatRelative(t.at)}</span>
                         </div>
+                        {t.sub && <div className="mt-0.5 pl-8 text-xs text-slate-500">{t.sub}</div>}
                         {t.replied && (
                           <div className="mt-1 pl-5">
                             <button

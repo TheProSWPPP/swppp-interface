@@ -137,6 +137,21 @@ export interface SdrLeadDetail {
   events: { event_type: string; occurred_at: string; mailbox_email: string | null }[];
   pd_lead: Record<string, unknown> | null;
   pd_person: Record<string, unknown> | null;
+  pd_activities?: SdrPdActivity[];
+}
+
+// A Pipedrive activity (call/meeting/task/email) normalized server-side for the timeline.
+export interface SdrPdActivity {
+  id: number;
+  type: string; // call | meeting | task | email | contact_attempt | deadline | lunch | ...
+  typeName: string;
+  subject: string;
+  done: boolean;
+  at: string | null;
+  duration: string | null;
+  who: string | null;
+  note: string | null;
+  outcome: string | null;
 }
 
 export interface SdrLeadsResponse {

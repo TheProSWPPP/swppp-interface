@@ -1705,6 +1705,24 @@ app.post("/api/sdr/leads/:leadId/note", async (req, res) => {
 // Full per-lead detail for the drawer: mirror row + live Pipedrive lead/person
 // + our drafts/sends + engagement events. Aggregated server-side so the drawer
 // is one round-trip.
+// Map a raw Pipedrive activity → a compact, typed shape for the interface timeline.
+// `at` is the best single timestamp: when it was completed, else when it's due, else created.
+function normalizeActivity(a) {
+  const at = a.marked_as_done_time || (a.due_date ? `${a.due_date}${a.due_time ? " " + a.due_time : ""}` : null) || a.add_time || null;
+  return {
+    id: a.id,
+    type: a.type || "task", // call | meeting | task | email | contact_attempt | deadline | lunch | ...
+    typeName: a.type_name || a.type || "Activity",
+    subject: a.subject || a.type_name || "Activity",
+    done: !!a.done,
+    at,
+    duration: a.duration || null,
+    who: a.owner_name || null,
+    note: a.note ? String(a.note).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 500) : null,
+    outcome: a.outcome || null,
+  };
+}
+
 app.get("/api/sdr/leads/:leadId/detail", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   const { leadId } = req.params;
@@ -1756,9 +1774,10 @@ app.get("/api/sdr/leads/:leadId/detail", async (req, res) => {
       ),
     ]);
 
-    // Live Pipedrive lead + person (best-effort; drawer still renders if PD is down).
+    // Live Pipedrive lead + person + activity history (best-effort; drawer still renders if PD is down).
     let pdLead = null;
     let pdPerson = null;
+    let pdActivities = [];
     if (process.env.PIPEDRIVE_API_TOKEN) {
       try {
         pdLead = await pipedriveClient.getLead(leadId);
@@ -1768,9 +1787,15 @@ app.get("/api/sdr/leads/:leadId/detail", async (req, res) => {
       } catch (e) {
         console.warn("[detail] Pipedrive fetch failed:", e.message);
       }
+      try {
+        const acts = await pipedriveClient.listActivities(leadId, { limit: 100 });
+        pdActivities = acts.map(normalizeActivity).filter((a) => a.at);
+      } catch (e) {
+        console.warn("[detail] Pipedrive activities fetch failed:", e.message);
+      }
     }
 
-    res.json({ lead, drafts, sends, events, pd_lead: pdLead, pd_person: pdPerson });
+    res.json({ lead, drafts, sends, events, pd_lead: pdLead, pd_person: pdPerson, pd_activities: pdActivities });
   } catch (err) {
     console.error("GET /api/sdr/leads/:leadId/detail error:", err);
     res.status(500).json({ error: err.message || "Failed to load detail" });
@@ -2633,6 +2658,25 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
            WHERE id = $1`,
           [sendRow.id, emailerMessageId],
         );
+      }
+      // Per-step Pipedrive activity: every follow-up send (Apollo step >= 2) lands a "done"
+      // activity so Derek sees each touch in Pipedrive, not just the enrollment (step 1, logged
+      // at approve-and-send). Gated on newlyInserted + the poll only emits recent steps, so a
+      // re-poll never double-logs and the first poll after deploy can't back-fill history.
+      const stepNum = Number(ev.step || ev.campaign_position || 0);
+      if (eventType === "email_sent" && newlyInserted && stepNum >= 2 && leadId && process.env.PIPEDRIVE_API_TOKEN) {
+        sideEffect = "step-sent-activity";
+        try {
+          await pipedriveClient.addActivity({
+            leadId,
+            subject: `Outreach step ${stepNum} sent${contactEmail ? ` to ${contactEmail}` : ""}`,
+            type: "email",
+            done: true,
+            note: `Apollo sequence follow-up (step ${stepNum}) delivered${mailboxEmail ? ` via ${mailboxEmail}` : ""}.`,
+          });
+        } catch (e) {
+          console.error("Pipedrive step-sent activity failed:", e.message);
+        }
       }
       // First click on a lead = high engagement → one Pipedrive note, ever.
       // Gated on newlyInserted so webhook retries can't double-note.
