@@ -15,6 +15,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import * as apolloClient from "./lib/apolloClient.js";
 import * as pipedriveClient from "./lib/pipedriveClient.js";
+import * as emailVerify from "./lib/emailVerify.js";
 import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
@@ -1199,7 +1200,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
   const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
   const runInboxWatch = () =>
     pollInboxReplies(pool, { getToken: accessTokenForMailbox, appBase })
-      .then((r) => { if (r && (r.created || r.forwarded)) console.log("[inbox-reply-watch]", JSON.stringify(r)); })
+      .then((r) => { if (r && (r.created || r.forwarded || r.bounced)) console.log("[inbox-reply-watch]", JSON.stringify(r)); })
       .catch((e) => console.error("[inbox-reply-watch] failed:", e.message));
   setTimeout(runInboxWatch, 90_000);
   setInterval(runInboxWatch, 5 * 60 * 1000);
@@ -2787,12 +2788,34 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
         }
         if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
           try {
-            await pipedriveClient.addNote({
-              leadId,
-              content: `[Auto] Apollo: bounce${contactEmail ? ` on ${contactEmail}` : ""}.`,
-            });
+            // Stop the sequence on a bounce: clear Sequence_Started so the lead is no longer
+            // "in sequence", and leave a bounced comment. Deduped against any other bounce event
+            // on this lead in the last 48h (e.g. the inbox NDR watcher) so it's one note.
+            await pipedriveClient.updateLead(leadId, { [pdSequenceStartedKey]: "" });
+            const { rows: dupeB } = await pool.query(
+              `SELECT 1 FROM sdr_engagement_events
+                WHERE pipedrive_lead_id = $1 AND event_type IN ('email_bounced','bounce')
+                  AND apollo_event_id IS DISTINCT FROM $2
+                  AND occurred_at > NOW() - INTERVAL '48 hours' LIMIT 1`,
+              [leadId, apolloEventId],
+            );
+            if (!dupeB.length) {
+              await pipedriveClient.addNote({
+                leadId,
+                content: `[Auto] BOUNCED${contactEmail ? ` on ${contactEmail}` : ""} — Apollo flagged delivery failure. Sequence stopped.`,
+              });
+            }
           } catch (e) {
-            console.error("Pipedrive note on bounce failed:", e.message);
+            console.error("Pipedrive sync on bounce failed:", e.message);
+          }
+        }
+        // Hard-stop remaining Apollo follow-ups to a bouncing address.
+        const bounceSeqId = sendRow?.apollo_sequence_id || sequenceId;
+        if (sendRow?.apollo_contact_id && bounceSeqId && process.env.APOLLO_API_KEY) {
+          try {
+            await apolloClient.removeContactsFromSequence(bounceSeqId, [sendRow.apollo_contact_id], "remove");
+          } catch (e) {
+            console.error("Apollo remove-from-sequence on bounce failed:", e.message);
           }
         }
       }
@@ -3386,6 +3409,37 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
             }
           }
         }
+      }
+    }
+
+    // Pre-send email verification: block enroll on a confident-bad address so we stop burning
+    // sends + sender reputation on dead mailboxes / typo domains. Fail-open (no key or API error
+    // → proceeds). catch-all / unknown are allowed through. Admin can force via override:true.
+    if (emailVerify.verifyEnabled() && req.body?.skip_verify !== true) {
+      const v = await emailVerify.verifyEmail(draft.contact_email_snapshot);
+      const adminForcing = req.body?.override === true && req.sdrUser?.role === "admin";
+      if (!v.ok && !adminForcing) {
+        await pool.query(`UPDATE sdr_drafts SET status = 'rejected' WHERE id = $1`, [draft.id]);
+        if (draft.pipedrive_lead_id && process.env.PIPEDRIVE_API_TOKEN) {
+          try {
+            await pipedriveClient.addNote({
+              leadId: draft.pipedrive_lead_id,
+              content:
+                `[Auto] Skipped enroll — email failed verification (${v.status}${v.sub_status ? "/" + v.sub_status : ""}). ` +
+                `Address: ${draft.contact_email_snapshot}.` +
+                (v.suggestion ? ` Did you mean ${v.suggestion}?` : ""),
+            });
+          } catch (e) {
+            console.error("Pipedrive note on verify-fail failed:", e.message);
+          }
+        }
+        return res.status(422).json({
+          code: "email_unverified",
+          status: v.status,
+          sub_status: v.sub_status,
+          suggestion: v.suggestion,
+          message: `Email ${draft.contact_email_snapshot} failed verification (${v.status}) — not enrolled.${v.suggestion ? ` Suggested: ${v.suggestion}` : ""}`,
+        });
       }
     }
 
