@@ -3409,9 +3409,14 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     let overrideContext = null;
     {
       const personId = draft.contact_id_snapshot || draft.pipedrive_contact_id;
+      let lastOut = null;
+      let personName = null;
+      let daysAgo = null;
+      let signal = "Pipedrive";
+      // 1. Live Pipedrive person field. UNRELIABLE: a rep's manual Pipedrive email often does
+      //    NOT stamp last_outgoing_mail_time on the person (seen live — a lead emailed June 5
+      //    still had null here), so this alone is not enough.
       if (personId && process.env.PIPEDRIVE_API_TOKEN) {
-        let lastOut = null;
-        let personName = null;
         try {
           const person = await pipedriveClient.getPerson(personId);
           lastOut = person?.last_outgoing_mail_time || null;
@@ -3420,30 +3425,48 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           console.warn("approve-and-send dedup precheck failed (allowing send):", e.message);
         }
         if (lastOut) {
-          // Offset-aware parse (matches the generate gate + daysSince) — appending a bare
-          // "Z" to a timestamp that already carries Z/offset yields Invalid Date → NaN.
+          // Offset-aware parse — appending a bare "Z" to a timestamp that already carries Z/offset
+          // yields Invalid Date → NaN.
           const ms = new Date(lastOut.replace(" ", "T") + (/[zZ]|[+-]\d\d:?\d\d$/.test(lastOut) ? "" : "Z")).getTime();
-          const daysAgo = Number.isNaN(ms) ? null : Math.floor((Date.now() - ms) / 86400000);
-          // Only block RECENT contact (<= 60d) — same window the generate gate uses, so a
-          // draft you were allowed to create can't be silently un-sendable when older.
-          const blockRecent = daysAgo !== null && daysAgo <= 60;
-          if (blockRecent) {
-            if (req.body?.override === true) {
-              if (req.sdrUser?.role !== "admin") {
-                return res.status(403).json({ error: "Admin override required to send to an already-contacted lead" });
-              }
-              overrideContext = `admin override by ${req.sdrUser?.username || req.sdrUser?.sub}: last emailed ${daysAgo}d ago (${lastOut})`;
-              console.log(`[dedup] ${overrideContext} — lead ${draft.pipedrive_lead_id}`);
-            } else {
-              return res.status(409).json({
-                code: "already_outreached",
-                lastOutgoing: lastOut,
-                daysAgo,
-                personName,
-                message: `${personName || "This lead"} was already emailed ${daysAgo}d ago via Pipedrive. Admin override required to send.`,
-              });
-            }
+          daysAgo = Number.isNaN(ms) ? null : Math.floor((Date.now() - ms) / 86400000);
+        }
+      }
+      // 2. Our own outreach ledger — the AUTHORITATIVE record. The sent-folder sweep captures
+      //    every send incl. reps' manual Pipedrive emails (source 'pipedrive') that the person
+      //    field misses. Take whichever signal shows the most recent contact.
+      try {
+        const { rows: olr } = await pool.query(
+          `SELECT sent_at, source FROM sdr_outreach_log WHERE pipedrive_lead_id = $1 ORDER BY sent_at DESC LIMIT 1`,
+          [draft.pipedrive_lead_id],
+        );
+        if (olr[0]?.sent_at) {
+          const logDays = Math.floor((Date.now() - new Date(olr[0].sent_at).getTime()) / 86400000);
+          if (daysAgo === null || logDays < daysAgo) {
+            daysAgo = logDays;
+            lastOut = olr[0].sent_at;
+            signal = `outreach ledger (${olr[0].source})`;
           }
+        }
+      } catch (e) {
+        console.warn("approve-and-send outreach-log precheck failed (allowing):", e.message);
+      }
+      // Block RECENT contact (<= 60d) — same window the generate gate uses. Admin can override.
+      const blockRecent = daysAgo !== null && daysAgo <= 60;
+      if (blockRecent) {
+        if (req.body?.override === true) {
+          if (req.sdrUser?.role !== "admin") {
+            return res.status(403).json({ error: "Admin override required to send to an already-contacted lead" });
+          }
+          overrideContext = `admin override by ${req.sdrUser?.username || req.sdrUser?.sub}: last contacted ${daysAgo}d ago via ${signal}`;
+          console.log(`[dedup] ${overrideContext} — lead ${draft.pipedrive_lead_id}`);
+        } else {
+          return res.status(409).json({
+            code: "already_outreached",
+            lastOutgoing: lastOut,
+            daysAgo,
+            personName,
+            message: `${personName || "This lead"} was already contacted ${daysAgo}d ago (${signal}). Admin override required to send.`,
+          });
         }
       }
     }
