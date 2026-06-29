@@ -3578,7 +3578,12 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         const draftMeta = draft.metadata || {};
         if (APOLLO_CF_ENV) customFields[APOLLO_CF_ENV] = draftMeta.env_acronym || "EPA";
         if (APOLLO_CF_SWPPP) customFields[APOLLO_CF_SWPPP] = draftMeta.swppp_acronym || "SWPPP";
-        await apolloClient.updateContactCustomFields(apolloContactId, customFields);
+        // Set the contact's name so the follow-up templates' native {{contact.first_name}} merge
+        // can't fail "required dynamic variable missing" (a real cause of failed sends).
+        await apolloClient.updateContactCustomFields(apolloContactId, customFields, {
+          first_name: draftMeta.first_name || "there",
+          last_name: draftMeta.last_name,
+        });
 
         // Enroll in sequence with the assigned mailbox as the sender
         enrollResponse = await apolloClient.addContactsToSequence(
