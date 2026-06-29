@@ -2919,6 +2919,13 @@ const APOLLO_CF_DRAFT_BODY = process.env.APOLLO_CF_DRAFT_BODY || "6a2adb32bfaa32
 // so Apollo silently dropped every write to it and all sends failed `snippets_missing`.
 // Recreated 2026-06-23 as a proper textarea field; this is the working id.
 const APOLLO_CF_TRACK = process.env.APOLLO_CF_TRACK || "6a3b065762456a00208db22b";
+// Per-state agency acronyms for the Apollo FOLLOW-UP templates (steps 2/3), which Apollo can't
+// resolve on its own. Set these to the Apollo custom-field ids once created, then reference them
+// in the follow-up templates as {{contact.env_acronym}} / {{contact.swppp_acronym}}. Empty = the
+// injection is a no-op (follow-ups keep their current literal text) — safe to deploy ahead of the
+// Apollo field/template work.
+const APOLLO_CF_ENV = process.env.APOLLO_CF_ENV || "";
+const APOLLO_CF_SWPPP = process.env.APOLLO_CF_SWPPP || "";
 
 // SDR drafts — list (owner-scoped; admin sees all)
 app.get("/api/sdr/drafts", async (req, res) => {
@@ -3538,11 +3545,17 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         // Must succeed BEFORE enrollment — otherwise Apollo would send raw merge tags.
         // NOTE: tracking pixel + styling live in the Apollo TEMPLATE (which renders),
         // NOT here — Apollo HTML-escapes custom-field values, so the body stays plain.
-        await apolloClient.updateContactCustomFields(apolloContactId, {
+        const customFields = {
           [APOLLO_CF_DRAFT_SUBJECT]: draft.subject,
           [APOLLO_CF_DRAFT_BODY]: draft.body,
           [APOLLO_CF_TRACK]: draft.id, // open-pixel token, rendered via {{contact.swppp_track}}
-        });
+        };
+        // Per-state agency acronyms so the follow-up steps (2/3) resolve like step 1 does. The
+        // resolved values were computed at draft time (state lookup) and stored on the draft.
+        const draftMeta = draft.metadata || {};
+        if (APOLLO_CF_ENV) customFields[APOLLO_CF_ENV] = draftMeta.env_acronym || "EPA";
+        if (APOLLO_CF_SWPPP) customFields[APOLLO_CF_SWPPP] = draftMeta.swppp_acronym || "SWPPP";
+        await apolloClient.updateContactCustomFields(apolloContactId, customFields);
 
         // Enroll in sequence with the assigned mailbox as the sender
         enrollResponse = await apolloClient.addContactsToSequence(
