@@ -31,7 +31,7 @@ import { sweepSentOutreach, upsertOutreach } from "./lib/outreachSync.js";
 import * as gmailInbox from "./lib/gmailInbox.js";
 import { dailyCap, rampDay } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
-import { pollInboxReplies } from "./lib/inboxReplyWatch.js";
+import { pollInboxReplies, classifyInbound } from "./lib/inboxReplyWatch.js";
 import { runAutoOutreach, pruneStaleQueuedDrafts } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
@@ -2287,6 +2287,10 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
       return n;
     };
     for (const t of all) {
+      // Skip bounces / NDRs ("address not found") and auto-replies — they land in the inbox and
+      // match a lead by the quoted recipient, but they are NOT real replies and must never show
+      // as "needs reply". The bounce itself is recorded + stops the sequence in the reply-watch.
+      if (classifyInbound(t.from, t.subject, t.snippet)) continue;
       // Gather every lead any participant maps to, then disambiguate by subject. SDR lead
       // takes priority over permit.
       const leadCands = [];
@@ -2591,7 +2595,7 @@ async function fireHighIntentAlert(leadId, opens, contactEmail) {
   const row = rows[0] || {};
   const who = row.person_name || contactEmail || "This lead";
   const base = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
-  const link = `${base}/#/sdr?lead=${leadId}`;
+  const link = `${base}/#/sdr?inboxLead=${leadId}`;
   // Pipedrive note (recorded regardless of whether the email send works).
   if (process.env.PIPEDRIVE_API_TOKEN) {
     try {
@@ -2843,7 +2847,7 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
                 leadId,
                 content:
                   `[Auto] Apollo: REPLY received${contactEmail ? ` from ${contactEmail}` : ""} — hot lead, follow up.` +
-                  `\nOpen in interface: ${appBase}/#/sdr?lead=${leadId}`,
+                  `\nOpen in interface: ${appBase}/#/sdr?inboxLead=${leadId}`,
               });
               // Also create a follow-up Activity assigned to the rep who sent the outreach
               // (dc/jg/mh/th → their Pipedrive user; falls back to Derek if unmapped).
@@ -2865,7 +2869,7 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
                 userId: pdSenderId || 19499202, // Derek Chinners fallback
                 note:
                   `Replied to ${replyMailbox || "outreach"} outreach — follow up.` +
-                  `\nOpen in interface: ${appBase}/#/sdr?lead=${leadId}`,
+                  `\nOpen in interface: ${appBase}/#/sdr?inboxLead=${leadId}`,
               });
             }
           } catch (e) {

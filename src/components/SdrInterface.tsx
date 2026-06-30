@@ -589,6 +589,32 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
     markPrioritySeen(l.draft_id);
     setDeepLeadId(l.pipedrive_lead_id);
   }, []);
+
+  // Deep-link from a forwarded reply / high-intent email: #/sdr?inboxLead=<id> opens the INBOX
+  // on that lead's conversation (so Derek lands where he can reply). Falls back to the lead
+  // drawer when the lead has no inbox thread yet (e.g. a high-intent lead who opened but hasn't
+  // replied — nothing is in the inbox to open).
+  useEffect(() => {
+    const hash = window.location.hash;
+    const qi = hash.indexOf("?");
+    if (qi === -1) return;
+    const inboxLead = new URLSearchParams(hash.slice(qi + 1)).get("inboxLead");
+    if (!inboxLead) return;
+    window.history.replaceState(null, "", hash.slice(0, qi)); // strip so refresh doesn't reopen
+    (async () => {
+      try {
+        const r = await sdrApi.findLeadThread(inboxLead);
+        if (r?.threadId && r?.mailbox) {
+          goInbox({ threadId: r.threadId, mailbox: r.mailbox });
+          return;
+        }
+      } catch {
+        /* fall through to the drawer */
+      }
+      setDeepLeadId(inboxLead);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     let stop = false;
     const load = () =>
