@@ -826,7 +826,7 @@ async function initDB() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sdr_engagement_events (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        source TEXT NOT NULL DEFAULT 'apollo' CHECK (source IN ('apollo','pipedrive')),
+        source TEXT NOT NULL DEFAULT 'apollo' CHECK (source IN ('apollo','pipedrive','gmail','self_tracking')),
         event_type TEXT NOT NULL,
         apollo_event_id TEXT UNIQUE,
         apollo_sequence_id TEXT,
@@ -843,6 +843,13 @@ async function initDB() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    // Widen the source CHECK on existing DBs: the inbox reply-watch ('gmail') + high-intent
+    // marker ('self_tracking') were silently failing the original apollo/pipedrive-only check.
+    await pool.query(`ALTER TABLE sdr_engagement_events DROP CONSTRAINT IF EXISTS sdr_engagement_events_source_check`);
+    await pool.query(
+      `ALTER TABLE sdr_engagement_events ADD CONSTRAINT sdr_engagement_events_source_check
+         CHECK (source IN ('apollo','pipedrive','gmail','self_tracking'))`,
+    );
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_lead_time ON sdr_engagement_events(pipedrive_lead_id, occurred_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_type ON sdr_engagement_events(event_type)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_process_status ON sdr_engagement_events(process_status)`);
