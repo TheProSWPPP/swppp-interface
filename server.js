@@ -2569,6 +2569,51 @@ async function logTrackEvent(token, kind, url) {
   }
 }
 
+// High-intent push: when a lead crosses 3 opens, email the owning rep a heads-up and drop a
+// Pipedrive note. Called once per lead (the caller gates on a unique high_intent marker).
+async function fireHighIntentAlert(leadId, opens, contactEmail) {
+  if (/ivan\.manfredi2001|prodtest|@example\./i.test(contactEmail || "")) return; // skip test contacts
+  const { rows } = await pool.query(
+    `SELECT mb.email AS mailbox, ls.lead_title, ls.person_name
+       FROM sdr_sends snd
+       JOIN sdr_mailboxes mb ON mb.id = snd.mailbox_id
+       JOIN sdr_lead_state ls ON ls.pipedrive_lead_id = snd.pipedrive_lead_id
+      WHERE snd.pipedrive_lead_id = $1 ORDER BY snd.sent_at DESC LIMIT 1`,
+    [leadId],
+  );
+  const row = rows[0] || {};
+  const who = row.person_name || contactEmail || "This lead";
+  const base = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
+  const link = `${base}/#/sdr?lead=${leadId}`;
+  // Pipedrive note (recorded regardless of whether the email send works).
+  if (process.env.PIPEDRIVE_API_TOKEN) {
+    try {
+      await pipedriveClient.addNote({
+        leadId,
+        content: `[Auto] HIGH INTENT — ${who} opened the outreach ${opens}x. Strong interest, consider a call.\nOpen in interface: ${link}`,
+      });
+    } catch (e) {
+      console.error("high-intent PD note failed:", e.message);
+    }
+  }
+  // Heads-up email to the owning rep (same local-part .com as the sending .co mailbox).
+  if (row.mailbox) {
+    try {
+      const token = await accessTokenForMailbox(row.mailbox);
+      const rep = `${String(row.mailbox).split("@")[0]}@proswppp.com`;
+      await gmailInbox.sendMail(token, {
+        from: row.mailbox,
+        to: rep,
+        subject: `High intent: ${row.lead_title || who}`,
+        bodyText: `${who} opened your outreach ${opens} times — strong interest, worth a call.\n\nOpen in the SDR interface: ${link}`,
+        bodyHtml: `<p><strong>${who}</strong> opened your outreach <strong>${opens} times</strong> — strong interest, worth a call.</p><p><a href="${link}">Open in the SDR interface</a></p>`,
+      });
+    } catch (e) {
+      console.error("high-intent rep email failed:", e.message);
+    }
+  }
+}
+
 app.get("/api/sdr/track/open/:token", (req, res) => {
   // Respond with the pixel immediately; log async so the image never blocks.
   res.set("Content-Type", "image/gif")
@@ -2728,6 +2773,32 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
             });
           } catch (e) {
             console.error("Pipedrive note on first click failed:", e.message);
+          }
+        }
+      }
+
+      // High intent: 3+ opens on a lead = active interest. Fire ONCE per lead — record a
+      // unique high_intent marker (dedup), then push a heads-up email to the rep + a Pipedrive
+      // note. The bell already surfaces 3-open leads passively (isHot); this is the active push.
+      if (eventType === "email_opened" && newlyInserted && leadId) {
+        const { rows: oc } = await pool.query(
+          `SELECT COUNT(*)::int AS n FROM sdr_engagement_events
+            WHERE pipedrive_lead_id = $1 AND event_type = 'email_opened'`,
+          [leadId],
+        );
+        if ((oc[0]?.n || 0) >= 3) {
+          const ins = await pool.query(
+            `INSERT INTO sdr_engagement_events
+               (source, event_type, apollo_event_id, pipedrive_lead_id, mailbox_email, occurred_at, payload, process_status, processed_at)
+             VALUES ('self_tracking','high_intent',$1,$2,$3,NOW(),$4::jsonb,'processed',NOW())
+             ON CONFLICT (apollo_event_id) DO NOTHING RETURNING id`,
+            [`high_intent:${leadId}`, leadId, mailboxEmail, JSON.stringify({ opens: oc[0].n })],
+          );
+          if (ins.rows.length) {
+            sideEffect = "high-intent";
+            await fireHighIntentAlert(leadId, oc[0].n, contactEmail).catch((e) =>
+              console.error("high-intent alert failed:", e.message),
+            );
           }
         }
       }
