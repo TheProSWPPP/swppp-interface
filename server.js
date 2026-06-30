@@ -2538,7 +2538,7 @@ app.post("/api/sdr/mailboxes/sync", async (req, res) => {
 // Keyed by draft id. We resolve the draft → contact email + sequence, then feed an
 // event into /api/sdr/events/ingest (reusing its dedup + side effects). Per-lead
 // opens/clicks without Apollo's Professional webhook.
-async function logTrackEvent(token, kind, url) {
+async function logTrackEvent(token, kind, url, meta = {}) {
   if (!process.env.DATABASE_URL) return;
   try {
     // Token is either a draft id (body-injected, legacy) or `c-<apolloContactId>`
@@ -2561,6 +2561,22 @@ async function logTrackEvent(token, kind, url) {
       d = rows[0];
     }
     if (!d) return;
+    // Don't count our own test sends.
+    if (/ivan\.manfredi2001|prodtest|@example\./i.test(d.contact_email_snapshot || "")) return;
+    // Prefetch / send-time self-view guard (OPENS only — a click needs a human, proxies don't
+    // auto-click). Mail-client image proxies (Apple Mail Privacy Protection especially) fetch the
+    // pixel the instant the email is delivered, and the sender's client loads it on send. An
+    // "open" within 60s of a send to this lead is almost never a human read, so drop it.
+    if (kind === "open") {
+      const { rows: recentSend } = await pool.query(
+        `SELECT 1 FROM sdr_sends WHERE pipedrive_lead_id = $1 AND sent_at > NOW() - INTERVAL '60 seconds'
+         UNION ALL
+         SELECT 1 FROM sdr_engagement_events WHERE pipedrive_lead_id = $1 AND event_type = 'email_sent' AND occurred_at > NOW() - INTERVAL '60 seconds'
+         LIMIT 1`,
+        [d.pipedrive_lead_id],
+      );
+      if (recentSend.length) return;
+    }
     const ev = {
       type: kind === "open" ? "email_opened" : "email_clicked",
       sequence_id: d.apollo_sequence_id,
@@ -2569,6 +2585,8 @@ async function logTrackEvent(token, kind, url) {
       id: trackEventId(kind, token, url),
       source: "self_tracking",
       clicked_url: url || undefined,
+      ua: meta.ua || undefined, // captured so non-recipient opens can be spotted/filtered
+      ip: meta.ip || undefined,
     };
     await fetch(`http://127.0.0.1:${port}/api/sdr/events/ingest?callback_secret=${encodeURIComponent(N8N_CALLBACK_SECRET)}`, {
       method: "POST",
@@ -2631,14 +2649,20 @@ app.get("/api/sdr/track/open/:token", (req, res) => {
     .set("Cache-Control", "no-store, no-cache, must-revalidate, private")
     .set("Pragma", "no-cache")
     .send(TRANSPARENT_GIF);
-  logTrackEvent(String(req.params.token).replace(/\.gif$/i, ""), "open").catch(() => {});
+  logTrackEvent(String(req.params.token).replace(/\.gif$/i, ""), "open", undefined, {
+    ua: req.get("user-agent") || null,
+    ip: (req.headers["x-forwarded-for"] || req.ip || "").toString().split(",")[0].trim() || null,
+  }).catch(() => {});
 });
 
 app.get("/api/sdr/track/click/:token", (req, res) => {
   const dest = req.query.u;
   if (!dest || !/^https?:\/\//i.test(String(dest))) return res.status(400).send("Invalid redirect target");
   res.redirect(302, String(dest));
-  logTrackEvent(String(req.params.token), "click", String(dest)).catch(() => {});
+  logTrackEvent(String(req.params.token), "click", String(dest), {
+    ua: req.get("user-agent") || null,
+    ip: (req.headers["x-forwarded-for"] || req.ip || "").toString().split(",")[0].trim() || null,
+  }).catch(() => {});
 });
 
 // SDR — Apollo webhook ingest. n8n forwards Apollo events here with
