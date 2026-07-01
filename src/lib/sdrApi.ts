@@ -407,6 +407,14 @@ export const sdrApi = {
       body: JSON.stringify(payload),
     }),
 
+  // Mark a thread handled / not-needing-reply (or un-mark it). Drops it off the needs-reply
+  // badge + count and marks it read in Gmail. handled: false reverses it.
+  setInboxHandled: (id: string, handled: boolean, mailbox?: string) =>
+    sdrFetch<{ ok: boolean; thread_id: string; handled: boolean }>(`/api/sdr/inbox/threads/${id}/handled`, {
+      method: "POST",
+      body: JSON.stringify({ handled, mailbox }),
+    }),
+
   // Gmail-style compose: reply / reply-all / forward. The server quotes/forwards the
   // original and sets threading; the client supplies the final recipients + note.
   composeInboxThread: (

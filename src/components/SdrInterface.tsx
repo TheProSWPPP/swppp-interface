@@ -3079,12 +3079,13 @@ function emailFromHeader(s: string | null | undefined): string {
   return (m ? m[1] : s).trim();
 }
 
-type OverviewThread = SdrInboxThread & { mailbox: string; to?: string | null; openable?: boolean; outreached?: boolean; direction?: "in" | "out"; lastOutbound?: boolean; kind?: "sdr" | "permit"; permit?: { operator_key: string; contact_name: string | null } };
+type OverviewThread = SdrInboxThread & { mailbox: string; to?: string | null; openable?: boolean; outreached?: boolean; direction?: "in" | "out"; lastOutbound?: boolean; kind?: "sdr" | "permit"; permit?: { operator_key: string; contact_name: string | null }; handled?: boolean };
 
 // A thread is "waiting on us" when the lead replied and our latest message isn't the last
-// one in the thread. Used for the Inbox badge + the Needs-reply filter.
+// one in the thread — unless a rep manually marked it handled. Used for the Inbox badge +
+// the Needs-reply filter.
 function needsReply(t: OverviewThread): boolean {
-  return t.direction === "in" && t.openable === true && t.lastOutbound !== true;
+  return t.direction === "in" && t.openable === true && t.lastOutbound !== true && t.handled !== true;
 }
 
 function nameFromHeader(s: string | null | undefined): string {
@@ -3263,6 +3264,20 @@ function InboxView({
         setThreads((prev) => prev?.map((t) => (t.id === id ? { ...t, unread: false } : t)) ?? prev);
       })
       .catch((e) => pushToast("error", e.message));
+  };
+
+  // Mark a thread handled / not-needing-reply (or undo). Optimistic local flag for instant
+  // feedback; on success fire the shared refresh so the bell + tab badge recount.
+  const markHandled = (t: OverviewThread, handled: boolean) => {
+    if (!t.id) return;
+    setThreads((prev) => prev?.map((x) => (x.id === t.id ? { ...x, handled } : x)) ?? prev);
+    sdrApi
+      .setInboxHandled(t.id, handled, t.mailbox)
+      .then(() => window.dispatchEvent(new Event("sdr:inbox-refresh")))
+      .catch((e) => {
+        pushToast("error", e.message);
+        setThreads((prev) => prev?.map((x) => (x.id === t.id ? { ...x, handled: !handled } : x)) ?? prev);
+      });
   };
 
   // A jump-to-thread request from the bell or the lead drawer. The bell hands us a
@@ -3489,6 +3504,25 @@ function InboxView({
                     {needsReply(t) && (
                       <span className="inline-block rounded bg-cta-100 px-1.5 py-0.5 text-[11px] font-semibold text-cta-700">
                         Needs reply
+                      </span>
+                    )}
+                    {/* Handled toggle — only on inbound reply threads (the ones that flag as
+                        needs-reply). Marking handled drops it off the badge/count; undo restores. */}
+                    {t.direction === "in" && t.openable === true && t.lastOutbound !== true && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); markHandled(t, !t.handled); }}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); markHandled(t, !t.handled); } }}
+                        title={t.handled ? "Mark as needing reply again" : "Mark handled — drops it off the needs-reply list"}
+                        className={cn(
+                          "inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium",
+                          t.handled
+                            ? "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                            : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+                        )}
+                      >
+                        {t.handled ? "✓ Handled · undo" : "Mark handled"}
                       </span>
                     )}
                     {view === "outreach" && t.direction && (

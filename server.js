@@ -823,6 +823,19 @@ async function initDB() {
     // Mailbox sending signature, mirrored from Apollo (editable in the interface).
     await pool.query(`ALTER TABLE sdr_mailboxes ADD COLUMN IF NOT EXISTS signature_html TEXT`);
 
+    // Manually "handled" inbox threads. needsReply() is computed live from Gmail, so a thread
+    // (an out-of-office that slipped detection, or one a rep dealt with by phone) would nag as
+    // "needs reply" forever. Marking it handled here drops it off the needs-reply badge/count.
+    // Keyed by Gmail thread id; reversible (un-handle deletes the row).
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_inbox_handled (
+        thread_id TEXT PRIMARY KEY,
+        mailbox_email TEXT,
+        handled_by UUID REFERENCES sdr_users(id) ON DELETE SET NULL,
+        handled_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sdr_engagement_events (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2099,6 +2112,37 @@ app.get("/api/sdr/inbox/threads/:id", async (req, res) => {
   }
 });
 
+// Mark a thread handled / not-needing-reply (or un-mark it). Persists so needsReply() drops
+// it from the badge + count; also marks the Gmail thread read so the unread styling clears.
+// Reversible: { handled: false } removes the row and it can flag as needs-reply again.
+app.post("/api/sdr/inbox/threads/:id/handled", express.json(), async (req, res) => {
+  try {
+    const threadId = req.params.id;
+    const handled = req.body?.handled !== false; // default true
+    if (handled) {
+      const mailbox = await resolveMailbox(req.sdrUser, req.body?.mailbox || req.query.mailbox).catch(() => null);
+      await pool.query(
+        `INSERT INTO sdr_inbox_handled (thread_id, mailbox_email, handled_by)
+           VALUES ($1, $2, $3)
+         ON CONFLICT (thread_id) DO UPDATE SET mailbox_email = EXCLUDED.mailbox_email, handled_by = EXCLUDED.handled_by, handled_at = NOW()`,
+        [threadId, mailbox || null, req.sdrUser?.sub || null],
+      );
+      // Best-effort: also clear the unread flag in Gmail so it doesn't sit bold in the inbox.
+      if (mailbox) {
+        try {
+          const token = await accessTokenForMailbox(mailbox);
+          await gmailInbox.markThreadRead(token, threadId);
+        } catch { /* mailbox offline — the handled flag still stands */ }
+      }
+    } else {
+      await pool.query(`DELETE FROM sdr_inbox_handled WHERE thread_id = $1`, [threadId]);
+    }
+    res.json({ ok: true, thread_id: threadId, handled });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // Reply in-thread, sent from the mailbox.
 app.post("/api/sdr/inbox/threads/:id/reply", express.json(), async (req, res) => {
   try {
@@ -2353,6 +2397,18 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
         snippet: "", messageCount: 1, unread: false, lead: null,
         permit: { operator_key: r.operator_key, contact_name: r.contact_name || r.operator_name },
       });
+    }
+
+    // Flag manually-handled threads so needsReply() drops them from the badge/count. We keep
+    // showing the row (it stays in the inbox list), just no longer as "needs reply".
+    const replyIds = replyThreads.map((t) => t.id).filter(Boolean);
+    if (replyIds.length) {
+      const { rows: handledRows } = await pool.query(
+        `SELECT thread_id FROM sdr_inbox_handled WHERE thread_id = ANY($1)`,
+        [replyIds],
+      );
+      const handledSet = new Set(handledRows.map((r) => r.thread_id));
+      for (const t of replyThreads) if (handledSet.has(t.id)) t.handled = true;
     }
 
     const threads = [...replyThreads, ...sendItems]
