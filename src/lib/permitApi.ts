@@ -54,7 +54,9 @@ export interface OperatorRow {
   max_pain: number;
   best_score: number;
   earliest_expiry: string | null;
-  stage: "pool" | "promoted" | "enriched" | "mailed";
+  stage: "pool" | "promoted" | "email_ready" | "discarded" | "mailed";
+  emailable: boolean;
+  discarded: boolean;
   compliance_tier: "snc" | "violation" | "inspected" | "clean";
   possible_customer: boolean;
   possible_crm: boolean;
@@ -67,7 +69,7 @@ export interface OperatorsListResponse {
   total: number;
   page: number;
   pageSize: number;
-  counts: { pool: number; promoted: number; enriched: number; mailed: number };
+  counts: { pool: number; promoted: number; email_ready: number; discarded: number; mailed: number };
   compliance_last_refreshed?: string | null;
 }
 
@@ -108,16 +110,40 @@ export interface OperatorDetail {
   permits: OperatorPermit[];
   enrichment: OperatorEnrichment | null;
   mailable: boolean;
+  email: { email: string; contact_name: string | null; title: string | null } | null;
+  emailable: boolean;
   outreach: OutreachEvent[];
 }
 
-export interface PermitSettings { active: boolean; }
+export interface PermitSettings {
+  active: boolean;
+  auto_find_enabled?: boolean;
+  auto_find_daily_cap?: number;
+  auto_find_backlog_max?: number;
+  auto_send_enabled?: boolean;
+}
 export interface PermitMailbox { id: string; email: string; display_name: string | null; permit_enabled: boolean; daily_send_limit?: number; }
 
 export async function getPermitSettings(): Promise<{ settings: PermitSettings; mailboxes: PermitMailbox[] }> {
   return j<{ settings: PermitSettings; mailboxes: PermitMailbox[] }>(`/api/permits/settings`);
 }
-export async function patchPermitSettings(body: { active: boolean }): Promise<{ settings: PermitSettings }> {
+
+export interface PermitSend {
+  operator_key: string;
+  operator_name: string | null;
+  email: string | null;
+  status: "emailed" | "skipped";
+  note: string | null;
+  created_at: string;
+}
+export interface PermitSentResponse {
+  sends: PermitSend[];
+  counts: { total_sent: number; sent_today: number; skipped: number };
+}
+export function getPermitSent(): Promise<PermitSentResponse> {
+  return j<PermitSentResponse>(`/api/permits/sent`);
+}
+export async function patchPermitSettings(body: Partial<PermitSettings>): Promise<{ settings: PermitSettings }> {
   return j<{ settings: PermitSettings }>(`/api/permits/settings`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -142,6 +168,100 @@ export async function createMsgpSequence(): Promise<{ apollo_sequence_id: string
   return j<{ apollo_sequence_id: string }>(`/api/permits/msgp-sequence/create`, { method: "POST", body: "{}" });
 }
 
+// ── Permit email draft queue ────────────────────────────────────────────────
+
+export interface PermitDraft {
+  id: string;
+  operator_key: string;
+  operator_name: string | null;
+  contact_name: string | null;
+  email: string;
+  subject: string;
+  body: string;
+  apollo_sequence_id: string | null;
+  assigned_mailbox_id: string | null;
+  assigned_email: string | null;
+  status: "pending" | "approved" | "sent" | "rejected";
+  reject_reason: string | null;
+  error_message: string | null;
+  approved_at: string | null;
+  sent_at: string | null;
+  created_at: string;
+}
+
+export interface PermitDraftsResponse {
+  drafts: PermitDraft[];
+  counts: { pending: number; approved: number; sent: number; rejected: number };
+}
+
+export interface GenerateDraftsResult {
+  created: number;
+  eligible: number;
+  mailboxesEnabled: number;
+  sequenceLinked: boolean;
+}
+
+export function generatePermitDrafts(
+  opts: { cap?: number; operatorKeys?: string[] } = {},
+): Promise<GenerateDraftsResult> {
+  const body: Record<string, unknown> = {};
+  if (opts.cap) body.cap = opts.cap;
+  if (opts.operatorKeys?.length) body.operator_keys = opts.operatorKeys;
+  return jMsg<GenerateDraftsResult>(`/api/permits/drafts/generate`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// Bulk discard selected companies (multi-select).
+export function discardOperators(operatorKeys: string[]): Promise<{ discarded: number }> {
+  return jMsg<{ discarded: number }>(`/api/permits/operators/discard`, {
+    method: "POST",
+    body: JSON.stringify({ operator_keys: operatorKeys }),
+  });
+}
+
+export function getPermitDrafts(status = "pending"): Promise<PermitDraftsResponse> {
+  return j<PermitDraftsResponse>(`/api/permits/drafts?status=${encodeURIComponent(status)}`);
+}
+
+export function editPermitDraft(
+  id: string,
+  body: { subject?: string; body?: string },
+): Promise<{ draft: PermitDraft }> {
+  return jMsg<{ draft: PermitDraft }>(`/api/permits/drafts/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function rejectPermitDraft(id: string, reason?: string): Promise<{ draft: PermitDraft }> {
+  return jMsg<{ draft: PermitDraft }>(`/api/permits/drafts/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+// Approve = queue for the auto-sender (status 'approved').
+export function approvePermitDraft(id: string): Promise<{ draft: PermitDraft }> {
+  return jMsg<{ draft: PermitDraft }>(`/api/permits/drafts/${id}/approve`, { method: "POST", body: "{}" });
+}
+
+// Bulk-approve: all pending, or a specific set of ids.
+export function approveAllPermitDrafts(ids?: string[]): Promise<{ approved: number }> {
+  return jMsg<{ approved: number }>(`/api/permits/drafts/approve`, {
+    method: "POST",
+    body: JSON.stringify(ids && ids.length ? { ids } : {}),
+  });
+}
+
+// Send now = immediate enroll (bypasses the auto-send queue).
+export function sendPermitDraftNow(
+  id: string,
+): Promise<{ id: string; status: string; apollo_contact_id: string; enrolled: number }> {
+  return jMsg(`/api/permits/drafts/${id}/approve-and-send`, { method: "POST", body: "{}" });
+}
+
 // ── Operator-centric API functions ─────────────────────────────────────────
 
 export function getOperatorsList(params: {
@@ -149,6 +269,7 @@ export function getOperatorsList(params: {
   compliance?: string;
   hideContacted?: boolean;
   search?: string;
+  sort?: string;
   page?: number;
   pageSize?: number;
 } = {}): Promise<OperatorsListResponse> {
@@ -191,10 +312,16 @@ export const permitApi = {
     j<{ promoted: number }>(`/api/permits/promote`, { method: "POST", body: JSON.stringify(body) }),
   enrich: (cap = 50) =>
     jMsg<{ processed: number; ok: number; fail: number }>(`/api/permits/enrich`, { method: "POST", body: JSON.stringify({ cap }) }),
+  findEmails: (opts: { cap?: number; operatorKeys?: string[] } = {}) => {
+    const body: Record<string, unknown> = {};
+    if (opts.cap) body.cap = opts.cap;
+    if (opts.operatorKeys?.length) body.operator_keys = opts.operatorKeys;
+    return jMsg<{ probed: number; found: number; discarded: number; hadDomain: number }>(
+      `/api/permits/find-emails`, { method: "POST", body: JSON.stringify(body) });
+  },
   getEnriched: (params: { page?: number; pageSize?: number } = {}) => {
     const q = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined) q.set(k, String(v)); });
     return j<EnrichedResponse>(`/api/permits/enriched?${q.toString()}`);
   },
-  directMailCsvUrl: () => `/api/permits/export/direct-mail.csv`,
 };
