@@ -117,6 +117,9 @@ export interface SdrLead {
   send_current_step: number | null;
   send_total_steps: number | null;
   send_next_at: string | null;
+  email_verify_status?: string | null;
+  email_flag?: string | null;
+  resolved_email?: string | null;
 }
 
 export interface SdrLeadDetail {

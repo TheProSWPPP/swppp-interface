@@ -905,6 +905,7 @@ function LeadsView({
   const [triggerFilter, setTriggerFilter] = useState<LeadTriggerFilter>("all");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [emailBadFilter, setEmailBadFilter] = useState(false);
   const [query, setQuery] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [sort, setSort] = useState<LeadSortKey>("last_contact");
@@ -1029,13 +1030,14 @@ function LeadsView({
     }
   }
 
-  const leads = resp?.leads ?? [];
+  const allLeads = resp?.leads ?? [];
+  const leads = emailBadFilter ? allLeads.filter((l) => l.email_flag === "email_bad") : allLeads;
   const total = resp?.total ?? 0;
   const pages = resp?.pages ?? 1;
   const firstRow = total === 0 ? 0 : (page - 1) * LEAD_PAGE_SIZE + 1;
   const lastRow = Math.min(page * LEAD_PAGE_SIZE, total);
 
-  const filtersActive = statusFilter !== "all" || triggerFilter !== "all" || stageFilter !== "all" || sourceFilter !== "all" || !!debouncedQ;
+  const filtersActive = statusFilter !== "all" || triggerFilter !== "all" || stageFilter !== "all" || sourceFilter !== "all" || !!debouncedQ || emailBadFilter;
 
   return (
     <div className="space-y-6">
@@ -1103,6 +1105,20 @@ function LeadsView({
           ))}
         </div>
 
+        <button
+          onClick={() => setEmailBadFilter((v) => !v)}
+          aria-pressed={emailBadFilter}
+          title="Show only leads where the email was flagged as bad (email_flag = email_bad)"
+          className={cn(
+            "rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
+            emailBadFilter
+              ? "border-rose-300 bg-rose-50 text-rose-700"
+              : "border-slate-200 bg-white text-slate-500 hover:text-slate-700",
+          )}
+        >
+          Needs contact
+        </button>
+
         <select
           value={triggerFilter}
           onChange={(e) => setTriggerFilter(e.target.value as LeadTriggerFilter)}
@@ -1163,6 +1179,7 @@ function LeadsView({
               setTriggerFilter("all");
               setStageFilter("all");
               setSourceFilter("all");
+              setEmailBadFilter(false);
               setQuery("");
             }}
             className="font-semibold text-brand-700 hover:text-brand-800"
@@ -1462,6 +1479,24 @@ function LeadDetailDrawer({
               <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
                 <DrawerField label="Contact" value={lead?.person_name} />
                 <DrawerField label="Email" value={lead?.person_email} />
+                {(lead?.email_verify_status || lead?.resolved_email) && (
+                  <div className="col-span-2">
+                    <dt className="text-xs font-medium text-slate-400">Email verify</dt>
+                    <dd className="mt-0.5 flex items-center gap-2 text-sm font-medium text-slate-800">
+                      <span>{lead.resolved_email || lead.person_email || "—"}</span>
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset",
+                          lead.email_flag === "email_bad"
+                            ? "bg-rose-50 text-rose-700 ring-rose-200"
+                            : "bg-emerald-50 text-emerald-700 ring-emerald-200",
+                        )}
+                      >
+                        {lead.email_verify_status || "unverified"}
+                      </span>
+                    </dd>
+                  </div>
+                )}
                 <DrawerField
                   label="Trigger"
                   value={
