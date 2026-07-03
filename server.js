@@ -16,6 +16,7 @@ import jwt from "jsonwebtoken";
 import * as apolloClient from "./lib/apolloClient.js";
 import * as pipedriveClient from "./lib/pipedriveClient.js";
 import * as emailVerify from "./lib/emailVerify.js";
+import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
 import { runAutoSwitch, autoSwitchEnabled } from "./lib/sdrAutoSwitch.js";
 import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
@@ -3659,29 +3660,45 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     // sends + sender reputation on dead mailboxes / typo domains. Fail-open (no key or API error
     // → proceeds). catch-all / unknown are allowed through. Admin can force via override:true.
     if (emailVerify.verifyEnabled() && req.body?.skip_verify !== true) {
-      const v = await emailVerify.verifyEmail(draft.contact_email_snapshot);
       const adminForcing = req.body?.override === true && req.sdrUser?.role === "admin";
-      if (!v.ok && !adminForcing) {
+      const targetEmail = draft.contact_email_snapshot;
+
+      // Prefer a fresh cached verdict for this exact address (set by the refresh pass) — no API spend.
+      const cache = draft.pipedrive_lead_id ? await readVerifyCache(pool, draft.pipedrive_lead_id) : null;
+      const cacheFresh =
+        cache && cache.email_verified_value === targetEmail && cache.email_verified_at &&
+        Date.now() - new Date(cache.email_verified_at).getTime() < STALE_MS;
+
+      let blocked = null; // { status, sub_status, suggestion }
+      if (cacheFresh) {
+        if (["invalid", "disposable"].includes(cache.email_verify_status)) {
+          blocked = { status: cache.email_verify_status, sub_status: null, suggestion: null };
+        }
+      } else {
+        const v = await emailVerify.verifyEmail(targetEmail);
+        if (v && !v.skipped && draft.pipedrive_lead_id) {
+          await writeVerifyCache(pool, draft.pipedrive_lead_id, {
+            status: v.status || (v.ok ? "valid" : "invalid"), verifiedValue: targetEmail,
+          }).catch((e) => console.error("send-gate cache write failed:", e.message));
+        }
+        if (!v.ok) blocked = { status: v.status, sub_status: v.sub_status, suggestion: v.suggestion };
+      }
+
+      if (blocked && !adminForcing) {
         await pool.query(`UPDATE sdr_drafts SET status = 'rejected' WHERE id = $1`, [draft.id]);
         if (draft.pipedrive_lead_id && process.env.PIPEDRIVE_API_TOKEN) {
           try {
             await pipedriveClient.addNote({
               leadId: draft.pipedrive_lead_id,
               content:
-                `[Auto] Skipped enroll — email failed verification (${v.status}${v.sub_status ? "/" + v.sub_status : ""}). ` +
-                `Address: ${draft.contact_email_snapshot}.` +
-                (v.suggestion ? ` Did you mean ${v.suggestion}?` : ""),
+                `[Auto] Skipped enroll — email failed verification (${blocked.status}${blocked.sub_status ? "/" + blocked.sub_status : ""}). ` +
+                `Address: ${targetEmail}.` + (blocked.suggestion ? ` Did you mean ${blocked.suggestion}?` : ""),
             });
-          } catch (e) {
-            console.error("Pipedrive note on verify-fail failed:", e.message);
-          }
+          } catch (e) { console.error("Pipedrive note on verify-fail failed:", e.message); }
         }
         return res.status(422).json({
-          code: "email_unverified",
-          status: v.status,
-          sub_status: v.sub_status,
-          suggestion: v.suggestion,
-          message: `Email ${draft.contact_email_snapshot} failed verification (${v.status}) — not enrolled.${v.suggestion ? ` Suggested: ${v.suggestion}` : ""}`,
+          code: "email_unverified", status: blocked.status, sub_status: blocked.sub_status, suggestion: blocked.suggestion,
+          message: `Email ${targetEmail} failed verification (${blocked.status}) — not enrolled.${blocked.suggestion ? ` Suggested: ${blocked.suggestion}` : ""}`,
         });
       }
     }
