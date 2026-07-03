@@ -1954,6 +1954,20 @@ app.post("/api/sdr/sync/leads", async (req, res) => {
   res.status(202).json({ started: true, note: "Sync running in background; poll GET /api/sdr/leads for updated state." });
 });
 
+// Manually trigger a verification pass (careful rollout / testing). Admin only.
+app.post("/api/sdr/verify/run", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const cap = Number(req.body?.cap ?? process.env.APOLLO_LOOKUP_CAP ?? 25);
+  const limit = Number(req.body?.limit ?? 50); // default small for a careful, credit-aware run
+  res.status(202).json({ started: true, cap, limit });
+  try {
+    const { runVerificationPass } = await import("./lib/emailVerifyRefresh.js");
+    await runVerificationPass(pool, { cap, limit });
+  } catch (e) {
+    console.error("/api/sdr/verify/run failed", e.message);
+  }
+});
+
 // SDR outreach ledger — sweep the Pipedrive sent folder into sdr_outreach_log
 // (admin only). body { full:true } pages the whole sent folder (initial backfill);
 // otherwise incremental from the last watermark. Fire-and-forget for the full run.
