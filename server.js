@@ -914,6 +914,14 @@ async function initDB() {
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS lead_score DOUBLE PRECISION`);
     // Pipedrive organization id — lets the auto-switch engine detect a company change mid-sequence.
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS pipedrive_org_id TEXT`);
+    // Email verification state (NeverBounce, added 2026-07-02) — Postgres-only, per the
+    // "track SDR state in Postgres" rule. Drives lazy+cached verify in the refresh.
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_verify_status TEXT`);
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_verified_value TEXT`);
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS resolved_email TEXT`);
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_flag TEXT`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_email_flag ON sdr_lead_state(email_flag)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_status ON sdr_lead_state(outreach_status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_person ON sdr_lead_state(pipedrive_person_id)`);
     // Who initiated a draft: a human ('manual') or the auto-outreach engine ('automatic').
