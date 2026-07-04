@@ -3787,10 +3787,16 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         });
 
         // Enroll in sequence with the assigned mailbox as the sender
+        // NeverBounce is now our authoritative pre-enroll deliverability check (the verification
+        // block above already blocked invalid/disposable). Tell Apollo to stop applying its OWN
+        // email-confidence gate — otherwise Apollo silently DROPS contacts it considers unverified
+        // (into skipped_contact_ids), including ones we create from a bare email that Apollo has no
+        // status for, losing addresses we've already vetted.
         enrollResponse = await apolloClient.addContactsToSequence(
           draft.apollo_sequence_id,
           [apolloContactId],
           mailbox.apollo_mailbox_id,
+          { sequence_unverified_email: true },
         );
 
         // Apollo returns HTTP 200 even when it silently DROPS the contact (e.g.
