@@ -2209,6 +2209,14 @@ app.post("/api/sdr/inbox/threads/:id/compose", express.json({ limit: "4mb" }), a
     const last = msgs[msgs.length - 1] || {};
     const baseSubject = (last.subject || subject || "").replace(/^(re|fwd?):\s*/i, "").trim();
 
+    // Append the sender mailbox's signature (mirrored from Apollo) so manual inbox replies
+    // look like the rep's real email, matching the sequence sends. Null-safe if none set.
+    const { rows: sigRows } = await pool.query(
+      `SELECT signature_html FROM sdr_mailboxes WHERE email = $1`,
+      [mailbox],
+    );
+    const signatureHtml = sigRows[0]?.signature_html || null;
+
     let r;
     if (mode === "forward") {
       r = await gmailInbox.sendMail(token, {
@@ -2217,8 +2225,8 @@ app.post("/api/sdr/inbox/threads/:id/compose", express.json({ limit: "4mb" }), a
         cc,
         bcc,
         subject: /^fwd:/i.test(subject || "") ? subject : `Fwd: ${baseSubject}`,
-        bodyText: gmailInbox.buildForwardText(body, last),
-        bodyHtml: gmailInbox.buildForwardHtml(body, last),
+        bodyText: gmailInbox.buildForwardText(body, last, signatureHtml),
+        bodyHtml: gmailInbox.buildForwardHtml(body, last, signatureHtml),
       });
     } else {
       r = await gmailInbox.sendMail(token, {
@@ -2228,7 +2236,8 @@ app.post("/api/sdr/inbox/threads/:id/compose", express.json({ limit: "4mb" }), a
         cc,
         bcc,
         subject: /^re:/i.test(last.subject || "") ? last.subject : `Re: ${baseSubject}`,
-        bodyText: gmailInbox.buildReplyText(body, last),
+        bodyText: gmailInbox.buildReplyText(body, last, signatureHtml),
+        bodyHtml: gmailInbox.buildReplyHtml(body, last, signatureHtml),
         inReplyTo: last.messageId,
         references: [last.references, last.messageId].filter(Boolean).join(" ").trim() || undefined,
       });

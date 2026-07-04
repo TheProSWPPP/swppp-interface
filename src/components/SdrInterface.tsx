@@ -3690,8 +3690,11 @@ function InboxView({
                     {composeMode === "forward" && (
                       <p className="text-xs text-slate-400">The original message is included below your note.</p>
                     )}
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-slate-400">Sends from {openMailbox}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 ring-1 ring-brand-200">
+                        <Mail className="h-3.5 w-3.5 shrink-0" />
+                        Sending from {openMailbox}
+                      </span>
                       <div className="flex items-center gap-2">
                         <button
                           onClick={resetComposer}
