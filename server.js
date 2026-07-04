@@ -1956,6 +1956,17 @@ app.post("/api/sdr/sync/leads", async (req, res) => {
 });
 
 // Manually trigger a verification pass (careful rollout / testing). Admin only.
+// Which email verifier is live right now (provider resolution + key presence + remaining
+// credits). Admin-only, returns no secret values. Confirms exactly one provider fires and
+// catches a stale EMAIL_VERIFY_PROVIDER pin overriding a newer key.
+app.get("/api/sdr/verify/status", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  const summary = emailVerify.activeProvider();
+  let credits = null;
+  try { credits = await emailVerify.remainingCredits(); } catch { /* best-effort */ }
+  res.json({ ...summary, enabled: emailVerify.verifyEnabled(), remaining_credits: credits });
+});
+
 app.post("/api/sdr/verify/run", async (req, res) => {
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
   const cap = Number(req.body?.cap ?? process.env.APOLLO_LOOKUP_CAP ?? 25);
