@@ -3952,6 +3952,49 @@ function MailboxesView({ user }: { user: SdrUser }) {
         </div>
       )}
 
+      {user.role === "admin" && settings && (
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Contact cooldown</div>
+              <p className="mt-0.5 max-w-xl text-xs text-slate-500">
+                Don't email the same contact again within this many days, even for a different project. One estimator is
+                often the contact on many bids, so this keeps us from hitting one inbox repeatedly and hurting sender
+                reputation. A new project to that contact is allowed once the cooldown passes. Admins can override per lead.
+              </p>
+            </div>
+            <div className="flex flex-shrink-0 items-center gap-1.5">
+              <button
+                onClick={() => saveSettings({ contact_cooldown_days: Math.max(0, (settings.contact_cooldown_days ?? 14) - 1) })}
+                disabled={savingSettings}
+                className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                title="Fewer days"
+              >
+                −
+              </button>
+              <input
+                type="number"
+                min={0}
+                max={365}
+                value={settings.contact_cooldown_days ?? 14}
+                onChange={(e) => setSettings((s) => (s ? { ...s, contact_cooldown_days: Number(e.target.value) } : s))}
+                onBlur={(e) => saveSettings({ contact_cooldown_days: Math.min(365, Math.max(0, Math.round(Number(e.target.value) || 0))) })}
+                className="w-14 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm focus:border-brand-400 focus:outline-none"
+              />
+              <button
+                onClick={() => saveSettings({ contact_cooldown_days: Math.min(365, (settings.contact_cooldown_days ?? 14) + 1) })}
+                disabled={savingSettings}
+                className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                title="More days"
+              >
+                +
+              </button>
+              <span className="text-xs text-slate-400">days</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {user.role === "admin" && (
         <div className="flex items-center justify-end gap-3 mb-3">
           {syncError && <span className="text-xs text-rose-600">Sync failed: {syncError}</span>}

@@ -934,10 +934,14 @@ async function initDB() {
         auto_outreach_enabled BOOLEAN NOT NULL DEFAULT FALSE,
         auto_outreach_mode TEXT NOT NULL DEFAULT 'queue' CHECK (auto_outreach_mode IN ('queue','send')),
         auto_min_score DOUBLE PRECISION,
+        contact_cooldown_days INT NOT NULL DEFAULT 14,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_by TEXT
       )
     `);
+    // Contact-level cooldown: don't re-email the same contact within this many days, even for a
+    // DIFFERENT project. Default 14 (was a hardcoded 60). Reps can tune it in the Mailboxes tab.
+    await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS contact_cooldown_days INT NOT NULL DEFAULT 14`);
     await pool.query(`INSERT INTO sdr_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
     // Editable first-touch draft copy per trigger. Seeded from the code templates; the
     // draft generator reads here first and falls back to code, so generation can't break.
@@ -1459,11 +1463,27 @@ app.put("/api/sdr/mailboxes/:id/signature", express.json(), async (req, res) => 
 });
 
 // SDR settings — auto-outreach config (read by anyone signed in; only admins change it).
+// Contact-level cooldown (days): don't re-email the same contact within this window, even for a
+// different project. Reads sdr_settings, defaults 14. Cached 60s so the send path isn't querying
+// settings on every enroll.
+let _cooldownCache = { v: 14, exp: 0 };
+async function contactCooldownDays() {
+  if (Date.now() < _cooldownCache.exp) return _cooldownCache.v;
+  let v = 14;
+  try {
+    const { rows } = await pool.query(`SELECT contact_cooldown_days FROM sdr_settings WHERE id = 1`);
+    const n = Number(rows[0]?.contact_cooldown_days);
+    if (Number.isFinite(n) && n >= 0) v = n;
+  } catch { /* default 14 */ }
+  _cooldownCache = { v, exp: Date.now() + 60_000 };
+  return v;
+}
+
 app.get("/api/sdr/settings", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   try {
     const { rows } = await pool.query(`SELECT * FROM sdr_settings WHERE id = 1`);
-    res.json({ settings: rows[0] || { auto_outreach_enabled: false, auto_outreach_mode: "queue", auto_min_score: null } });
+    res.json({ settings: rows[0] || { auto_outreach_enabled: false, auto_outreach_mode: "queue", auto_min_score: null, contact_cooldown_days: 14 } });
   } catch (err) {
     console.error("GET /api/sdr/settings error:", err);
     res.status(500).json({ error: "Failed to load settings" });
@@ -1473,9 +1493,12 @@ app.get("/api/sdr/settings", async (req, res) => {
 app.patch("/api/sdr/settings", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
-  const { auto_outreach_enabled, auto_outreach_mode, auto_min_score } = req.body || {};
+  const { auto_outreach_enabled, auto_outreach_mode, auto_min_score, contact_cooldown_days } = req.body || {};
   if (auto_outreach_mode !== undefined && !["queue", "send"].includes(auto_outreach_mode)) {
     return res.status(400).json({ error: "auto_outreach_mode must be 'queue' or 'send'" });
+  }
+  if (contact_cooldown_days !== undefined && (!Number.isInteger(contact_cooldown_days) || contact_cooldown_days < 0 || contact_cooldown_days > 365)) {
+    return res.status(400).json({ error: "contact_cooldown_days must be an integer between 0 and 365" });
   }
   try {
     const { rows } = await pool.query(
@@ -1485,6 +1508,7 @@ app.patch("/api/sdr/settings", async (req, res) => {
          auto_min_score        = CASE WHEN $3::text = 'unset' THEN NULL
                                       WHEN $4::float8 IS NOT NULL THEN $4::float8
                                       ELSE auto_min_score END,
+         contact_cooldown_days = COALESCE($6, contact_cooldown_days),
          updated_at = NOW(), updated_by = $5
        WHERE id = 1 RETURNING *`,
       [
@@ -1493,8 +1517,10 @@ app.patch("/api/sdr/settings", async (req, res) => {
         auto_min_score === null ? "unset" : null,
         typeof auto_min_score === "number" ? auto_min_score : null,
         req.sdrUser?.username || req.sdrUser?.sub,
+        Number.isInteger(contact_cooldown_days) ? contact_cooldown_days : null,
       ],
     );
+    _cooldownCache = { v: 14, exp: 0 }; // bust the cache so the new window applies immediately
     await pool.query(
       `INSERT INTO nurture_audit (sdr_user, action, target_kind, target_id, summary)
        VALUES ($1, 'settings.auto_outreach', 'sdr_settings', '1', $2)`,
@@ -3317,7 +3343,8 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
       const lastOut = payload.person_last_outgoing;
       const ms = new Date(lastOut.replace(" ", "T") + (/[zZ]|[+-]\d\d:?\d\d$/.test(lastOut) ? "" : "Z")).getTime();
       const daysAgo = Number.isNaN(ms) ? null : Math.floor((Date.now() - ms) / 86400000);
-      const freshStatus = daysAgo === null ? "clear" : daysAgo <= 60 ? "contacted_recent" : "contacted_stale";
+      const cooldown = await contactCooldownDays();
+      const freshStatus = daysAgo === null ? "clear" : daysAgo <= cooldown ? "contacted_recent" : "contacted_stale";
       if (process.env.DATABASE_URL) {
         await pool.query(
           `UPDATE sdr_lead_state
@@ -3655,8 +3682,10 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       } catch (e) {
         console.warn("approve-and-send outreach-log precheck failed (allowing):", e.message);
       }
-      // Block RECENT contact (<= 60d) — same window the generate gate uses. Admin can override.
-      const blockRecent = daysAgo !== null && daysAgo <= 60;
+      // Block RECENT contact within the cooldown window — same setting the generate gate uses.
+      // Cross-project guard: a shared contact emailed for another lead still blocks. Admin override.
+      const cooldown = await contactCooldownDays();
+      const blockRecent = daysAgo !== null && daysAgo <= cooldown;
       if (blockRecent) {
         if (req.body?.override === true) {
           if (req.sdrUser?.role !== "admin") {

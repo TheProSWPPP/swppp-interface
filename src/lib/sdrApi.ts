@@ -221,6 +221,7 @@ export interface SdrSettings {
   auto_outreach_enabled: boolean;
   auto_outreach_mode: "queue" | "send";
   auto_min_score: number | null;
+  contact_cooldown_days: number;
   updated_at?: string | null;
   updated_by?: string | null;
 }
@@ -454,7 +455,7 @@ export const sdrApi = {
 
   getSettings: () => sdrFetch<{ settings: SdrSettings }>("/api/sdr/settings"),
 
-  updateSettings: (patch: Partial<Pick<SdrSettings, "auto_outreach_enabled" | "auto_outreach_mode" | "auto_min_score">>) =>
+  updateSettings: (patch: Partial<Pick<SdrSettings, "auto_outreach_enabled" | "auto_outreach_mode" | "auto_min_score" | "contact_cooldown_days">>) =>
     sdrFetch<{ settings: SdrSettings }>("/api/sdr/settings", {
       method: "PATCH",
       body: JSON.stringify(patch),
