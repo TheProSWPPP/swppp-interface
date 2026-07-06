@@ -2738,8 +2738,13 @@ async function fireHighIntentAlert(leadId, opens, contactEmail) {
   const row = rows[0] || {};
   const who = row.person_name || contactEmail || "This lead";
   const base = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
-  const link = `${base}/#/sdr?inboxLead=${leadId}`;
-  // Pipedrive note (recorded regardless of whether the email send works).
+  // ?lead= opens the lead's DETAIL drawer directly (a high-intent lead opened but hasn't
+  // replied, so there's no inbox thread to open — ?inboxLead just fell back awkwardly).
+  const link = `${base}/#/sdr?lead=${leadId}`;
+  const pdBase = process.env.PIPEDRIVE_LEAD_URL_BASE || "https://proswpppllc.pipedrive.com";
+  const pdLink = `${pdBase}/leads/inbox/${leadId}`;
+  // Pipedrive note (recorded regardless of whether the email send works). No PD link here — the
+  // note already lives on the lead in Pipedrive.
   if (process.env.PIPEDRIVE_API_TOKEN) {
     try {
       await pipedriveClient.addNote({
@@ -2759,8 +2764,8 @@ async function fireHighIntentAlert(leadId, opens, contactEmail) {
         from: row.mailbox,
         to: rep,
         subject: `High intent: ${row.lead_title || who}`,
-        bodyText: `${who} opened your outreach ${opens} times — strong interest, worth a call.\n\nOpen in the SDR interface: ${link}`,
-        bodyHtml: `<p><strong>${who}</strong> opened your outreach <strong>${opens} times</strong> — strong interest, worth a call.</p><p><a href="${link}">Open in the SDR interface</a></p>`,
+        bodyText: `${who} opened your outreach ${opens} times — strong interest, worth a call.\n\nOpen the lead in the SDR interface: ${link}\nOpen in Pipedrive: ${pdLink}`,
+        bodyHtml: `<p><strong>${who}</strong> opened your outreach <strong>${opens} times</strong> — strong interest, worth a call.</p><p><a href="${link}">Open the lead in the SDR interface</a> &nbsp;·&nbsp; <a href="${pdLink}">Open in Pipedrive</a></p>`,
       });
     } catch (e) {
       console.error("high-intent rep email failed:", e.message);
@@ -2946,7 +2951,27 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
             WHERE pipedrive_lead_id = $1 AND event_type = 'email_opened'`,
           [leadId],
         );
-        if ((oc[0]?.n || 0) >= 3) {
+        // Don't fire high-intent if the lead ALREADY replied — the rep knows, and a "worth a
+        // call" nudge on someone who wrote back reads as a duplicate/noise. Covers all three
+        // reply signals: Apollo (send marked replied / reply event) + a Gmail reply matched by
+        // the inbox watch (excluding bounce/auto-reply rows, which carry a tagged from_addr).
+        let alreadyReplied = false;
+        try {
+          const { rows: rep } = await pool.query(
+            `SELECT 1 FROM sdr_sends WHERE pipedrive_lead_id = $1 AND status = 'replied'
+             UNION ALL
+             SELECT 1 FROM sdr_engagement_events WHERE pipedrive_lead_id = $1 AND event_type IN ('email_replied','reply_received')
+             UNION ALL
+             SELECT 1 FROM sdr_inbox_reply_log WHERE pipedrive_lead_id = $1
+               AND from_addr NOT LIKE '[bounce]%' AND from_addr NOT LIKE '[auto-reply]%'
+             LIMIT 1`,
+            [leadId],
+          );
+          alreadyReplied = rep.length > 0;
+        } catch (e) {
+          console.warn("high-intent reply-check failed (allowing alert):", e.message);
+        }
+        if ((oc[0]?.n || 0) >= 3 && !alreadyReplied) {
           const ins = await pool.query(
             `INSERT INTO sdr_engagement_events
                (source, event_type, apollo_event_id, pipedrive_lead_id, mailbox_email, occurred_at, payload, process_status, processed_at)
