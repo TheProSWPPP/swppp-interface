@@ -239,6 +239,7 @@ export interface SdrEngagementLead {
   clicks: number;
   replies: number;
   last_event_at: string | null;
+  last_intent_at: string | null; // most recent OPEN/CLICK only (drives the 96h priority window)
   score: number;
 }
 

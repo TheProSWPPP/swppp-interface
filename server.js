@@ -2971,7 +2971,12 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
         } catch (e) {
           console.warn("high-intent reply-check failed (allowing alert):", e.message);
         }
-        if ((oc[0]?.n || 0) >= 3 && !alreadyReplied) {
+        // Only fire on FRESH interest: the triggering open must be within 96h. Stops a stale
+        // open re-ingested by a poll (or a late Apollo event) from firing an alert about
+        // interest that's already days cold.
+        const intentAgeMs = Date.now() - new Date(occurredAt).getTime();
+        const intentFresh = Number.isFinite(intentAgeMs) && intentAgeMs <= 96 * 60 * 60 * 1000;
+        if ((oc[0]?.n || 0) >= 3 && !alreadyReplied && intentFresh) {
           const ins = await pool.query(
             `INSERT INTO sdr_engagement_events
                (source, event_type, apollo_event_id, pipedrive_lead_id, mailbox_email, occurred_at, payload, process_status, processed_at)
@@ -3280,6 +3285,7 @@ app.get("/api/sdr/engagement/summary", async (req, res) => {
          COUNT(e.id) FILTER (WHERE e.event_type IN ('email_clicked','link_clicked'))::int AS clicks,
          COUNT(e.id) FILTER (WHERE e.event_type IN ('email_replied','reply_received'))::int AS replies,
          MAX(e.occurred_at) AS last_event_at,
+         MAX(e.occurred_at) FILTER (WHERE e.event_type IN ('email_opened','email_clicked','link_clicked')) AS last_intent_at,
          ROUND(COALESCE(SUM(
            (CASE WHEN e.event_type IN ('email_replied','reply_received') THEN 10
                  WHEN e.event_type IN ('email_clicked','link_clicked') THEN 5

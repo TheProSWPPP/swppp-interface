@@ -2726,8 +2726,15 @@ function DraftRow({
 // Engaged — sent leads ranked by engagement score (clicks > opens, recent > old)
 // --------------------------------------------------------------------------
 
+// Priority = RECENT high intent with NO reply. A lead that replied moves to the inbox flow, so
+// it's dropped here (no duplicate). "Recent" = showed interest (open/click) within 96h; stale
+// interest ages off on its own so the list stays a short, actionable set.
+const HIGH_INTENT_WINDOW_MS = 96 * 60 * 60 * 1000;
 function isHot(l: SdrEngagementLead): boolean {
-  return l.replies > 0 || l.clicks > 0 || l.opens >= 3;
+  if (l.replies > 0 || l.send_status === "replied") return false; // replied → handled in inbox
+  const ts = l.last_intent_at ? new Date(l.last_intent_at).getTime() : NaN;
+  if (!Number.isFinite(ts) || Date.now() - ts > HIGH_INTENT_WINDOW_MS) return false; // not recent
+  return l.opens >= 3 || l.clicks > 0;
 }
 
 // Priority "notifications" the rep has dismissed. Persisted client-side (per browser) so a
@@ -2846,7 +2853,7 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
       ) : (
         <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-900">Prioritized by engagement</div>
+            <div className="text-sm font-semibold text-slate-900">Recent high intent</div>
             <div className="flex items-center gap-3">
               {hiddenCount > 0 && (
                 <button
@@ -2857,16 +2864,16 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
                   {hiddenCount} dismissed · restore
                 </button>
               )}
-              <div className="text-xs text-slate-400">Replies ×10 · Clicks ×5 · Opens ×1 · recent activity weighs more</div>
+              <div className="text-xs text-slate-400">Opened 3+ times or clicked in the last 96h · no reply yet</div>
             </div>
           </div>
-          {visible.length === 0 ? (
+          {hot.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-slate-500">
-              All caught up — nothing in the priority list right now.
+              All caught up — no recent high-intent leads waiting on a call.
             </div>
           ) : (
           <ul className="divide-y divide-slate-100">
-            {visible.map((l) => (
+            {hot.map((l) => (
               <li
                 key={l.draft_id}
                 onClick={() => { markPrioritySeen(l.draft_id); setDetailLeadId(l.pipedrive_lead_id); }}
