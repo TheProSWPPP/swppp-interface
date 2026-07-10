@@ -4,7 +4,10 @@ import { US_STATES } from "../data";
 import AIContentList from "./AIContentList";
 import AIContentDetail from "./AIContentDetail";
 import SeoIdeas from "./SeoIdeas";
+import { useToasts, ToastStack } from "./Toast";
 import {
+  AlertCircle,
+  RotateCcw,
   ListOrdered,
   Loader2,
   FileEdit,
@@ -37,8 +40,10 @@ export default function AIContent() {
   });
   const [selectedItem, setSelectedItem] = useState<AIContentItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const { toasts, push, dismiss } = useToasts();
 
   const fetchData = useCallback(async () => {
     try {
@@ -46,16 +51,20 @@ export default function AIContent() {
         fetch("/api/ai-content", { credentials: "include" }),
         fetch("/api/ai-content/stats", { credentials: "include" }),
       ]);
+      if (!itemsRes.ok || !statsRes.ok)
+        throw new Error(`HTTP ${itemsRes.status}/${statsRes.status}`);
       const itemsData = await itemsRes.json();
       const statsData = await statsRes.json();
-      setItems(itemsData);
+      setItems(Array.isArray(itemsData) ? itemsData : []);
       setStats(statsData);
+      setLoadError(false);
       if (selectedItem) {
         const updated = itemsData.find((i: AIContentItem) => i.id === selectedItem.id);
         if (updated) setSelectedItem(updated);
       }
     } catch (err) {
       console.error("Failed to fetch AI content:", err);
+      setLoadError(true);
     } finally {
       setIsLoading(false);
     }
@@ -109,74 +118,89 @@ export default function AIContent() {
           credentials: "include",
           body: JSON.stringify({ ...data, force: true }),
         });
-        if (retry.ok) await fetchData();
+        if (!retry.ok) throw new Error(`HTTP ${retry.status}`);
+        await fetchData();
         return;
       }
-      if (res.ok) await fetchData();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchData();
     } catch (err) {
       console.error("Failed to create content:", err);
+      push("error", "Couldn't create that content item. Please try again.");
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
-      await fetch(`/api/ai-content/${id}`, { method: "DELETE", credentials: "include" });
+      const res = await fetch(`/api/ai-content/${id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       if (selectedItem?.id === id) setSelectedItem(null);
       await fetchData();
     } catch (err) {
       console.error("Failed to delete content:", err);
+      push("error", "Couldn't delete that article. Please try again.");
     }
   };
 
   const handleBulkDelete = async (ids: string[]) => {
     try {
-      await fetch("/api/ai-content/delete-bulk", {
+      const res = await fetch("/api/ai-content/delete-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ ids }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       if (selectedItem && ids.includes(selectedItem.id)) setSelectedItem(null);
       await fetchData();
     } catch (err) {
       console.error("Failed to bulk delete:", err);
+      push("error", `Couldn't delete the selected article${ids.length === 1 ? "" : "s"}. Please try again.`);
     }
   };
 
   const handleGenerate = async (id: string) => {
     try {
-      await fetch(`/api/ai-content/${id}/generate`, { method: "POST", credentials: "include" });
+      const res = await fetch(`/api/ai-content/${id}/generate`, { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      push("success", "Generation started — this can take a few minutes.");
       await fetchData();
     } catch (err) {
       console.error("Failed to trigger generation:", err);
+      push("error", "Couldn't start generation. Check your connection and try again.");
     }
   };
 
   const handleBulkGenerate = async (ids: string[]) => {
     try {
-      await fetch("/api/ai-content/generate-bulk", {
+      const res = await fetch("/api/ai-content/generate-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ ids }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      push("success", `Generation started for ${ids.length} article${ids.length === 1 ? "" : "s"} — this can take a few minutes.`);
       await fetchData();
     } catch (err) {
       console.error("Failed to bulk generate:", err);
+      push("error", "Couldn't start generation for the selected articles. Please try again.");
     }
   };
 
   const handleUpdate = async (id: string, data: Partial<AIContentItem>) => {
     try {
-      await fetch(`/api/ai-content/${id}`, {
+      const res = await fetch(`/api/ai-content/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify(data),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchData();
     } catch (err) {
       console.error("Failed to update:", err);
+      push("error", "Couldn't save your changes — they may not have persisted. Please try again.");
     }
   };
 
@@ -185,6 +209,36 @@ export default function AIContent() {
       <div className="flex items-center justify-center py-20 text-slate-500">
         Loading AI content...
       </div>
+    );
+  }
+
+  if (loadError && items.length === 0 && !selectedItem) {
+    return (
+      <>
+        <div className="flex flex-col items-center justify-center text-center py-20">
+          <div className="h-12 w-12 rounded-full bg-red-50 flex items-center justify-center text-red-500 mb-4">
+            <AlertCircle className="h-6 w-6" />
+          </div>
+          <h3 className="text-lg font-bold text-slate-900">
+            Couldn't load AI content
+          </h3>
+          <p className="mt-1 max-w-sm text-sm text-slate-500">
+            The content library didn't come back from the server. This is a
+            connection issue, not lost data.
+          </p>
+          <button
+            onClick={() => {
+              setIsLoading(true);
+              fetchData();
+            }}
+            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1 transition-colors"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Retry
+          </button>
+        </div>
+        <ToastStack toasts={toasts} dismiss={dismiss} />
+      </>
     );
   }
 
@@ -209,6 +263,7 @@ export default function AIContent() {
           onDelete={handleDelete}
           onUpdate={handleUpdate}
         />
+        <ToastStack toasts={toasts} dismiss={dismiss} />
       </div>
     );
   }
@@ -342,6 +397,8 @@ export default function AIContent() {
 
       {/* SEO Ideas (Phase 5) */}
       {viewMode === "ideas" && <SeoIdeas onConverted={fetchData} />}
+
+      <ToastStack toasts={toasts} dismiss={dismiss} />
     </div>
   );
 }

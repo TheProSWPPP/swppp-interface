@@ -27,8 +27,16 @@ export async function uploadLeadsCsv(file: File): Promise<{ job_id: string; stat
     body: fd,
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Upload failed: ${res.status}`);
+    if (res.status === 413) {
+      throw new Error(
+        "That file is too large to upload. Try splitting it into smaller batches (a few thousand rows each).",
+      );
+    }
+    const text = (await res.text().catch(() => "")).trim();
+    // Server error pages come back as HTML — don't dump raw markup at the user.
+    const isHtml = text.startsWith("<") || /<html|<!doctype/i.test(text);
+    const clean = !text || isHtml ? "" : text;
+    throw new Error(clean || `Upload failed (${res.status}). Please try again.`);
   }
   return res.json();
 }
