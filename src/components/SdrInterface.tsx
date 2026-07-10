@@ -1604,7 +1604,7 @@ function LeadDetailDrawer({
                       <li key={i} className="rounded-xl border border-slate-100 px-3 py-2">
                         <div className="flex items-center gap-3">
                           {t.actType ? (
-                            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-indigo-500">
+                            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-brand-500">
                               {(() => {
                                 const Icon =
                                   t.actType === "call" || t.actType === "contact_attempt"

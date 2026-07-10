@@ -52,13 +52,13 @@ function NavButton({
   onClick: () => void;
 }) {
   const Icon = item.icon;
-  const base = "flex items-center gap-2 text-sm font-semibold transition-all duration-200";
+  const base = "flex items-center gap-2 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1";
   const cls =
     variant === "inline"
-      ? cn(base, "px-4 py-2 rounded-xl", active ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50")
+      ? cn(base, "px-4 py-2 rounded-xl", active ? "text-brand-600 bg-brand-50 shadow-sm shadow-brand-100/50" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50")
       : variant === "menu"
-        ? cn(base, "w-full px-3 py-2 text-left rounded-lg", active ? "text-indigo-600 bg-indigo-50" : "text-slate-600 hover:bg-slate-50")
-        : cn(base, "w-full px-3 py-2.5 rounded-xl", active ? "text-indigo-600 bg-indigo-50" : "text-slate-600 hover:bg-slate-50");
+        ? cn(base, "w-full px-3 py-2 text-left rounded-lg", active ? "text-brand-600 bg-brand-50" : "text-slate-600 hover:bg-slate-50")
+        : cn(base, "w-full px-3 py-2.5 rounded-xl", active ? "text-brand-600 bg-brand-50" : "text-slate-600 hover:bg-slate-50");
   return (
     <button onClick={onClick} aria-current={active ? "page" : undefined} className={cls}>
       <Icon className="h-4 w-4 flex-shrink-0" />
@@ -209,7 +209,7 @@ function App() {
                     className={cn(
                       "flex items-center gap-1 text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200",
                       NAV_ITEMS.some((i) => !i.primary && i.id === view)
-                        ? "text-indigo-600 bg-indigo-50 shadow-sm shadow-indigo-100/50"
+                        ? "text-brand-600 bg-brand-50 shadow-sm shadow-brand-100/50"
                         : "text-slate-500 hover:text-slate-900 hover:bg-slate-50",
                     )}
                   >
@@ -235,7 +235,7 @@ function App() {
                     Admin User
                   </span>
                 </div>
-                <div className="h-9 w-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm border-2 border-white shadow-sm ring-1 ring-slate-200">
+                <div className="h-9 w-9 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold text-sm border-2 border-white shadow-sm ring-1 ring-slate-200">
                   AD
                 </div>
               </div>

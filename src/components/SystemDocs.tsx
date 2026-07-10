@@ -242,7 +242,7 @@ export default function SystemDocs() {
 function Section({ icon, color, title, children }: { icon: React.ReactNode; color: string; title: string; children: React.ReactNode }) {
   const colorMap: Record<string, string> = {
     blue: "bg-blue-50 text-blue-600 border-blue-100",
-    indigo: "bg-indigo-50 text-indigo-600 border-indigo-100",
+    indigo: "bg-brand-50 text-brand-600 border-brand-100",
     purple: "bg-purple-50 text-purple-600 border-purple-100",
     emerald: "bg-emerald-50 text-emerald-600 border-emerald-100",
     amber: "bg-amber-50 text-amber-600 border-amber-100",

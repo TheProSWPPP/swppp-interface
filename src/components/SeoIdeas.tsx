@@ -254,9 +254,9 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
   return (
     <div className="space-y-6">
       {/* Hero */}
-      <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl border border-indigo-200 p-5">
+      <div className="bg-gradient-to-br from-brand-50 to-purple-50 rounded-xl border border-brand-200 p-5">
         <div className="flex items-start gap-3">
-          <div className="h-10 w-10 rounded-lg bg-indigo-600 text-white flex items-center justify-center flex-shrink-0">
+          <div className="h-10 w-10 rounded-lg bg-brand-600 text-white flex items-center justify-center flex-shrink-0">
             <Sparkles className="h-5 w-5" />
           </div>
           <div className="flex-1">
@@ -298,7 +298,7 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
             className={cn(
               "px-3 py-1 text-xs font-medium rounded-full border transition",
               statusFilter === s
-                ? "bg-indigo-600 text-white border-indigo-600"
+                ? "bg-brand-600 text-white border-brand-600"
                 : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
             )}
           >
@@ -330,8 +330,8 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
             className={cn(
               "flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full border transition",
               allSelected
-                ? "bg-indigo-600 text-white border-indigo-600"
-                : "bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600"
+                ? "bg-brand-600 text-white border-brand-600"
+                : "bg-white text-slate-600 border-slate-200 hover:border-brand-300 hover:text-brand-600"
             )}
           >
             {allSelected ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
@@ -368,13 +368,13 @@ export default function SeoIdeas({ onConverted }: { onConverted?: () => void }) 
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl">
-          <CheckSquare className="h-4 w-4 text-indigo-600 flex-shrink-0" />
-          <span className="text-sm font-medium text-indigo-900">{selectedIds.size} idea{selectedIds.size !== 1 ? "s" : ""} selected</span>
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-brand-50 border border-brand-200 rounded-xl">
+          <CheckSquare className="h-4 w-4 text-brand-600 flex-shrink-0" />
+          <span className="text-sm font-medium text-brand-900">{selectedIds.size} idea{selectedIds.size !== 1 ? "s" : ""} selected</span>
           <div className="flex gap-2 ml-auto">
             <button
               onClick={bulkApproveSelected}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700"
             >
               <Check className="h-3.5 w-3.5" />
               Queue selected
@@ -472,7 +472,7 @@ function ClusterCard({
           <span className="text-xs text-slate-500">·</span>
           <span className="text-xs text-slate-500">{ideas.length} {ideas.length === 1 ? "idea" : "ideas"}</span>
           {pendingCount > 0 && pendingCount !== ideas.length && (
-            <span className="text-xs text-indigo-600">· {pendingCount} pending</span>
+            <span className="text-xs text-brand-600">· {pendingCount} pending</span>
           )}
           <span className={cn("ml-2 px-2 py-0.5 text-[10px] font-semibold rounded-full border uppercase", scoreColor(opportunityScore(top)))}>
             top {opportunityScore(top).toLocaleString()}
@@ -483,7 +483,7 @@ function ClusterCard({
           <div className="flex gap-1.5">
             <button
               onClick={onBulkApprove}
-              className="text-xs px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium"
+              className="text-xs px-2.5 py-1 rounded-md bg-brand-50 text-brand-700 hover:bg-brand-100 font-medium"
             >
               Queue all ({pendingCount})
             </button>
@@ -540,7 +540,7 @@ function IdeaRow({
   const score = opportunityScore(idea);
   const isPending = idea.status === "pending";
   const typeColor =
-    idea.suggestedType === "pillar" ? "bg-indigo-50 text-indigo-700 border-indigo-200" :
+    idea.suggestedType === "pillar" ? "bg-brand-50 text-brand-700 border-brand-200" :
     idea.suggestedType === "comparison" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
     "bg-slate-100 text-slate-700 border-slate-200";
 
@@ -549,14 +549,14 @@ function IdeaRow({
       "px-4 py-3 transition",
       idea.status === "converted" && "bg-green-50/30",
       idea.status === "rejected" && "opacity-50",
-      selected && "bg-indigo-50/40",
+      selected && "bg-brand-50/40",
       "hover:bg-slate-50/50"
     )}>
       <div className="flex items-start gap-3">
         {/* Checkbox (pending only) */}
         {idea.status === "pending" && onToggleSelect && (
-          <button onClick={onToggleSelect} className="mt-1 text-slate-400 hover:text-indigo-600 flex-shrink-0">
-            {selected ? <CheckSquare className="h-4 w-4 text-indigo-600" /> : <Square className="h-4 w-4" />}
+          <button onClick={onToggleSelect} className="mt-1 text-slate-400 hover:text-brand-600 flex-shrink-0">
+            {selected ? <CheckSquare className="h-4 w-4 text-brand-600" /> : <Square className="h-4 w-4" />}
           </button>
         )}
         {/* Score chip */}
@@ -642,7 +642,7 @@ function IdeaRow({
             <button
               onClick={() => onApprove(true)}
               disabled={busy}
-              className="inline-flex items-center justify-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
               title="Queue + immediately start generating"
             >
               <Sparkles className="h-3 w-3" />
@@ -651,7 +651,7 @@ function IdeaRow({
             <button
               onClick={() => onApprove(false)}
               disabled={busy}
-              className="inline-flex items-center justify-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-brand-50 text-brand-700 hover:bg-brand-100 disabled:opacity-50"
             >
               <Check className="h-3 w-3" />
               Queue
@@ -723,10 +723,10 @@ function TableView({
                 <td className="px-3 py-2 text-right">
                   {idea.status === "pending" ? (
                     <div className="inline-flex gap-1">
-                      <button onClick={() => onApprove(idea, true)} disabled={busy} className="px-2 py-0.5 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50" title="Generate">
+                      <button onClick={() => onApprove(idea, true)} disabled={busy} className="px-2 py-0.5 text-xs rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50" title="Generate">
                         <Sparkles className="h-3 w-3" />
                       </button>
-                      <button onClick={() => onApprove(idea, false)} disabled={busy} className="px-2 py-0.5 text-xs rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50" title="Queue">
+                      <button onClick={() => onApprove(idea, false)} disabled={busy} className="px-2 py-0.5 text-xs rounded bg-brand-50 text-brand-700 hover:bg-brand-100 disabled:opacity-50" title="Queue">
                         <Check className="h-3 w-3" />
                       </button>
                       <button onClick={() => onReject(idea)} disabled={busy} className="px-2 py-0.5 text-xs rounded bg-slate-100 text-slate-500 hover:bg-slate-200 disabled:opacity-50" title="Reject">

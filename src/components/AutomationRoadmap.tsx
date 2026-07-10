@@ -34,7 +34,7 @@ interface AutomationTask {
 
 const STATUS_META: Record<TaskStatus, { label: string; badge: string }> = {
   planned: { label: "Planned", badge: "bg-slate-100 text-slate-600 border-slate-200" },
-  in_progress: { label: "In Progress", badge: "bg-indigo-100 text-indigo-700 border-indigo-200" },
+  in_progress: { label: "In Progress", badge: "bg-brand-100 text-brand-700 border-brand-200" },
   blocked: { label: "Blocked", badge: "bg-amber-100 text-amber-700 border-amber-200" },
   done: { label: "Done", badge: "bg-emerald-100 text-emerald-700 border-emerald-200" },
 };
@@ -161,7 +161,7 @@ export default function AutomationRoadmap() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <ListChecks className="h-6 w-6 text-indigo-600" />
+            <ListChecks className="h-6 w-6 text-brand-600" />
             Automation Roadmap
           </h1>
           <p className="text-sm text-slate-500 mt-1">
@@ -171,7 +171,7 @@ export default function AutomationRoadmap() {
         {!adding && (
           <button
             onClick={() => setAdding(true)}
-            className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+            className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl bg-brand-600 text-white hover:bg-brand-700 transition-colors"
           >
             <Plus className="h-4 w-4" /> Add task
           </button>
@@ -189,9 +189,9 @@ export default function AutomationRoadmap() {
               if (e.key === "Escape") { setAdding(false); setNewTitle(""); }
             }}
             placeholder="New task title…"
-            className="flex-1 text-sm px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            className="flex-1 text-sm px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-200"
           />
-          <button onClick={addTask} className="text-sm font-semibold px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+          <button onClick={addTask} className="text-sm font-semibold px-4 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
             Add
           </button>
           <button onClick={() => { setAdding(false); setNewTitle(""); }} className="text-sm font-semibold px-3 py-2 rounded-lg text-slate-500 hover:bg-slate-100">
@@ -289,7 +289,7 @@ function EditableTitle({ task, onSave }: { task: AutomationTask; onSave: (v: str
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onBlur={() => { if (value.trim() && value !== task.title) onSave(value.trim()); }}
-        className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+        className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-200"
       />
     </div>
   );
@@ -306,7 +306,7 @@ function EditableDescription({ task, onSave }: { task: AutomationTask; onSave: (
         onBlur={() => { if (value !== task.description) onSave(value); }}
         rows={Math.min(12, Math.max(3, value.split("\n").length))}
         placeholder="Technical details…"
-        className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-200 whitespace-pre-wrap"
+        className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-brand-200 whitespace-pre-wrap"
       />
     </div>
   );
@@ -359,7 +359,7 @@ function UpdatesLog({ task, onPosted }: { task: AutomationTask; onPosted: (t: Au
         <input
           value={author}
           onChange={(e) => setAuthor(e.target.value)}
-          className="w-28 text-xs px-2 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          className="w-28 text-xs px-2 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-200"
           placeholder="Author"
         />
         <textarea
@@ -367,7 +367,7 @@ function UpdatesLog({ task, onPosted }: { task: AutomationTask; onPosted: (t: Au
           onChange={(e) => setBody(e.target.value)}
           rows={1}
           placeholder="Post an update…"
-          className="flex-1 text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          className="flex-1 text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-200"
         />
         <button
           onClick={post}
