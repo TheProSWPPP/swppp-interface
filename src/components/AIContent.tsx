@@ -5,6 +5,7 @@ import AIContentList from "./AIContentList";
 import AIContentDetail from "./AIContentDetail";
 import SeoIdeas from "./SeoIdeas";
 import { useToasts, ToastStack } from "./Toast";
+import { StatCardsSkeleton, ListRowsSkeleton, Skeleton } from "./Skeleton";
 import {
   AlertCircle,
   RotateCcw,
@@ -206,8 +207,13 @@ export default function AIContent() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-20 text-slate-500">
-        Loading AI content...
+      <div className="space-y-6">
+        <StatCardsSkeleton count={5} />
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-9 w-64 rounded-xl" />
+          <Skeleton className="h-8 w-20 rounded-lg" />
+        </div>
+        <ListRowsSkeleton rows={4} />
       </div>
     );
   }

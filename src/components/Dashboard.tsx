@@ -3,9 +3,11 @@ import type { Project } from "../data";
 import ProjectList from "./ProjectList";
 import ProjectDetail from "./ProjectDetail";
 import { CheckCircle2, Clock, AlertCircle, Inbox, RotateCcw } from "lucide-react";
+import { StatCardsSkeleton, ListRowsSkeleton, Skeleton } from "./Skeleton";
 
 interface DashboardProps {
   projects: Project[];
+  isLoading?: boolean;
   loadError?: boolean;
   onRetry?: () => void;
   onUpdateProject: (project: Project) => void;
@@ -15,6 +17,7 @@ interface DashboardProps {
 
 export default function Dashboard({
   projects,
+  isLoading,
   loadError,
   onRetry,
   onUpdateProject,
@@ -71,6 +74,20 @@ export default function Dashboard({
     ).length,
     completed: projects.filter((p) => p.status === "Complete").length,
   };
+
+  if (isLoading && !selectedProject && projects.length === 0) {
+    return (
+      <div className="space-y-8">
+        <StatCardsSkeleton count={4} />
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-4 w-72" />
+        </div>
+        <Skeleton className="h-11 w-full rounded-xl" />
+        <ListRowsSkeleton rows={4} />
+      </div>
+    );
+  }
 
   if (loadError && !selectedProject) {
     return (
