@@ -162,7 +162,7 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
             "inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition",
             approving || approvedCount === 0
               ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-              : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
+              : "bg-brand-600 text-white hover:bg-brand-700 shadow-sm"
           )}
         >
           <Send className="h-4 w-4" />
@@ -183,7 +183,7 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0); }}
             placeholder="Search title, city, state..."
-            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none bg-white"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-1 focus:ring-brand-500 outline-none bg-white"
           />
         </div>
         <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
@@ -271,9 +271,9 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
                               if (e.key === "Enter") saveEdit(row);
                               if (e.key === "Escape") setEditingId(null);
                             }}
-                            className="w-full px-2 py-1 border border-indigo-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                            className="w-full px-2 py-1 border border-brand-300 rounded text-sm focus:ring-1 focus:ring-brand-500 outline-none"
                           />
-                          <button onClick={() => saveEdit(row)} className="text-indigo-600 hover:text-indigo-800 p-1">
+                          <button onClick={() => saveEdit(row)} className="text-brand-600 hover:text-brand-800 p-1">
                             <Save className="h-4 w-4" />
                           </button>
                           <button onClick={() => setEditingId(null)} className="text-slate-400 hover:text-slate-600 p-1">
@@ -325,7 +325,7 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
                         <div className="inline-flex items-center gap-1">
                           <button
                             onClick={() => startEdit(row)}
-                            className="text-slate-400 hover:text-indigo-600 p-1"
+                            className="text-slate-400 hover:text-brand-600 p-1"
                             title="Edit title"
                           >
                             <Edit3 className="h-4 w-4" />
@@ -376,7 +376,7 @@ export default function LeadImportPreview({ job, onApproved }: Props) {
                                 href={quickLink}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-indigo-600 hover:underline truncate"
+                                className="inline-flex items-center gap-1 text-brand-600 hover:underline truncate"
                               >
                                 CMD <ExternalLink className="h-3 w-3" />
                               </a>
@@ -445,7 +445,7 @@ function StatusPill({ status }: { status: LeadImportRow["status"] }) {
   const map: Record<LeadImportRow["status"], { label: string; cls: string }> = {
     pending: { label: "Pending", cls: "bg-slate-100 text-slate-600" },
     cleaned: { label: "Ready", cls: "bg-blue-50 text-blue-700" },
-    approved: { label: "Approved", cls: "bg-indigo-50 text-indigo-700" },
+    approved: { label: "Approved", cls: "bg-brand-50 text-brand-700" },
     rejected: { label: "Rejected", cls: "bg-slate-100 text-slate-500" },
     uploaded: { label: "Uploaded", cls: "bg-emerald-50 text-emerald-700" },
     error: { label: "Error", cls: "bg-red-50 text-red-700" },

@@ -94,7 +94,7 @@ export default function ArchiveList({ onRestore }: ArchiveListProps) {
 
               <button
                 onClick={() => handleRestore(project.id)}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-indigo-600 bg-white border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors shadow-sm"
+                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-brand-600 bg-white border border-brand-200 rounded-lg hover:bg-brand-50 transition-colors shadow-sm"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 Restore

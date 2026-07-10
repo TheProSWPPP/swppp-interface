@@ -223,7 +223,7 @@ export default function AIContent() {
 
   const colorMap: Record<string, { bg: string; text: string }> = {
     blue: { bg: "bg-blue-50", text: "text-blue-600" },
-    indigo: { bg: "bg-indigo-50", text: "text-indigo-600" },
+    indigo: { bg: "bg-brand-50", text: "text-brand-600" },
     amber: { bg: "bg-amber-50", text: "text-amber-600" },
     green: { bg: "bg-green-50", text: "text-green-600" },
     red: { bg: "bg-red-50", text: "text-red-600" },
@@ -247,7 +247,7 @@ export default function AIContent() {
             className={cn(
               "bg-white overflow-hidden rounded-xl border shadow-sm p-4 flex items-center gap-3 transition-all duration-200 text-left",
               statusFilter === card.key
-                ? "border-indigo-500 ring-1 ring-indigo-500 shadow-indigo-100"
+                ? "border-brand-500 ring-1 ring-brand-500 shadow-brand-100"
                 : "border-gray-200 hover:shadow-md hover:-translate-y-0.5"
             )}
           >
@@ -400,9 +400,9 @@ function StatesDashboard({
           <p className="text-xs font-medium text-red-600">No Content</p>
           <p className="text-2xl font-bold text-red-900">{statesWithoutContent.length}</p>
         </div>
-        <div className="bg-indigo-50 rounded-xl border border-indigo-200 p-4">
-          <p className="text-xs font-medium text-indigo-600">Total Articles</p>
-          <p className="text-2xl font-bold text-indigo-900">{items.length}</p>
+        <div className="bg-brand-50 rounded-xl border border-brand-200 p-4">
+          <p className="text-xs font-medium text-brand-600">Total Articles</p>
+          <p className="text-2xl font-bold text-brand-900">{items.length}</p>
         </div>
       </div>
 

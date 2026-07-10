@@ -126,10 +126,10 @@ export default function OperatorWorkspace({
     <button
       onClick={() => { setStage(key); setPage(1); }}
       className={`rounded-full px-3 py-1 text-sm font-semibold transition-colors ${
-        stage === key ? "bg-indigo-600 text-white" : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+        stage === key ? "bg-brand-600 text-white" : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
       }`}
     >
-      {label} <span className={stage === key ? "text-indigo-200" : "text-slate-400"}>{count.toLocaleString()}</span>
+      {label} <span className={stage === key ? "text-brand-200" : "text-slate-400"}>{count.toLocaleString()}</span>
     </button>
   );
 
@@ -153,7 +153,7 @@ export default function OperatorWorkspace({
         {stageChip("all", "All", counts.all)}
         <a
           href={LEADS_CSV_URL}
-          className="ml-auto flex items-center gap-1 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+          className="ml-auto flex items-center gap-1 rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700"
           title="Download the full leads list (phone, email, address, violation) as CSV"
         >
           <Download className="h-4 w-4" /> Download list
@@ -209,10 +209,10 @@ export default function OperatorWorkspace({
 
       {/* Bulk bar */}
       {selected.size > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm">
-          <span className="font-semibold text-indigo-700">{selected.size} selected</span>
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm">
+          <span className="font-semibold text-brand-700">{selected.size} selected</span>
           <button onClick={bulkMarkContacted} disabled={bulkBusy}
-            className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">
+            className="rounded-lg bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
             Mark contacted ({selected.size})
           </button>
           <button onClick={clearSel} className="ml-auto text-xs text-slate-500 hover:text-slate-700">Clear</button>
@@ -248,7 +248,7 @@ export default function OperatorWorkspace({
           <tbody>
             {operators.map((row) => (
               <tr key={row.operator_key}
-                className={"border-t border-slate-100 hover:bg-slate-50 cursor-pointer " + (selected.has(row.operator_key) ? "bg-indigo-50/60" : "")}
+                className={"border-t border-slate-100 hover:bg-slate-50 cursor-pointer " + (selected.has(row.operator_key) ? "bg-brand-50/60" : "")}
                 onClick={() => setSelectedKey(row.operator_key)}>
                 <td className="p-2" onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" aria-label={`Select ${row.operator_name || row.operator_key}`}

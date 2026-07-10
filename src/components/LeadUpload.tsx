@@ -23,7 +23,7 @@ const STATUS_LABEL: Record<LeadImportStatus, string> = {
 const STATUS_COLOR: Record<LeadImportStatus, string> = {
   uploaded: "text-slate-600 bg-slate-50",
   cleaning: "text-blue-700 bg-blue-50",
-  ready: "text-indigo-700 bg-indigo-50",
+  ready: "text-brand-700 bg-brand-50",
   uploading: "text-amber-700 bg-amber-50",
   done: "text-emerald-700 bg-emerald-50",
   error: "text-red-700 bg-red-50",
@@ -40,7 +40,7 @@ function ProgressRow({ job, onDelete, onOpen }: { job: LeadImportJob; onDelete?:
     <div
       className={cn(
         "border border-slate-200 rounded-xl p-4 bg-white",
-        onOpen && "cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition"
+        onOpen && "cursor-pointer hover:border-brand-300 hover:bg-brand-50/30 transition"
       )}
       onClick={onOpen}
     >
@@ -216,7 +216,7 @@ export default function LeadUpload() {
         onClick={() => fileInputRef.current?.click()}
         className={cn(
           "border-2 border-dashed rounded-2xl p-12 text-center transition cursor-pointer",
-          dragOver ? "border-indigo-500 bg-indigo-50" : "border-slate-300 hover:border-slate-400 bg-white",
+          dragOver ? "border-brand-500 bg-brand-50" : "border-slate-300 hover:border-slate-400 bg-white",
           isUploading && "pointer-events-none opacity-60",
         )}
       >

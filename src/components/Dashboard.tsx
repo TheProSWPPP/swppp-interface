@@ -57,7 +57,7 @@ export default function Dashboard({
     total: projects.length,
     new: projects.filter((p) => p.status === "New").length,
     pending: projects.filter(
-      (p) => p.status === "Pending Review" || p.status === "New"
+      (p) => p.status === "Pending Review"
     ).length,
     processing: projects.filter(
       (p) =>
@@ -97,7 +97,7 @@ export default function Dashboard({
             </div>
           </div>
           <div className="bg-white overflow-hidden rounded-xl border border-gray-200 shadow-sm p-5 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
+            <div className="h-12 w-12 rounded-lg bg-brand-50 flex items-center justify-center text-brand-600">
               <Clock className="h-6 w-6" />
             </div>
             <div>

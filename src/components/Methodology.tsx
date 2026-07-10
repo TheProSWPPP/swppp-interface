@@ -121,7 +121,7 @@ export default function Methodology() {
           {/* MS4 Operator */}
           <section className="space-y-4">
             <h2 className="text-xl font-bold text-slate-900 flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+              <div className="h-10 w-10 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center border border-brand-100">
                 <ClipboardList className="h-6 w-6" />
               </div>
               MS4 Operator (EPA ECHO)

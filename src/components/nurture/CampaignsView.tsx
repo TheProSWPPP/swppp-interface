@@ -7,7 +7,7 @@ type Toast = (kind: "success" | "error", text: string) => void;
 
 const STATUS_COLORS: Record<string, string> = {
   sent: "bg-emerald-100 text-emerald-700", queued: "bg-sky-100 text-sky-700", draft: "bg-slate-100 text-slate-600",
-  suspended: "bg-amber-100 text-amber-700", in_process: "bg-indigo-100 text-indigo-700", archive: "bg-slate-100 text-slate-500",
+  suspended: "bg-amber-100 text-amber-700", in_process: "bg-brand-100 text-brand-700", archive: "bg-slate-100 text-slate-500",
 };
 function rate(n: number | undefined, d: number | undefined): string { if (!d) return "—"; return `${Math.round(((n || 0) / d) * 100)}%`; }
 function fmtDate(iso: string | null): string { if (!iso) return "—"; return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }

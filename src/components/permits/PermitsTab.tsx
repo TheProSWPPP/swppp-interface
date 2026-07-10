@@ -37,7 +37,7 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
   const btn = (v: PermitSub, label: string, icon: React.ReactNode) => (
     <button onClick={() => setSub(v)}
       className={"flex items-center gap-1 text-sm font-semibold px-3 py-1.5 rounded-lg " +
-        (sub === v ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+        (sub === v ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
       {icon}{label}
     </button>
   );

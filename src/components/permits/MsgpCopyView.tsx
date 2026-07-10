@@ -83,7 +83,7 @@ export default function MsgpCopyView({ pushToast }: { pushToast?: (m: string, k?
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
           disabled={busy}
-          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
         />
       </div>
 
@@ -96,7 +96,7 @@ export default function MsgpCopyView({ pushToast }: { pushToast?: (m: string, k?
             type="button"
             disabled={busy}
             onClick={() => setBody((b) => b + " " + token)}
-            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-50"
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
           >
             {label}
           </button>
@@ -115,7 +115,7 @@ export default function MsgpCopyView({ pushToast }: { pushToast?: (m: string, k?
             className={
               "flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors " +
               (showSource
-                ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                ? "border-brand-300 bg-brand-50 text-brand-700"
                 : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700")
             }
           >
@@ -129,7 +129,7 @@ export default function MsgpCopyView({ pushToast }: { pushToast?: (m: string, k?
             onChange={(e) => setBody(e.target.value)}
             disabled={busy}
             rows={18}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
           />
         ) : (
           <ReactQuill
@@ -148,7 +148,7 @@ export default function MsgpCopyView({ pushToast }: { pushToast?: (m: string, k?
           onClick={save}
           disabled={busy || !loaded}
           title={!loaded ? "Template not yet loaded — wait before saving" : undefined}
-          className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
           Save copy
         </button>

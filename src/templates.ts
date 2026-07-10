@@ -462,7 +462,7 @@ export function getTemplateName(templateIdOrName?: string): string | undefined {
 const colors = [
   "bg-blue-50 text-blue-700 border-blue-200",
   "bg-purple-50 text-purple-700 border-purple-200",
-  "bg-indigo-50 text-indigo-700 border-indigo-200",
+  "bg-brand-50 text-brand-700 border-brand-200",
   "bg-pink-50 text-pink-700 border-pink-200",
   "bg-rose-50 text-rose-700 border-rose-200",
   "bg-orange-50 text-orange-700 border-orange-200",

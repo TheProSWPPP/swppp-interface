@@ -572,7 +572,7 @@ export default function ProjectDetail({
                             ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                             : project.status === "New"
                               ? "bg-slate-100 text-slate-700 border-slate-200"
-                              : "bg-indigo-50 text-indigo-700 border-indigo-200",
+                              : "bg-brand-50 text-brand-700 border-brand-200",
                   )}
                 >
                   {project.status || "Draft"}
@@ -621,7 +621,7 @@ export default function ProjectDetail({
                   value={formData.companyName || ""}
                   onChange={(e) => handleChange("companyName", e.target.value)}
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
@@ -634,7 +634,7 @@ export default function ProjectDetail({
                   value={formData.contactName || ""}
                   onChange={(e) => handleChange("contactName", e.target.value)}
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
@@ -647,7 +647,7 @@ export default function ProjectDetail({
                   value={formData.phone || ""}
                   onChange={(e) => handleChange("phone", e.target.value)}
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
@@ -662,7 +662,7 @@ export default function ProjectDetail({
                     handleChange("customerAddress", e.target.value)
                   }
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
@@ -675,7 +675,7 @@ export default function ProjectDetail({
                   value={formData.email || ""}
                   onChange={(e) => handleChange("email", e.target.value)}
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
@@ -700,7 +700,7 @@ export default function ProjectDetail({
                       handleChange("projectAddress", e.target.value)
                     }
                     onBlur={() => onUpdate(formData)}
-                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     disabled={isApproved}
                   />
                 </div>
@@ -718,7 +718,7 @@ export default function ProjectDetail({
                       )
                     }
                     onBlur={() => onUpdate(formData)}
-                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     disabled={isApproved}
                   />
                 </div>
@@ -736,7 +736,7 @@ export default function ProjectDetail({
                       )
                     }
                     onBlur={() => onUpdate(formData)}
-                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     disabled={isApproved}
                   />
                 </div>
@@ -753,7 +753,7 @@ export default function ProjectDetail({
                       }
                       onBlur={() => onUpdate(formData)}
                       placeholder="https://dropbox.com/path/to/drawings..."
-                      className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                      className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                       disabled={isApproved}
                     />
                     {formData.civilDrawingsLink && (
@@ -761,7 +761,7 @@ export default function ProjectDetail({
                         href={formData.civilDrawingsLink}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-indigo-600 hover:border-indigo-300 transition-colors"
+                        className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-brand-600 hover:border-brand-300 transition-colors"
                         title="Open link"
                       >
                         <ExternalLink className="h-4 w-4" />
@@ -965,7 +965,7 @@ export default function ProjectDetail({
                   }
                   onBlur={() => onUpdate(formData)}
                   rows={3}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500"
                   disabled={isApproved}
                 />
               </div>
@@ -981,7 +981,7 @@ export default function ProjectDetail({
                   }
                   onBlur={() => onUpdate(formData)}
                   rows={6}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 font-mono"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 font-mono"
                   placeholder="e.g., Site prep, utilities, paving, construction, landscaping..."
                   disabled={isApproved}
                 />
@@ -999,7 +999,7 @@ export default function ProjectDetail({
                   }
                   onBlur={() => onUpdate(formData)}
                   rows={4}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 bg-slate-50/50"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50/50"
                   placeholder="Additional notes from job order..."
                   disabled={isApproved}
                 />
@@ -1019,7 +1019,7 @@ export default function ProjectDetail({
                     )
                   }
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   placeholder="e.g., 2.5"
                   disabled={isApproved}
                 />
@@ -1049,7 +1049,7 @@ export default function ProjectDetail({
                     )},${parseCoordinate(formData.longitude)}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center hover:underline"
+                    className="text-xs text-brand-600 hover:text-brand-800 flex items-center hover:underline"
                   >
                     View on Map <ExternalLink className="h-3 w-3 ml-1" />
                   </a>
@@ -1060,7 +1060,7 @@ export default function ProjectDetail({
                     value={formData.latitude || ""}
                     onChange={(e) => handleChange("latitude", e.target.value)}
                     onBlur={() => onUpdate(formData)}
-                    className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                    className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     placeholder="Lat"
                     disabled={isApproved}
                   />
@@ -1069,7 +1069,7 @@ export default function ProjectDetail({
                     value={formData.longitude || ""}
                     onChange={(e) => handleChange("longitude", e.target.value)}
                     onBlur={() => onUpdate(formData)}
-                    className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                    className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     placeholder="Long"
                     disabled={isApproved}
                   />
@@ -1085,7 +1085,7 @@ export default function ProjectDetail({
                   value={formData.state || ""}
                   onChange={(e) => handleChange("state", e.target.value)}
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   placeholder="e.g., Arkansas, Texas, Florida"
                   disabled={isApproved}
                 />
@@ -1100,7 +1100,7 @@ export default function ProjectDetail({
                   value={formData.county || ""}
                   onChange={(e) => handleChange("county", e.target.value)}
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
@@ -1114,7 +1114,7 @@ export default function ProjectDetail({
                   value={formData.city || ""}
                   onChange={(e) => handleChange("city", e.target.value)}
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   placeholder="e.g., Chalmette"
                   disabled={isApproved}
                 />
@@ -1134,7 +1134,7 @@ export default function ProjectDetail({
                       handleChange("tceqSegment", e.target.value)
                     }
                     onBlur={() => onUpdate(formData)}
-                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     disabled={isApproved}
                   />
                 </div>
@@ -1149,7 +1149,7 @@ export default function ProjectDetail({
                   value={formData.ms4Operator || ""}
                   onChange={(e) => handleChange("ms4Operator", e.target.value)}
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
@@ -1163,7 +1163,7 @@ export default function ProjectDetail({
                     href={formatWaterwayUrl(formData.projectAddress || "")}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center hover:underline"
+                    className="text-xs text-brand-600 hover:text-brand-800 flex items-center hover:underline"
                   >
                     View Source <ExternalLink className="h-3 w-3 ml-1" />
                   </a>
@@ -1173,7 +1173,7 @@ export default function ProjectDetail({
                   value={formData.waterway || ""}
                   onChange={(e) => handleChange("waterway", e.target.value)}
                   onBlur={() => onUpdate(formData)}
-                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 transition-all"
+                  className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
@@ -1188,7 +1188,7 @@ export default function ProjectDetail({
                       href="https://websoilsurvey.nrcs.usda.gov/app/WebSoilSurvey.aspx"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center hover:underline"
+                      className="text-xs text-brand-600 hover:text-brand-800 flex items-center hover:underline"
                     >
                       View Source <ExternalLink className="h-3 w-3 ml-1" />
                     </a>
@@ -1197,7 +1197,7 @@ export default function ProjectDetail({
                     value={formData.soilData || ""}
                     onChange={(e) => handleChange("soilData", e.target.value)}
                     onBlur={() => onUpdate(formData)}
-                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 min-h-[80px]"
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 min-h-[80px]"
                     disabled={isApproved}
                   />
                 </div>
@@ -1213,7 +1213,7 @@ export default function ProjectDetail({
                       }`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center hover:underline"
+                      className="text-xs text-brand-600 hover:text-brand-800 flex items-center hover:underline"
                     >
                       View Source <ExternalLink className="h-3 w-3 ml-1" />
                     </a>
@@ -1224,7 +1224,7 @@ export default function ProjectDetail({
                       handleChange("endangeredSpecies", e.target.value)
                     }
                     onBlur={() => onUpdate(formData)}
-                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 min-h-[80px]"
+                    className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 min-h-[80px]"
                     disabled={isApproved}
                   />
                 </div>
@@ -1255,7 +1255,7 @@ export default function ProjectDetail({
                         name="noiType"
                         checked={formData.noiType === "Large"}
                         onChange={() => handleChange("noiType", "Large")}
-                        className="text-indigo-600 focus:ring-indigo-500"
+                        className="text-brand-600 focus:ring-brand-500"
                         disabled={isApproved}
                       />
                       <span className="text-sm text-slate-600">
@@ -1268,7 +1268,7 @@ export default function ProjectDetail({
                         name="noiType"
                         checked={formData.noiType === "Small"}
                         onChange={() => handleChange("noiType", "Small")}
-                        className="text-indigo-600 focus:ring-indigo-500"
+                        className="text-brand-600 focus:ring-brand-500"
                         disabled={isApproved}
                       />
                       <span className="text-sm text-slate-600">
@@ -1289,7 +1289,7 @@ export default function ProjectDetail({
                         handleChange("swpppProjectDescription", e.target.value)
                       }
                       rows={3}
-                      className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 bg-slate-50/30"
+                      className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50/30"
                       placeholder="This description will appear in the SWPPP document..."
                       disabled={isApproved}
                     />
@@ -1305,7 +1305,7 @@ export default function ProjectDetail({
                         handleChange("sequenceActivities", e.target.value)
                       }
                       rows={6}
-                      className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 font-mono bg-slate-50/30"
+                      className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 font-mono bg-slate-50/30"
                       disabled={isApproved}
                     />
                   </div>
@@ -1329,7 +1329,7 @@ export default function ProjectDetail({
                             false
                           }
                           onChange={() => toggleBMP(bmp)}
-                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
                           disabled={true}
                         />
                         <span className="text-sm text-slate-600">{bmp}</span>
@@ -1363,11 +1363,11 @@ export default function ProjectDetail({
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 transition-colors group"
+                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-slate-600 hover:text-brand-600 hover:bg-brand-50 transition-colors group"
                   >
-                    <Icon className="h-4 w-4 text-slate-400 group-hover:text-indigo-500 shrink-0" />
+                    <Icon className="h-4 w-4 text-slate-400 group-hover:text-brand-500 shrink-0" />
                     <span className="flex-1 truncate">{label}</span>
-                    <ExternalLink className="h-3 w-3 text-slate-300 group-hover:text-indigo-400 shrink-0" />
+                    <ExternalLink className="h-3 w-3 text-slate-300 group-hover:text-brand-400 shrink-0" />
                   </a>
                 ) : (
                   <div
@@ -1392,7 +1392,7 @@ export default function ProjectDetail({
                   ? "bg-white border-orange-200 ring-1 ring-orange-500/10"
                   : isNew
                     ? "bg-white border-slate-200"
-                    : "bg-white border-indigo-200 ring-1 ring-indigo-500/10",
+                    : "bg-white border-brand-200 ring-1 ring-brand-500/10",
             )}
           >
             {/* Status Indicator Bar */}
@@ -1405,7 +1405,7 @@ export default function ProjectDetail({
                     ? "bg-orange-500"
                     : isNew
                       ? "bg-slate-500"
-                      : "bg-indigo-500",
+                      : "bg-brand-500",
               )}
             />
 
@@ -1425,28 +1425,28 @@ export default function ProjectDetail({
             <div className="space-y-4">
               {!isApproved && !isManual && (
                 <div className="space-y-3">
-                  <label className="flex items-center p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer hover:border-indigo-300 transition-colors">
+                  <label className="flex items-center p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer hover:border-brand-300 transition-colors">
                     <input
                       type="checkbox"
                       checked={formData.plansUploaded || false}
                       onChange={(e) =>
                         handleChange("plansUploaded", e.target.checked)
                       }
-                      className="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                      className="h-4 w-4 text-brand-600 rounded border-slate-300 focus:ring-brand-500"
                     />
                     <span className="ml-3 text-sm font-medium text-slate-700 leading-tight">
                       I have verified civil plans are in the dropbox folder
                     </span>
                   </label>
 
-                  <label className="flex items-center p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer hover:border-indigo-300 transition-colors">
+                  <label className="flex items-center p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer hover:border-brand-300 transition-colors">
                     <input
                       type="checkbox"
                       checked={formData.isIndustrial || false}
                       onChange={(e) =>
                         handleChange("isIndustrial", e.target.checked)
                       }
-                      className="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                      className="h-4 w-4 text-brand-600 rounded border-slate-300 focus:ring-brand-500"
                     />
                     <span className="ml-3 text-sm font-medium text-slate-700">
                       Is Industrial Project?
@@ -1498,7 +1498,7 @@ export default function ProjectDetail({
                       isGenerating ||
                       (!formData.plansUploaded && !formData.isIndustrial)
                     }
-                    className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-500/20 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-indigo-600/20"
+                    className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-brand-600 hover:bg-brand-700 focus:ring-4 focus:ring-brand-500/20 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-brand-600/20"
                   >
                     {isGenerating ? (
                       <>
@@ -1616,7 +1616,7 @@ export default function ProjectDetail({
                         className={cn(
                           "h-8 w-8 rounded-lg flex items-center justify-center mr-3 transition-colors",
                           isClickable
-                            ? "bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100"
+                            ? "bg-brand-50 text-brand-600 group-hover:bg-brand-100"
                             : "bg-slate-200 text-slate-500",
                         )}
                       >
@@ -1627,7 +1627,7 @@ export default function ProjectDetail({
                           className={cn(
                             "text-sm font-medium transition-colors",
                             isClickable
-                              ? "text-slate-700 group-hover:text-indigo-600"
+                              ? "text-slate-700 group-hover:text-brand-600"
                               : "text-slate-500",
                           )}
                         >
@@ -1643,7 +1643,7 @@ export default function ProjectDetail({
                           </span>
                         )}
                         {automated && !isProjectReady && isApproved && (
-                          <span className="text-[10px] text-indigo-600 font-bold uppercase tracking-tight animate-pulse">
+                          <span className="text-[10px] text-brand-600 font-bold uppercase tracking-tight animate-pulse">
                             Generating...
                           </span>
                         )}
@@ -1654,7 +1654,7 @@ export default function ProjectDetail({
                         )}
                       </div>
                       {isClickable && (
-                        <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-indigo-400" />
+                        <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-brand-400" />
                       )}
                     </a>
 
@@ -1664,7 +1664,7 @@ export default function ProjectDetail({
                           href={templateLink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[10px] font-bold text-indigo-500 hover:text-indigo-700 flex items-center gap-1 bg-indigo-50/50 px-2 py-0.5 rounded-full transition-colors"
+                          className="text-[10px] font-bold text-brand-500 hover:text-brand-700 flex items-center gap-1 bg-brand-50/50 px-2 py-0.5 rounded-full transition-colors"
                         >
                           View Template Doc
                           <ExternalLink className="h-2.5 w-2.5" />
