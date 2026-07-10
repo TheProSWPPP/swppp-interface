@@ -9,6 +9,7 @@ import LeadUpload from "./components/LeadUpload";
 import SystemDocs from "./components/SystemDocs";
 import AutomationRoadmap from "./components/AutomationRoadmap";
 import SdrInterface from "./components/SdrInterface";
+import { useToasts, ToastStack } from "./components/Toast";
 import {
   LayoutDashboard,
   Archive,
@@ -79,6 +80,7 @@ function App() {
   const [view, setViewState] = useState<View>(() => readViewFromHash());
   const [moreOpen, setMoreOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { toasts, push, dismiss } = useToasts();
 
   // Keep URL hash in sync with view; allow back/forward to navigate
   const setView = (v: View) => {
@@ -156,19 +158,39 @@ function App() {
       },
       credentials: "include",
       body: JSON.stringify(updatedProject),
-    }).catch((err) => console.error("Failed to update project:", err));
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      })
+      .catch((err) => {
+        console.error("Failed to update project:", err);
+        push(
+          "error",
+          "Couldn't save your changes — they may not have persisted. Check your connection and try again.",
+        );
+      });
   };
 
   const handleDeleteProject = (projectId: string) => {
+    const prevProjects = projects;
     setProjects((prev) => prev.filter((p) => p.id !== projectId));
 
     fetch(`/api/projects/${projectId}`, {
       method: "DELETE",
       credentials: "include",
-    }).catch((err) => console.error("Failed to delete project:", err));
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      })
+      .catch((err) => {
+        console.error("Failed to delete project:", err);
+        setProjects(prevProjects); // restore — the delete didn't take
+        push("error", "Couldn't archive that project — it's still in the queue.");
+      });
   };
 
   const handleBulkDeleteProjects = (projectIds: string[]) => {
+    const prevProjects = projects;
     setProjects((prev) => prev.filter((p) => !projectIds.includes(p.id)));
 
     fetch("/api/projects/delete", {
@@ -178,7 +200,18 @@ function App() {
       },
       credentials: "include",
       body: JSON.stringify({ ids: projectIds }),
-    }).catch((err) => console.error("Failed to bulk delete projects:", err));
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      })
+      .catch((err) => {
+        console.error("Failed to bulk delete projects:", err);
+        setProjects(prevProjects); // restore — the delete didn't take
+        push(
+          "error",
+          `Couldn't archive the selected project${projectIds.length === 1 ? "" : "s"} — still in the queue.`,
+        );
+      });
   };
 
   if (isLoading) {
@@ -302,6 +335,7 @@ function App() {
         {view === "system-docs" && <SystemDocs />}
         {view === "settings" && <SettingsView />}
       </main>
+      <ToastStack toasts={toasts} dismiss={dismiss} />
     </div>
   );
 }
