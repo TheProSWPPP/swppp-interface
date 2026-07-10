@@ -14,6 +14,7 @@ import {
   Globe,
   Search,
   X,
+  Inbox,
 } from "lucide-react";
 import { cn, formatDate } from "../utils";
 import { getTemplateName } from "../templates";
@@ -169,13 +170,30 @@ export default function ProjectList({
         )}
       </div>
 
-      {filtered.length === 0 && (
-        <div className="text-center py-16 text-slate-400">
-          <Search className="h-8 w-8 mx-auto mb-3 opacity-40" />
-          <p className="font-medium">No projects match your search.</p>
-          <button onClick={() => { setSearchQuery(""); setStatusFilter("all"); }} className="mt-2 text-brand-500 text-sm hover:underline">Clear filters</button>
-        </div>
-      )}
+      {filtered.length === 0 &&
+        (searchQuery.trim() !== "" || statusFilter !== "all" ? (
+          <div className="text-center py-16 text-slate-400">
+            <Search className="h-8 w-8 mx-auto mb-3 opacity-40" />
+            <p className="font-medium">No projects match your search.</p>
+            <button
+              onClick={() => {
+                setSearchQuery("");
+                setStatusFilter("all");
+              }}
+              className="mt-2 text-brand-500 text-sm hover:underline"
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : (
+          <div className="text-center py-16 text-slate-400">
+            <Inbox className="h-8 w-8 mx-auto mb-3 opacity-40" />
+            <p className="font-medium text-slate-500">No projects yet</p>
+            <p className="mt-1 text-sm">
+              New job orders will appear here as they come in.
+            </p>
+          </div>
+        ))}
 
       <div className="grid grid-cols-1 gap-4">
         <AnimatePresence mode="popLayout">

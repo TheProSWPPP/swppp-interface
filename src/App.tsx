@@ -75,6 +75,7 @@ function readViewFromHash(): View {
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [view, setViewState] = useState<View>(() => readViewFromHash());
   const [moreOpen, setMoreOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -120,16 +121,21 @@ function App() {
 
   const fetchProjects = () => {
     setIsLoading(true);
+    setLoadError(false);
     fetch("/api/projects", {
       credentials: "include",
     })
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
-        setProjects(data);
+        setProjects(Array.isArray(data) ? data : []);
         setIsLoading(false);
       })
       .catch((err) => {
         console.error("Failed to fetch projects:", err);
+        setLoadError(true);
         setIsLoading(false);
       });
   };
@@ -280,6 +286,8 @@ function App() {
         {view === "dashboard" && (
           <Dashboard
             projects={projects}
+            loadError={loadError}
+            onRetry={fetchProjects}
             onUpdateProject={handleUpdateProject}
             onDeleteProject={handleDeleteProject}
             onBulkDeleteProjects={handleBulkDeleteProjects}

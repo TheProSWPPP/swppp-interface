@@ -8,18 +8,29 @@ interface ArchiveListProps {
 export default function ArchiveList({ onRestore }: ArchiveListProps) {
   const [archive, setArchive] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => {
+  const fetchArchive = () => {
+    setIsLoading(true);
+    setLoadError(false);
     fetch("/api/archive")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
-        setArchive(data);
+        setArchive(Array.isArray(data) ? data : []);
         setIsLoading(false);
       })
       .catch((err) => {
         console.error("Failed to fetch archive:", err);
+        setLoadError(true);
         setIsLoading(false);
       });
+  };
+
+  useEffect(() => {
+    fetchArchive();
   }, []);
 
   const handleRestore = (id: string) => {
@@ -55,7 +66,24 @@ export default function ArchiveList({ onRestore }: ArchiveListProps) {
         </p>
       </div>
 
-      {archive.length === 0 ? (
+      {loadError ? (
+        <div className="text-center py-12 bg-white rounded-xl border border-slate-200 border-dashed">
+          <div className="mx-auto mb-3 h-10 w-10 rounded-full bg-red-50 flex items-center justify-center text-red-500">
+            <AlertCircle className="h-5 w-5" />
+          </div>
+          <p className="text-slate-700 font-medium">Couldn't load the archive</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Connection issue — nothing was lost.
+          </p>
+          <button
+            onClick={fetchArchive}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 transition-colors"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Retry
+          </button>
+        </div>
+      ) : archive.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-xl border border-slate-200 border-dashed">
           <p className="text-slate-500">No archived projects found.</p>
         </div>

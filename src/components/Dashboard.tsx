@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import type { Project } from "../data";
 import ProjectList from "./ProjectList";
 import ProjectDetail from "./ProjectDetail";
-import { CheckCircle2, Clock, AlertCircle, Inbox } from "lucide-react";
+import { CheckCircle2, Clock, AlertCircle, Inbox, RotateCcw } from "lucide-react";
 
 interface DashboardProps {
   projects: Project[];
+  loadError?: boolean;
+  onRetry?: () => void;
   onUpdateProject: (project: Project) => void;
   onDeleteProject: (projectId: string) => void;
   onBulkDeleteProjects: (projectIds: string[]) => void;
@@ -13,6 +15,8 @@ interface DashboardProps {
 
 export default function Dashboard({
   projects,
+  loadError,
+  onRetry,
   onUpdateProject,
   onDeleteProject,
   onBulkDeleteProjects,
@@ -67,6 +71,32 @@ export default function Dashboard({
     ).length,
     completed: projects.filter((p) => p.status === "Complete").length,
   };
+
+  if (loadError && !selectedProject) {
+    return (
+      <div className="flex flex-col items-center justify-center text-center py-20">
+        <div className="h-12 w-12 rounded-full bg-red-50 flex items-center justify-center text-red-500 mb-4">
+          <AlertCircle className="h-6 w-6" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-900">
+          Couldn't load projects
+        </h3>
+        <p className="mt-1 max-w-sm text-sm text-slate-500">
+          The project queue didn't come back from the server. This is a
+          connection issue, not lost data — your projects are safe.
+        </p>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1 transition-colors"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Retry
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
