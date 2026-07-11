@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Calendar, RotateCcw, AlertCircle } from "lucide-react";
+import { ListRowsSkeleton, Skeleton } from "./Skeleton";
 
 interface ArchiveListProps {
   onRestore: () => void;
@@ -48,8 +49,12 @@ export default function ArchiveList({ onRestore }: ArchiveListProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64 text-slate-500">
-        Loading archive...
+      <div className="space-y-6">
+        <div className="bg-white px-6 py-5 rounded-xl border border-slate-200 shadow-sm space-y-2">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-3.5 w-80" />
+        </div>
+        <ListRowsSkeleton rows={3} />
       </div>
     );
   }
