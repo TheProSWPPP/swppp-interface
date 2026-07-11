@@ -435,6 +435,7 @@ app.use((req, res, next) => {
     (req.path === "/api/seo-ideas/existing-articles" && req.method === "GET" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/sdr/events/ingest" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path === "/api/sdr/drafts/generate" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
+    (req.path === "/api/sdr/verify/lead" && req.method === "POST" && req.query.callback_secret === N8N_CALLBACK_SECRET) ||
     (req.path.startsWith("/api/sdr/track/") && req.method === "GET") ||
     // Google redirects the OAuth consent back here without our bearer token; the
     // signed `state` param carries identity + CSRF protection (verified in the handler).
@@ -2003,6 +2004,68 @@ app.post("/api/sdr/verify/run", async (req, res) => {
     await runVerificationPass(pool, { cap, limit });
   } catch (e) {
     console.error("/api/sdr/verify/run failed", e.message);
+  }
+});
+
+// Per-lead on-demand verification for the .com n8n workflow. Verifies a single freshly-triggered
+// lead synchronously, reusing the same cascade as runVerificationPass. Fail-open: any error
+// returns 200 { skipped: true } so the n8n caller is never blocked.
+// Auth: callback_secret query param (same as /drafts/generate). No JWT required.
+app.post("/api/sdr/verify/lead", async (req, res) => {
+  if (req.query.callback_secret !== N8N_CALLBACK_SECRET) return res.status(401).json({ error: "Invalid secret" });
+  try {
+    const { pipedrive_lead_id } = req.body || {};
+    if (!pipedrive_lead_id) return res.json({ skipped: true });
+
+    const { rows } = await pool.query(
+      `SELECT person_email, pipedrive_person_id, pipedrive_org_id
+         FROM sdr_lead_state WHERE pipedrive_lead_id = $1`,
+      [String(pipedrive_lead_id)],
+    );
+    if (!rows.length || !rows[0].person_email) return res.json({ skipped: true });
+    const row = rows[0];
+
+    const { verifyOneLead } = await import("./lib/emailVerifyRefresh.js");
+    const { verifyEmail } = await import("./lib/emailVerify.js");
+
+    const memo = new Map();
+    const verify = async (email) => {
+      if (memo.has(email)) return memo.get(email);
+      const v = await verifyEmail(email);
+      memo.set(email, v);
+      return v;
+    };
+
+    let apolloUsed = 0;
+    const APOLLO_CAP = 5;
+
+    const result = await verifyOneLead(
+      pool,
+      {
+        leadId: String(pipedrive_lead_id),
+        personId: row.pipedrive_person_id,
+        orgId: row.pipedrive_org_id,
+        email: row.person_email,
+      },
+      {
+        verify,
+        canUseApollo: () => apolloUsed < APOLLO_CAP,
+        searchPeopleByDomain: async (domain, opts) => {
+          apolloUsed++;
+          const { searchPeopleByDomain } = await import("./lib/apolloClient.js");
+          return searchPeopleByDomain(domain, opts);
+        },
+      },
+    );
+
+    return res.json({
+      email_verify_status: result.status,
+      email_flag: result.email_flag,
+      resolved_email: result.resolved_email,
+    });
+  } catch (e) {
+    console.error("/api/sdr/verify/lead failed", e.message);
+    return res.json({ skipped: true });
   }
 });
 
