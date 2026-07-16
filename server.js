@@ -2018,15 +2018,28 @@ app.post("/api/sdr/verify/lead", async (req, res) => {
     if (!pipedrive_lead_id) return res.json({ skipped: true });
 
     const { rows } = await pool.query(
-      `SELECT person_email, pipedrive_person_id, pipedrive_org_id
+      `SELECT person_email, pipedrive_person_id, pipedrive_org_id,
+              email_verify_status, email_verified_at, email_verified_value, resolved_email, email_flag
          FROM sdr_lead_state WHERE pipedrive_lead_id = $1`,
       [String(pipedrive_lead_id)],
     );
     if (!rows.length || !rows[0].person_email) return res.json({ skipped: true });
     const row = rows[0];
 
-    const { verifyOneLead } = await import("./lib/emailVerifyRefresh.js");
+    const { verifyOneLead, STALE_MS } = await import("./lib/emailVerifyRefresh.js");
     const { verifyEmail } = await import("./lib/emailVerify.js");
+
+    // Fresh cached verdict for this exact address → answer from cache. Without this,
+    // every .com-triggered lead burned a NeverBounce credit even when verified days ago.
+    const verifiedAt = row.email_verified_at ? new Date(row.email_verified_at).getTime() : null;
+    if (row.email_verified_value === row.person_email && verifiedAt && Date.now() - verifiedAt <= STALE_MS) {
+      return res.json({
+        email_verify_status: row.email_verify_status,
+        email_flag: row.email_flag,
+        resolved_email: row.resolved_email,
+        cached: true,
+      });
+    }
 
     const memo = new Map();
     const verify = async (email) => {
