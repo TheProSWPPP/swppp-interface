@@ -1263,7 +1263,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
   const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
   const runInboxWatch = () =>
     pollInboxReplies(pool, { getToken: accessTokenForMailbox, appBase })
-      .then((r) => { if (r && (r.created || r.forwarded || r.bounced)) console.log("[inbox-reply-watch]", JSON.stringify(r)); })
+      .then((r) => { if (r && (r.created || r.forwarded || r.bounced || r.skipped)) console.log("[inbox-reply-watch]", JSON.stringify(r)); })
       .catch((e) => console.error("[inbox-reply-watch] failed:", e.message));
   setTimeout(runInboxWatch, 90_000);
   setInterval(runInboxWatch, 5 * 60 * 1000);
