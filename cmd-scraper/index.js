@@ -222,12 +222,54 @@ async function scrapeBidder(projectUrl) {
     const grid = document.querySelector("div#bv");
     if (!grid) return { error: "Grid not found" };
     const tables = grid.querySelectorAll('table[role="presentation"]');
-    for (const table of tables) {
-      const cells = table.querySelectorAll("td.x-grid-cell");
-      const cellTexts = Array.from(cells).map((cell) => {
+
+    const cellsOf = (table) => table.querySelectorAll("td.x-grid-cell");
+    const textsOf = (cells) =>
+      Array.from(cells).map((cell) => {
         const div = cell.querySelector("div.x-grid-cell-inner");
         return div ? div.textContent.trim() : "";
       });
+    const rowResult = (cells, cellTexts, extra) => {
+      const companyCell = cells[0];
+      const link = companyCell ? companyCell.querySelector("a") : null;
+      let companyId = "";
+      let companyUrl = "";
+      if (link) {
+        const onclickAttr = link.getAttribute("onclick");
+        const hrefAttr = link.getAttribute("href");
+        if (onclickAttr) {
+          const m = onclickAttr.match(/navigateToDetailsPage\('([^']+)','([^']+)','([^']+)'\)/);
+          if (m) companyId = m[1];
+        }
+        if (!companyId && hrefAttr) {
+          const m = hrefAttr.match(/CompanyInformation\/(\d+)/);
+          if (m) companyId = m[1];
+        }
+        if (companyId) {
+          const numericId = companyId.replace(/\|.*$/, "");
+          companyUrl =
+            "https://insight.cmdgroup.com/Company/Home/CompanyInformation/" + numericId;
+        }
+      }
+      return Object.assign(
+        {
+          company: cellTexts[0] || "",
+          address: cellTexts[4] || "",
+          phone: cellTexts[5] || "",
+          email: cellTexts[6] || "",
+          companyId,
+          companyUrl,
+          bidRank: cellTexts[8] || "",
+          biddingRole: cellTexts[7] || "",
+        },
+        extra || {}
+      );
+    };
+
+    // 1. Preferred: CMD flagged the winner in the bidder grid itself.
+    for (const table of tables) {
+      const cells = cellsOf(table);
+      const cellTexts = textsOf(cells);
       const bidRank = cellTexts[8] || "";
       const biddingRole = cellTexts[7] || "";
       if (
@@ -235,39 +277,51 @@ async function scrapeBidder(projectUrl) {
         biddingRole.includes("Apparent Low") ||
         biddingRole.includes("Awarded")
       ) {
-        const companyCell = cells[0];
-        const link = companyCell ? companyCell.querySelector("a") : null;
-        let companyId = "";
-        let companyUrl = "";
-        if (link) {
-          const onclickAttr = link.getAttribute("onclick");
-          const hrefAttr = link.getAttribute("href");
-          if (onclickAttr) {
-            const m = onclickAttr.match(/navigateToDetailsPage\('([^']+)','([^']+)','([^']+)'\)/);
-            if (m) companyId = m[1];
-          }
-          if (!companyId && hrefAttr) {
-            const m = hrefAttr.match(/CompanyInformation\/(\d+)/);
-            if (m) companyId = m[1];
-          }
-          if (companyId) {
-            const numericId = companyId.replace(/\|.*$/, "");
-            companyUrl =
-              "https://insight.cmdgroup.com/Company/Home/CompanyInformation/" + numericId;
+        return rowResult(cells, cellTexts, { awardSource: "grid_role" });
+      }
+    }
+
+    // 2. Fallback: on some AGC projects CMD announces the award ONLY in the project
+    //    update feed ("<Company> was added as General Contractor") and leaves every
+    //    grid role at Prospective/Short Listed, so step 1 finds nothing. Take the
+    //    most recent such line (the feed is newest-first) and match it back to a
+    //    grid row for address/phone/email/companyId.
+    //    NEVER fall back to an unmarked or Short Listed row — several companies are
+    //    short listed and picking one would contact a losing bidder.
+    const awardLine = (document.body.innerText || "")
+      .split("\n")
+      .map((s) => s.trim())
+      .find((s) => /was added as General Contractor/i.test(s));
+    if (awardLine) {
+      const m = awardLine.match(
+        /^(?:\d{1,2}\/\d{1,2}\/\d{4}\s+)?(.+?)\s+was added as General Contractor/i
+      );
+      const awarded = m ? m[1].trim() : "";
+      if (awarded) {
+        const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+        for (const table of tables) {
+          const cells = cellsOf(table);
+          const cellTexts = textsOf(cells);
+          if (cellTexts[0] && norm(cellTexts[0]) === norm(awarded)) {
+            return rowResult(cells, cellTexts, { awardSource: "update_feed" });
           }
         }
+        // Announced but not present in the grid — still return the name so the
+        // caller can match/create the org in Pipedrive.
         return {
-          company: cellTexts[0] || "",
-          address: cellTexts[4] || "",
-          phone: cellTexts[5] || "",
-          email: cellTexts[6] || "",
-          companyId,
-          companyUrl,
-          bidRank,
-          biddingRole,
+          company: awarded,
+          address: "",
+          phone: "",
+          email: "",
+          companyId: "",
+          companyUrl: "",
+          bidRank: "",
+          biddingRole: "",
+          awardSource: "update_feed_unmatched",
         };
       }
     }
+
     const debug = [];
     for (let i = 0; i < Math.min(3, tables.length); i++) {
       const cells = tables[i].querySelectorAll("td.x-grid-cell");
