@@ -53,14 +53,18 @@ export default function PermitsTab({ pushToast }: { pushToast?: (m: string, k?: 
             </label>
             <p className="mt-1 text-xs text-slate-500">
               On = automatically emails the renewal to companies that have an email, daily.
-              Each inbox sends at most <b>20% of its daily limit</b> for permits — your Pipedrive / SDR
-              outreach keeps the other 80%. Obviously-wrong matches are skipped, not sent.
+              Each inbox sends up to its <b>permit cap</b> per day; if no cap is set it falls back to
+              20% of the inbox's daily limit. Permits and Pipedrive / SDR share the same inbox budget.
+              Obviously-wrong matches are skipped, not sent.
             </p>
           </div>
           <details className="border-t border-slate-200 pt-2">
             <summary className="cursor-pointer text-slate-600">Sending inboxes ({enabledCount} on)</summary>
             {mailboxes.map((m) => {
-              const share = Math.max(1, Math.ceil((m.daily_send_limit ?? 25) * 0.2));
+              // Mirror lib/permitAuto.js: an explicit permit_daily_cap wins, else the legacy 20% share.
+              const share = (m.permit_daily_cap ?? 0) > 0
+                ? (m.permit_daily_cap as number)
+                : Math.max(1, Math.ceil((m.daily_send_limit ?? 25) * 0.2));
               return (
                 <label key={m.id} className="flex items-center gap-2 py-0.5 cursor-pointer">
                   <input type="checkbox" checked={m.permit_enabled}

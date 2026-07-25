@@ -126,7 +126,7 @@ export interface PermitSettings {
   auto_find_backlog_max?: number;
   auto_send_enabled?: boolean;
 }
-export interface PermitMailbox { id: string; email: string; display_name: string | null; permit_enabled: boolean; daily_send_limit?: number; }
+export interface PermitMailbox { id: string; email: string; display_name: string | null; permit_enabled: boolean; daily_send_limit?: number; permit_daily_cap?: number | null; }
 
 export async function getPermitSettings(): Promise<{ settings: PermitSettings; mailboxes: PermitMailbox[] }> {
   return j<{ settings: PermitSettings; mailboxes: PermitMailbox[] }>(`/api/permits/settings`);
