@@ -24,6 +24,8 @@ import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplate
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
 import { registerPermitExportRoutes } from "./lib/permitExportRoutes.js";
+import { registerSdrTeamRoutes, sdrPasswordRequired } from "./lib/sdrTeamRoutes.js";
+import bcrypt from "bcryptjs";
 import { runPermitAutoOutreach } from "./lib/permitAuto.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
@@ -394,6 +396,17 @@ const JWT_TTL_SECONDS = 60 * 60 * 12; // 12h
 if (!process.env.SDR_JWT_SECRET) {
   console.warn("Security: SDR_JWT_SECRET not set — using dev default. Set in Railway env before exposing /sdr publicly.");
 }
+
+// Password enforcement on SDR login. BORN DEAD: unset/absent === OFF, which is
+// byte-for-byte today's behaviour (username + active=true, password_hash ignored).
+// Only the literal strings 1/true/yes/on turn it on. Four people use this tool
+// daily and none of them knows their password — every one of them must be given
+// one via PATCH /api/sdr/admin/users/:id BEFORE this is flipped. See
+// goal-runs/2026-07-28-derek-ready-fixes-out/phase1-f-onboarding-auth.md.
+const REQUIRE_PASSWORD = sdrPasswordRequired();
+console.log(
+  `Security: REQUIRE_PASSWORD=${REQUIRE_PASSWORD ? "ON — SDR login verifies password_hash" : "off (default) — SDR login is username-only, unchanged"}`,
+);
 if (!process.env.APOLLO_API_KEY) {
   console.warn("APOLLO_API_KEY not set — SDR Apollo integration disabled until configured.");
 }
@@ -1315,27 +1328,52 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", database: !!process.env.DATABASE_URL });
 });
 
-// SDR identity — passwordless. The dashboard sits behind the basic-auth wall
-// (derek:dereksystem) which is the real perimeter; this endpoint just records
-// "who's working" so per-user mailbox/draft scoping has a subject.
-// Accepts a username, returns a JWT. No password required.
+// SDR identity. Two modes, selected by the REQUIRE_PASSWORD env flag:
+//
+//   REQUIRE_PASSWORD unset/off (DEFAULT, and what production runs today):
+//     passwordless. The dashboard sits behind the basic-auth wall which is the
+//     real perimeter; this endpoint just records "who's working" so per-user
+//     mailbox/draft scoping has a subject. Accepts a username, returns a JWT.
+//     `password_hash` is stored but never compared — exactly as before.
+//
+//   REQUIRE_PASSWORD=1/true/yes/on:
+//     the stored bcrypt `password_hash` is actually verified. Do not turn this
+//     on until every active user has had a password set through
+//     PATCH /api/sdr/admin/users/:id — the seed script's original passwords were
+//     printed once in June and are gone, so flipping the flag first locks
+//     everyone out.
 app.post("/api/sdr/auth/login", async (req, res) => {
   if (!process.env.DATABASE_URL) {
     return res.status(503).json({ error: "Database not configured" });
   }
-  const { username } = req.body || {};
+  const { username, password } = req.body || {};
   if (!username) {
     return res.status(400).json({ error: "username required" });
   }
   try {
     const { rows } = await pool.query(
-      `SELECT id, username, email, display_name, role, active
+      `SELECT id, username, email, password_hash, display_name, role, active
        FROM sdr_users WHERE username = $1 LIMIT 1`,
       [username],
     );
     const user = rows[0];
     if (!user || !user.active) {
       return res.status(404).json({ error: "Unknown user" });
+    }
+    if (REQUIRE_PASSWORD) {
+      if (!password) {
+        return res.status(400).json({ error: "password required" });
+      }
+      let ok = false;
+      try {
+        ok = !!user.password_hash && (await bcrypt.compare(String(password), user.password_hash));
+      } catch {
+        ok = false; // malformed hash → deny, never fall through to a free pass
+      }
+      if (!ok) {
+        console.warn(`[sdr-auth] failed password attempt for "${user.username}"`);
+        return res.status(401).json({ error: "Invalid username or password" });
+      }
     }
     await pool.query(`UPDATE sdr_users SET last_login_at = NOW() WHERE id = $1`, [user.id]);
     const token = jwt.sign(
@@ -1368,7 +1406,9 @@ app.get("/api/sdr/auth/users", async (req, res) => {
       `SELECT username, display_name, role
        FROM sdr_users WHERE active = TRUE ORDER BY role DESC, username`,
     );
-    res.json({ users: rows });
+    // `require_password` is additive — the picker reads `.users` and ignores it
+    // when false, so the passwordless UI is unchanged while the flag is off.
+    res.json({ users: rows, require_password: REQUIRE_PASSWORD });
   } catch (err) {
     console.error("/api/sdr/auth/users error:", err);
     res.status(500).json({ error: "Failed to list users" });
@@ -1417,23 +1457,96 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
   }
 });
 
-// SDR mailbox — enable/disable a sender (admin only). A disabled mailbox is skipped by
-// draft generation and the auto-outreach rotation (and can't be sent from).
+// SDR mailbox — enable/disable a sender and set its ownership/routing fields (admin only).
+// A disabled mailbox is skipped by draft generation and the auto-outreach rotation
+// (and can't be sent from).
+//
+// Extended 2026-07-28: `owner_user_id`, `pipedrive_sender_id` and `permit_daily_cap`
+// previously had NO runtime writer anywhere in the codebase — owner_user_id could only
+// be set by re-running scripts/seed-sdr.mjs, and the other two by hand-written SQL. The
+// consequence was silent: a mailbox with no pipedrive_sender_id falls back to Derek's
+// Pipedrive user id (lib/inboxReplyWatch.js:16, server.js:3124), so replies to a new
+// teammate's mailbox get filed under Derek.
+//
+// `active` alone still behaves exactly as before (same body, same response shape) so
+// existing callers are unaffected. Deliberately NOT handled here: `permit_enabled`,
+// which already has its own writer at PATCH /api/permits/mailboxes/:id — a second
+// toggle for the same column is exactly the kind of twin that drifts.
 app.patch("/api/sdr/mailboxes/:id", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
-  const { active } = req.body || {};
-  if (typeof active !== "boolean") return res.status(400).json({ error: "active (boolean) required" });
+  const body = req.body || {};
+  const UUID_RE_MB = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!UUID_RE_MB.test(req.params.id)) return res.status(400).json({ error: "Invalid mailbox id — must be a UUID" });
+
+  const sets = [];
+  const params = [];
+  const summary = [];
+
+  if (body.active !== undefined) {
+    if (typeof body.active !== "boolean") return res.status(400).json({ error: "active (boolean) required" });
+    params.push(body.active);
+    sets.push(`active = $${params.length}`);
+    summary.push(body.active ? "enabled" : "disabled");
+  }
+  if (body.owner_user_id !== undefined) {
+    if (body.owner_user_id === null || body.owner_user_id === "") {
+      params.push(null);
+      sets.push(`owner_user_id = $${params.length}`);
+      summary.push("owner cleared");
+    } else {
+      const oid = String(body.owner_user_id);
+      if (!UUID_RE_MB.test(oid)) return res.status(400).json({ error: "owner_user_id must be a UUID or null" });
+      const { rows: ow } = await pool.query(`SELECT id, email FROM sdr_users WHERE id = $1`, [oid]);
+      if (!ow[0]) return res.status(400).json({ error: "owner_user_id does not match any user" });
+      // Inbox visibility (visibleMailboxes, below) matches on email local-part, not
+      // owner_user_id. A mismatch would leave the owner unable to see their own inbox.
+      const { rows: mb } = await pool.query(`SELECT email FROM sdr_mailboxes WHERE id = $1`, [req.params.id]);
+      if (!mb[0]) return res.status(404).json({ error: "Mailbox not found" });
+      if (mb[0].email.split("@")[0] !== ow[0].email.split("@")[0]) {
+        return res.status(400).json({
+          error: `Local-part mismatch: ${ow[0].email} would not see ${mb[0].email} in their inbox (visibility matches on the part before the @).`,
+        });
+      }
+      params.push(oid);
+      sets.push(`owner_user_id = $${params.length}`);
+      summary.push(`owner → ${ow[0].email}`);
+    }
+  }
+  for (const [key, min, max] of [["pipedrive_sender_id", 1, 2147483647], ["permit_daily_cap", 0, 500], ["daily_send_limit", 0, 500]]) {
+    if (body[key] === undefined) continue;
+    if (body[key] === null || body[key] === "") {
+      if (key === "daily_send_limit") return res.status(400).json({ error: "daily_send_limit cannot be null" });
+      params.push(null);
+      sets.push(`${key} = $${params.length}`);
+      summary.push(`${key} cleared`);
+      continue;
+    }
+    const n = Number(body[key]);
+    if (!Number.isInteger(n) || n < min || n > max) {
+      return res.status(400).json({ error: `${key} must be an integer between ${min} and ${max}` });
+    }
+    params.push(n);
+    sets.push(`${key} = $${params.length}`);
+    summary.push(`${key}=${n}`);
+  }
+
+  if (!sets.length) {
+    return res.status(400).json({ error: "active (boolean) required" });
+  }
+
   try {
+    params.push(req.params.id);
     const { rows } = await pool.query(
-      `UPDATE sdr_mailboxes SET active = $1, updated_at = NOW() WHERE id = $2 RETURNING id, email, active`,
-      [active, req.params.id],
+      `UPDATE sdr_mailboxes SET ${sets.join(", ")}, updated_at = NOW() WHERE id = $${params.length}
+       RETURNING id, email, active, owner_user_id, pipedrive_sender_id, permit_daily_cap, daily_send_limit, permit_enabled`,
+      params,
     );
     if (!rows[0]) return res.status(404).json({ error: "Mailbox not found" });
     await pool.query(
       `INSERT INTO nurture_audit (sdr_user, action, target_kind, target_id, summary)
        VALUES ($1, 'mailbox.toggle', 'sdr_mailbox', $2, $3)`,
-      [req.sdrUser?.username || req.sdrUser?.sub, req.params.id, active ? "enabled" : "disabled"],
+      [req.sdrUser?.username || req.sdrUser?.sub, req.params.id, summary.join(", ")],
     ).catch(() => {});
     res.json({ mailbox: rows[0] });
   } catch (err) {
@@ -6266,6 +6379,7 @@ setInterval(async () => {
 registerNurtureRoutes(app, pool);
 registerPermitRoutes(app, pool);
 registerPermitExportRoutes(app, pool);
+registerSdrTeamRoutes(app, pool);
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, "dist")));
