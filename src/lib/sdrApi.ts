@@ -37,79 +37,6 @@ export interface SdrMailbox {
   warmup_day: number;
 }
 
-// --- Team admin (admin-only surface, added 2026-07-28) -----------------------
-export interface SdrTeamMailboxSummary {
-  id: string;
-  email: string;
-  active: boolean;
-  permit_enabled: boolean;
-  pipedrive_sender_id: number | null;
-  permit_daily_cap: number | null;
-}
-
-export interface SdrTeamUser {
-  id: string;
-  username: string;
-  email: string;
-  display_name: string | null;
-  role: SdrRole;
-  active: boolean;
-  has_password: boolean;
-  last_login_at: string | null;
-  created_at: string;
-  updated_at: string;
-  mailboxes?: SdrTeamMailboxSummary[];
-}
-
-export interface SdrTeamUserCreate {
-  username: string;
-  email: string;
-  display_name?: string;
-  role?: SdrRole;
-  active?: boolean;
-  password?: string;
-}
-
-export interface SdrTeamUserPatch {
-  display_name?: string;
-  email?: string;
-  role?: SdrRole;
-  active?: boolean;
-  password?: string;
-  generate_password?: boolean;
-}
-
-export interface SdrTeamMailboxCreate {
-  email: string;
-  display_name?: string;
-  owner_user_id?: string | null;
-  apollo_mailbox_id?: string | null;
-  pipedrive_sender_id?: number | null;
-  daily_send_limit?: number | null;
-  permit_daily_cap?: number | null;
-  active?: boolean;
-  permit_enabled?: boolean;
-}
-
-export interface SdrMailboxRoutingPatch {
-  active?: boolean;
-  owner_user_id?: string | null;
-  pipedrive_sender_id?: number | null;
-  permit_daily_cap?: number | null;
-  daily_send_limit?: number;
-}
-
-export interface SdrMailboxRouting {
-  id: string;
-  email: string;
-  active: boolean;
-  owner_user_id: string | null;
-  pipedrive_sender_id: number | null;
-  permit_daily_cap: number | null;
-  daily_send_limit: number;
-  permit_enabled: boolean;
-}
-
 export type SdrTriggerType = "AGC" | "LBA" | "CM" | "PB";
 export type SdrDraftStatus =
   | "pending"
@@ -416,18 +343,13 @@ export interface SdrInboxMessage {
 }
 
 export const sdrApi = {
-  // `require_password` mirrors the server's REQUIRE_PASSWORD env flag, which is
-  // off by default. When it's off the picker stays one-click, exactly as before.
-  listUsers: () =>
-    sdrFetch<{ users: SdrUserPublic[]; require_password?: boolean }>("/api/sdr/auth/users", { auth: false }),
+  listUsers: () => sdrFetch<{ users: SdrUserPublic[] }>("/api/sdr/auth/users", { auth: false }),
 
-  login: (username: string, password?: string) =>
+  login: (username: string) =>
     sdrFetch<{ token: string; expires_in: number; user: SdrUser }>("/api/sdr/auth/login", {
       method: "POST",
       auth: false,
-      // Omit the key entirely when there's no password so the request body is
-      // byte-identical to the pre-2026-07-28 passwordless call.
-      body: JSON.stringify(password ? { username, password } : { username }),
+      body: JSON.stringify({ username }),
     }),
 
   me: () => sdrFetch<{ user: { sub: string; username: string; role: SdrRole } }>("/api/sdr/auth/me"),
@@ -522,41 +444,6 @@ export const sdrApi = {
       `/api/sdr/mailboxes/${id}`,
       { method: "PATCH", body: JSON.stringify({ active }) },
     ),
-
-  // Team admin (admin-only). owner_user_id / pipedrive_sender_id / permit_daily_cap
-  // had no writer at all before 2026-07-28 — see lib/sdrTeamRoutes.js.
-  updateMailboxRouting: (id: string, patch: SdrMailboxRoutingPatch) =>
-    sdrFetch<{ mailbox: SdrMailboxRouting }>(`/api/sdr/mailboxes/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    }),
-
-  listTeamUsers: () =>
-    sdrFetch<{ users: SdrTeamUser[]; require_password: boolean }>("/api/sdr/admin/users"),
-
-  createTeamUser: (payload: SdrTeamUserCreate) =>
-    sdrFetch<{ user: SdrTeamUser; generated_password?: string; next_steps?: string[] }>(
-      "/api/sdr/admin/users",
-      { method: "POST", body: JSON.stringify(payload) },
-    ),
-
-  updateTeamUser: (id: string, patch: SdrTeamUserPatch) =>
-    sdrFetch<{ user: SdrTeamUser; generated_password?: string }>(`/api/sdr/admin/users/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    }),
-
-  deleteTeamUser: (id: string) =>
-    sdrFetch<{ deleted: boolean }>(`/api/sdr/admin/users/${id}`, { method: "DELETE" }),
-
-  createTeamMailbox: (payload: SdrTeamMailboxCreate) =>
-    sdrFetch<{ mailbox: SdrMailboxRouting; next_steps?: string[] }>("/api/sdr/admin/mailboxes", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  deleteTeamMailbox: (id: string) =>
-    sdrFetch<{ deleted: boolean }>(`/api/sdr/admin/mailboxes/${id}`, { method: "DELETE" }),
 
   getFirstTouchTemplates: () =>
     sdrFetch<{ templates: Record<SdrTriggerType, SdrFirstTouchTemplate> }>("/api/sdr/first-touch-templates"),
