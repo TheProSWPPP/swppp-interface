@@ -33,6 +33,7 @@ import {
   Sprout,
   StickyNote,
   Target,
+  Users,
   X,
   XCircle,
   Eye,
@@ -69,8 +70,9 @@ import ListsView from "./nurture/ListsView";
 import ContactsView from "./nurture/ContactsView";
 import AutomationsView from "./nurture/AutomationsView";
 import PermitsTab from "./permits/PermitsTab";
+import TeamView from "./sdr/TeamView";
 
-type SdrTab = "leads" | "queue" | "engaged" | "inbox" | "dashboard" | "mailboxes" | "templates" | "sequences" | "permits";
+type SdrTab = "leads" | "queue" | "engaged" | "inbox" | "dashboard" | "mailboxes" | "templates" | "sequences" | "permits" | "team";
 type OutreachLane = "cold" | "nurture";
 type NurtureTab = "campaigns" | "lists" | "contacts" | "automations";
 
@@ -304,19 +306,27 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
   const [users, setUsers] = useState<SdrUserPublic[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Mirrors the server's REQUIRE_PASSWORD flag. Defaults false, so unless an
+  // operator deliberately turns it on this stays the one-click picker it was.
+  const [requirePassword, setRequirePassword] = useState(false);
+  const [pending, setPending] = useState<SdrUserPublic | null>(null);
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     sdrApi
       .listUsers()
-      .then((d) => setUsers(d.users))
+      .then((d) => {
+        setUsers(d.users);
+        setRequirePassword(d.require_password === true);
+      })
       .catch((e) => setError(e.message));
   }, []);
 
-  async function pick(username: string) {
+  async function pick(username: string, pw?: string) {
     setBusy(username);
     setError(null);
     try {
-      const { token, user } = await sdrApi.login(username);
+      const { token, user } = await sdrApi.login(username, pw);
       setSession(token, user);
       onSignIn(user);
     } catch (e) {
@@ -324,6 +334,66 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
     } finally {
       setBusy(null);
     }
+  }
+
+  function onPickUser(u: SdrUserPublic) {
+    if (!requirePassword) return pick(u.username);
+    setPending(u);
+    setPassword("");
+    setError(null);
+  }
+
+  if (requirePassword && pending) {
+    return (
+      <div className="max-w-sm mx-auto py-12">
+        <div className="text-center mb-6">
+          <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-100 text-brand-700 mb-3">
+            <ShieldCheck className="h-6 w-6" />
+          </div>
+          <h2 className="text-2xl font-semibold text-slate-900">{pending.display_name}</h2>
+          <p className="text-sm text-slate-500 mt-1">Enter your password to continue.</p>
+        </div>
+        {error && (
+          <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" />
+            {error}
+          </div>
+        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (password) pick(pending.username, password);
+          }}
+          className="space-y-3"
+        >
+          <input
+            type="password"
+            autoFocus
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm focus:border-brand-400 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={!password || !!busy}
+            className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setPending(null); setError(null); }}
+            className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            Back
+          </button>
+        </form>
+        <p className="mt-4 text-center text-xs text-slate-400">
+          Forgot it? An admin can reset it from the Team tab.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -334,7 +404,9 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
         </div>
         <h2 className="text-2xl font-semibold text-slate-900">Who's working?</h2>
         <p className="text-sm text-slate-500 mt-1">
-          Pick your name to see your draft queue. No password — the dashboard already gates access.
+          {requirePassword
+            ? "Pick your name, then enter your password."
+            : "Pick your name to see your draft queue. No password — the dashboard already gates access."}
         </p>
       </div>
       {error && (
@@ -351,7 +423,7 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
           {users.map((u) => (
             <button
               key={u.username}
-              onClick={() => pick(u.username)}
+              onClick={() => onPickUser(u)}
               disabled={!!busy}
               className={cn(
                 "group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition-all duration-200 hover:border-brand-300 hover:shadow-sm",
@@ -714,6 +786,9 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
             <TabButton current={tab} value="templates" onClick={setTab} icon={<ListChecks className="h-4 w-4" />}>Templates</TabButton>
             <TabButton current={tab} value="permits" onClick={setTab} icon={<FileSearch className="h-4 w-4" />}>Permits</TabButton>
+            {user.role === "admin" && (
+              <TabButton current={tab} value="team" onClick={setTab} icon={<Users className="h-4 w-4" />}>Team</TabButton>
+            )}
           </div>
           {tab === "leads" && <LeadsView user={user} pushToast={push} onGenerated={() => setTab("queue")} />}
           {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
@@ -723,6 +798,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {tab === "mailboxes" && <MailboxesView user={user} />}
           {(tab === "templates" || tab === "sequences") && <MessagingView user={user} pushToast={push} />}
           {tab === "permits" && <PermitsTab pushToast={(m, k) => push(k ?? "success", m)} />}
+          {tab === "team" && user.role === "admin" && <TeamView pushToast={push} />}
         </>
       ) : (
         <>
@@ -2247,6 +2323,10 @@ function QueueView({
       if (err.status === 429 && err.data?.code === "daily_cap_reached") {
         pushToast("error", `Daily cap reached for ${err.data.mailbox} — ${err.data.sentToday}/${err.data.cap} sent (warmup day ${err.data.rampDay}). Cap rises as the inbox warms; try again tomorrow.`);
         await load();
+      } else if (err.status === 409 && err.data?.code === "mailbox_inactive") {
+        // Assigned mailbox was deactivated (or never armed) since the draft was created.
+        pushToast("error", `Mailbox ${err.data.mailbox || "assigned to this draft"} is not active — cannot send. Activate it in SDR → Mailboxes.`);
+        await load(); // status may have flipped to 'failed'
       } else if (err.status === 409 && err.data?.code === "already_outreached") {
         // Dedup guard: lead already contacted in Pipedrive.
         const who = err.data.personName || "This lead";
