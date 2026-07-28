@@ -2863,11 +2863,30 @@ app.post("/api/sdr/mailboxes/sync", async (req, res) => {
       const warmupCap = mb.mailwarming_vendor?.max_daily_emails ?? 0;
       const warmupStatus = mb.mailwarming_vendor?.inbox_status === "started" ? "warming" : "pending";
       const score = mb.deliverability_score?.deliverability_score ?? null;
+      // `active` and `permit_enabled` are the arming flags — they decide whether a mailbox can
+      // actually send. A routine Sync click must never be the thing that flips one on.
+      // Chosen semantics: sync NEVER writes `active`, in either direction, on an existing row —
+      // not even to honour an Apollo-side deactivation. The looser "Apollo is authoritative for
+      // deactivation only" reading was considered and rejected: it still lets a bad/incomplete
+      // Apollo response (e.g. a transient `active:false` on a healthy mailbox) silently kill a
+      // real sending mailbox with no human in the loop, which is the same class of surprise this
+      // fix exists to remove. `active` has exactly two writers by design — PATCH
+      // /api/sdr/mailboxes/:id and POST /api/sdr/admin/mailboxes — both admin-gated, both take an
+      // explicit boolean. A brand-new row (no existing conflict) is likewise always inserted
+      // `active = false` regardless of what Apollo reports: onboarding a mailbox sync discovers
+      // for the first time is not a human decision either, and the two dedicated endpoints above
+      // are how a mailbox actually gets armed. `permit_enabled` already has no writer in this
+      // statement (Apollo has no such concept), so it needs no additional guard.
+      //
+      // `display_name` and `signature_html` are presentation fields a human may have hand-set
+      // (the mh@ display name, or a signature written the night a mailbox was onboarded) — Apollo
+      // has no display_name field at all, and its signature_html is only useful to seed a value
+      // that doesn't exist yet, never to clobber one that does.
       await pool.query(
         `INSERT INTO sdr_mailboxes (email, display_name, apollo_mailbox_id,
                                      daily_send_limit, warmup_status, warmup_current_cap,
                                      deliverability_score, last_health_check_at, active, signature_html)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9)
+         VALUES ($1, NULL, $2, $3, $4, $5, $6, NOW(), FALSE, $7)
          ON CONFLICT (email) DO UPDATE
            SET apollo_mailbox_id = EXCLUDED.apollo_mailbox_id,
                daily_send_limit = EXCLUDED.daily_send_limit,
@@ -2875,10 +2894,9 @@ app.post("/api/sdr/mailboxes/sync", async (req, res) => {
                warmup_current_cap = EXCLUDED.warmup_current_cap,
                deliverability_score = EXCLUDED.deliverability_score,
                last_health_check_at = NOW(),
-               active = EXCLUDED.active,
-               signature_html = EXCLUDED.signature_html,
+               signature_html = COALESCE(NULLIF(sdr_mailboxes.signature_html, ''), EXCLUDED.signature_html),
                updated_at = NOW()`,
-        [mb.email, mb.email, mb.id, dailyLimit, warmupStatus, warmupCap, score, mb.active !== false, mb.signature_html ?? null],
+        [mb.email, mb.id, dailyLimit, warmupStatus, warmupCap, score, mb.signature_html ?? null],
       );
       synced.push({ email: mb.email, apollo_id: mb.id });
     }
@@ -4074,12 +4092,19 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
 
     // Resolve mailbox → apollo_mailbox_id
     const { rows: mbRows } = await pool.query(
-      `SELECT id, email, apollo_mailbox_id, warmup_started_at, signature_html FROM sdr_mailboxes WHERE id = $1`,
+      `SELECT id, email, apollo_mailbox_id, active, warmup_started_at, signature_html FROM sdr_mailboxes WHERE id = $1`,
       [draft.assigned_mailbox_id],
     );
     const mailbox = mbRows[0];
     if (!mailbox?.apollo_mailbox_id) {
       return res.status(500).json({ error: "Assigned mailbox has no apollo_mailbox_id — run /api/sdr/mailboxes/sync" });
+    }
+    // Re-check `active` here rather than trusting the draft's assigned_mailbox_id: a draft can be
+    // created (or an id passed straight to this endpoint) referencing a mailbox that was active at
+    // draft time and has since been turned off, or was never armed at all. Without this, a caller
+    // holding any valid draft id + mailbox id pair could send from an inactive mailbox.
+    if (!mailbox.active) {
+      return res.status(409).json({ code: "mailbox_inactive", mailbox: mailbox.email, error: `Mailbox ${mailbox.email} is not active — cannot send.` });
     }
 
     // Warmup ramp: enforce the per-mailbox daily send cap (gradual climb to 40).
