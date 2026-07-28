@@ -35,6 +35,8 @@ import { sweepSentOutreach, upsertOutreach } from "./lib/outreachSync.js";
 import * as gmailInbox from "./lib/gmailInbox.js";
 import { dailyCap, rampDay } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
+import * as apolloBudget from "./lib/apolloMessageSearchBudget.js";
+import { resolveEventPolicy } from "./lib/engagementSideEffectPolicy.js";
 import { pollInboxReplies, classifyInbound } from "./lib/inboxReplyWatch.js";
 import { runAutoOutreach, pruneStaleQueuedDrafts } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
@@ -957,6 +959,14 @@ async function initDB() {
     // Contact-level cooldown: don't re-email the same contact within this many days, even for a
     // DIFFERENT project. Default 14 (was a hardcoded 60). Reps can tune it in the Mailboxes tab.
     await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS contact_cooldown_days INT NOT NULL DEFAULT 14`);
+    // Apollo engagement-poll watermarks (see lib/apolloEngagementPoll.js).
+    //  engagement_backfill_done_at  — NULL until the one-time "record history, fire nothing"
+    //    sweep completes. Persisted BECAUSE it must survive a redeploy: module memory would
+    //    re-run the sweep on every boot and, once the watermark logic is bypassed, re-blast.
+    //  engagement_last_full_scan_at — drives the 3h full-pagination tier. Time-based and
+    //    persisted so a redeploy neither forces nor skips a sweep.
+    await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS engagement_backfill_done_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS engagement_last_full_scan_at TIMESTAMPTZ`);
     await pool.query(`INSERT INTO sdr_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
     // Editable first-touch draft copy per trigger. Seeded from the code templates; the
     // draft generator reads here first and falls back to code, so generation can't break.
@@ -1267,9 +1277,18 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
 // 4 sequences that was 2,880 calls/day = 144% of the cap before any UI traffic, so the
 // bucket emptied ~16.7h into every window and reply polling was silently blind for ~7h
 // a day. With correct pagination (31 pages/cycle) the same cadence would have been
-// 22,320 calls/day = 1,116% of cap. 15 min = 96 cycles/day; combined with the tiered
-// scan inside pollEngagement (page 1 only except every 12th cycle) that lands at
-// ~736 calls/day ≈ 37% of cap, leaving headroom for the UI endpoints.
+// 22,320 calls/day = 1,116% of cap.
+//
+// 15 min = 96 cycles/day. With the tiered scan inside pollEngagement (page 1 only, full
+// pagination every 3h) the STEADY STATE is:
+//     8 full    × 31 pages = 248
+//    88 shallow ×  4 seqs  = 352
+//                            ---
+//                            600 calls/day = 30.0% of cap
+// Plus GET /api/sdr/outbox behind its 5-min cache, <=288/day, counted in the same shared
+// ledger. Per-process worst case 600 + 288 = 888/day = 44.4% of cap.
+// Ship day only, the one-time backfill sweep adds ~31 → ~631 poll / ~919 total.
+// (If PERMIT_ENGAGEMENT_SYNC is ever enabled it draws from the same 1500 ceiling.)
 //
 // Reply latency is not the cost here: Gmail is the primary reply detector
 // (pollInboxReplies below, 5-min, different endpoint bucket). What this cadence delays
@@ -2714,12 +2733,21 @@ app.get("/api/sdr/outbox", async (req, res) => {
     let allMsgs;
     if (outboxCache && outboxCache.key === cacheKey && Date.now() - outboxCache.at < OUTBOX_CACHE_TTL_MS) {
       allMsgs = outboxCache.msgs;
+    } else if (apolloBudget.isRateLimited() && outboxCache?.key === cacheKey) {
+      // Breaker is open (possibly opened by the engagement cron, not by us — same endpoint,
+      // same bucket). Serve stale rather than spend a call we know will 429.
+      allMsgs = outboxCache.msgs;
     } else {
       try {
+        // Counted in the SHARED ledger: this route hits the same /emailer_messages/search
+        // bucket as the engagement poll, and before this it was invisible to the budget.
+        apolloBudget.recordCall();
         const data = await apolloClient.searchEmailerMessages({ campaignIds: seqIds, perPage: 100 });
         allMsgs = data.emailer_messages || [];
         outboxCache = { at: Date.now(), key: cacheKey, msgs: allMsgs };
       } catch (e) {
+        // A 429 here must stop the cron too — the bucket is endpoint-wide.
+        if (e.status === 429) apolloBudget.noteRateLimit(e, "sdr/outbox");
         // Rate-limited or Apollo down: serve the last good copy rather than 500ing the tab
         // (and rather than the tab retrying in 60s and burning another call).
         if (outboxCache && outboxCache.key === cacheKey) {
@@ -3057,6 +3085,23 @@ app.get("/api/sdr/track/click/:token", (req, res) => {
 //                   + remove contact from Apollo sequence
 //   email_bounced → mark sdr_sends=bounced + flag mailbox in metadata
 //   email_unsubscribed → mark sdr_sends=unsubscribed + flag do_not_mail in metadata
+// Has the one-time Apollo backfill sweep completed? Cached 30s — ingest runs per event and
+// a full sweep emits hundreds in a burst, so an uncached read would be hundreds of queries.
+// Fails CLOSED (returns false => record-only) so a DB blip can never open the back-blast.
+let backfillDoneCache = { at: 0, value: false };
+async function engagementBackfillDone() {
+  if (backfillDoneCache.value) return true; // one-way latch: never un-completes
+  if (Date.now() - backfillDoneCache.at < 30_000) return backfillDoneCache.value;
+  try {
+    const { rows } = await pool.query(`SELECT engagement_backfill_done_at FROM sdr_settings WHERE id = 1`);
+    backfillDoneCache = { at: Date.now(), value: !!rows[0]?.engagement_backfill_done_at };
+  } catch (e) {
+    console.error("[events/ingest] backfill watermark read failed, staying in record-only:", e.message);
+    backfillDoneCache = { at: Date.now(), value: false };
+  }
+  return backfillDoneCache.value;
+}
+
 app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   const ev = req.body || {};
@@ -3074,30 +3119,41 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
     ev.id || ev.event_id ||
     `synthetic:${crypto.createHash("sha1").update([eventType, emailerMessageId, contactEmail, sequenceId, occurredAt].join("|")).digest("hex")}`;
 
-  // ── Age guard on Pipedrive side effects (see lib/apolloEngagementPoll.js) ──────────
-  // The reply and bounce branches below had NO age check, unlike the email_sent branch
-  // (2-day cutoff) and the high-intent branch (96h). That was survivable only because the
-  // poll's pagination was broken and it never saw past page 1. Fixing pagination means the
-  // first correct pass walks the whole message history: live DB 2026-07-27 shows 866 leads
-  // with an Apollo touch but only 132 with a recorded reply/bounce, so up to 734 leads would
-  // have taken a back-blasted Pipedrive note in a single run.
+  // ── Back-blast guard: first-observation watermark, NOT message age ────────────────
+  // There is deliberately no age check here. Apollo gives no reply-arrival timestamp on
+  // /emailer_messages/search — the reply event and the send event carry the same value
+  // (measured 15/15) — so "message age" means "how long ago WE sent", and guarding on it
+  // silences real replies: 34% of replies (15/44, measured from Gmail) arrive more than 7
+  // days after first touch, and 682 of 718 live send rows are already older than that.
   //
-  // Enforced HERE, not only in the poll, so any caller (Apollo webhook, manual replay,
-  // a future importer) is protected. DB insert and Apollo sequence removal stay
-  // unconditional — both are idempotent and both are things we want done for history.
-  // Only addNote / addActivity / updateLead are suppressed.
-  const EVENT_SIDE_EFFECT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-  const occurredMs = Date.parse(occurredAt);
-  const staleForSideEffects =
-    ev.stale === true ||
-    !Number.isFinite(occurredMs) ||
-    occurredMs < Date.now() - EVENT_SIDE_EFFECT_MAX_AGE_MS;
+  // What actually needs containing is the FIRST correctly-paginated sweep, which discovers
+  // the whole message history at once. `sdr_settings.engagement_backfill_done_at` marks that
+  // sweep as done; until it is stamped, poll-sourced events are RECORDED ONLY.
+  //
+  // Checked HERE and not only in the poll so any caller (webhook, manual replay, importer)
+  // is covered. The watermark is only consulted for poll-sourced events (`poll:` id prefix,
+  // a stable convention in this codebase) so a live Apollo webhook or the Gmail inbox watch
+  // is never suppressed by a sweep that has nothing to do with it.
+  // Decisions live in lib/engagementSideEffectPolicy.js so they are unit-testable.
+  const backfillDone = String(apolloEventId).startsWith("poll:") ? await engagementBackfillDone() : true;
 
   try {
     // 1. Find the originating sdr_sends row for Pipedrive lead context.
     //    Match priority: emailer_message_id → sequence+email → email-only (latest sent).
+    //    `sendMatch` records HOW it matched, because that decides whether this event may
+    //    MUTATE the row it found. Only an exact apollo_emailer_message_id match identifies
+    //    the send that actually produced this message; the other two are
+    //    `ORDER BY sent_at DESC LIMIT 1` best-guesses that resolve to the contact's CURRENT
+    //    live row. `sdr_sends` stores only the FIRST message id per send, so every
+    //    follow-up-step message the fixed pagination discovers falls through to them — and
+    //    on this book that is not theoretical: 52 addresses have a live enrolled/sent row
+    //    plus an earlier row for the same address, and 164 rows are already 'switched'.
+    //    Letting a fallback drive the mutations means a June reply flips a currently-running
+    //    send to 'replied' and ejects a mid-sequence contact from their live campaign —
+    //    one-shot and unretryable, since both sit inside `if (newlyInserted)`.
     let leadId = null;
     let sendRow = null;
+    let sendMatch = null; // "message_id" (exact) | "sequence_email" | "email" (both fallbacks)
     const pickSend = async (sql, params) => {
       const { rows } = await pool.query(sql, params);
       return rows[0] || null;
@@ -3109,6 +3165,7 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
          WHERE s.apollo_emailer_message_id = $1 ORDER BY s.sent_at DESC LIMIT 1`,
         [emailerMessageId],
       );
+      if (sendRow) sendMatch = "message_id";
     }
     if (!sendRow && sequenceId && contactEmail) {
       sendRow = await pickSend(
@@ -3117,6 +3174,7 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
          ORDER BY s.sent_at DESC LIMIT 1`,
         [sequenceId, contactEmail],
       );
+      if (sendRow) sendMatch = "sequence_email";
     }
     if (!sendRow && contactEmail) {
       sendRow = await pickSend(
@@ -3124,8 +3182,22 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
          WHERE d.contact_email_snapshot = $1 ORDER BY s.sent_at DESC LIMIT 1`,
         [contactEmail],
       );
+      if (sendRow) sendMatch = "email";
     }
     if (sendRow) leadId = sendRow.pipedrive_lead_id;
+
+    // May this event mutate `sdr_sends` / pull the contact out of their Apollo sequence, and
+    // is it record-only? `apollo_emailer_message_id` is injective across sdr_sends (verified
+    // live: 338 rows carrying one, 338 distinct, 0 shared), so an exact match resolves to
+    // precisely the row that sent that message and can never land on a re-enrolled or
+    // superseded row.
+    const policy = resolveEventPolicy({
+      eventId: apolloEventId,
+      sendMatch,
+      backfillFlag: ev.backfill === true,
+      backfillDone,
+    });
+    const { mayMutateSend, recordOnly: backfillRecordOnly } = policy;
 
     // 2. Insert engagement event (idempotent by apollo_event_id incl. synthetic key)
     const insertResult = await pool.query(
@@ -3133,7 +3205,7 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
          source, event_type, apollo_event_id, apollo_sequence_id,
          apollo_emailer_message_id, pipedrive_lead_id, pipedrive_contact_id, mailbox_email,
          occurred_at, payload, process_status, processed_at
-       ) VALUES ('apollo', $1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', NULL)
+       ) VALUES ('apollo', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
        ON CONFLICT (apollo_event_id) DO NOTHING
        RETURNING id`,
       [
@@ -3146,12 +3218,28 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
         mailboxEmail,
         occurredAt,
         ev,
+        // 'backfilled' makes the one-time sweep's rows greppable and distinguishes them from
+        // events that actually drove side effects. They are terminal — step 4 below leaves
+        // them alone rather than flipping them to 'processed'.
+        policy.processStatus,
       ],
     );
     const newlyInserted = insertResult.rows.length > 0;
 
     // 3. Side effects based on event type
     let sideEffect = "none";
+
+    // The backfill sweep records and stops: no Pipedrive write, no sdr_sends mutation, no
+    // Apollo removal. Bail before any branch rather than threading a flag through each one.
+    if (backfillRecordOnly) {
+      return res.json({
+        ok: true,
+        side_effect: "backfill-recorded",
+        lead_id: leadId,
+        send_updated: false,
+        recorded: newlyInserted,
+      });
+    }
 
     if (eventType === "email_sent" || eventType === "email_opened" || eventType === "email_clicked" || eventType === "link_clicked") {
       sideEffect = "logged-only";
@@ -3266,21 +3354,24 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
       // was writing a Pipedrive note + clearing Sequence_Started + calling Apollo every 2
       // minutes — spamming the lead. `newlyInserted` is false on every repeat.
       if (newlyInserted) {
-        if (sendRow) {
+        // EXACT-MATCH ONLY (see `mayMutateSend`). On a fallback match this row is the
+        // contact's current live send, which may be a re-enrollment that has nothing to do
+        // with the message that triggered this event.
+        if (sendRow && mayMutateSend) {
           await pool.query(
             `UPDATE sdr_sends SET status = 'replied', last_status_at = NOW(), updated_at = NOW()
              WHERE id = $1`,
             [sendRow.id],
           );
+        } else if (sendRow) {
+          console.log(
+            `[events/ingest] reply resolved by ${sendMatch} fallback — skipping sdr_sends mutation + Apollo removal (send=${sendRow.id} lead=${leadId} event=${apolloEventId})`,
+          );
         }
         // Clear Pipedrive Sequence_Started + drop ONE reply note with the interface link.
-        // Age-gated: a reply older than 7 days is history, not a lead to chase today.
-        if (staleForSideEffects) {
-          sideEffect = "stale-skipped";
-          console.log(
-            `[events/ingest] stale-skipped reply side effects lead=${leadId} occurred_at=${occurredAt} event=${apolloEventId}`,
-          );
-        } else if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
+        // NOT age-gated: a reply is a reply whenever it arrives, and 34% arrive >7d after
+        // first touch. Repeat-firing is prevented by `newlyInserted` + the 48h dupe check.
+        if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
           try {
             await pipedriveClient.updateLead(leadId, { [pdSequenceStartedKey]: "" });
             const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
@@ -3329,9 +3420,14 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
           }
         }
         // Remove from Apollo sequence to stop further follow-ups (belt-and-suspender; Apollo
-        // usually auto-pauses on reply).
+        // usually auto-pauses on reply). EXACT-MATCH ONLY: removal is NOT idempotent against
+        // a contact who has since been re-added, so a fallback match could eject a live
+        // mid-sequence enrollment on the strength of an old message. The Gmail inbox watch
+        // (lib/inboxReplyWatch.js) independently removes on reply and is the primary reply
+        // detector (23 vs 10 in the last 14 days), so this path staying conservative does
+        // not leave follow-ups running to someone who answered.
         const replySeqId = sendRow?.apollo_sequence_id || sequenceId;
-        if (sendRow?.apollo_contact_id && replySeqId && process.env.APOLLO_API_KEY) {
+        if (mayMutateSend && sendRow?.apollo_contact_id && replySeqId && process.env.APOLLO_API_KEY) {
           try {
             await apolloClient.removeContactsFromSequence(replySeqId, [sendRow.apollo_contact_id], "remove");
           } catch (e) {
@@ -3342,21 +3438,20 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
     } else if (eventType === "email_bounced" || eventType === "bounce") {
       sideEffect = "bounce";
       if (newlyInserted) {
-        if (sendRow) {
+        // EXACT-MATCH ONLY — same reasoning as the reply branch. Marking a live re-enrolled
+        // send 'bounced' off an old message id would stop outreach to a working address.
+        if (sendRow && mayMutateSend) {
           await pool.query(
             `UPDATE sdr_sends SET status = 'bounced', last_status_at = NOW(), updated_at = NOW()
              WHERE id = $1`,
             [sendRow.id],
           );
-        }
-        // Age-gated (same reasoning as the reply branch): a bounce older than 7 days has
-        // already been acted on — re-noting it just spams the lead's Pipedrive timeline.
-        if (staleForSideEffects) {
-          sideEffect = "stale-skipped";
+        } else if (sendRow) {
           console.log(
-            `[events/ingest] stale-skipped bounce side effects lead=${leadId} occurred_at=${occurredAt} event=${apolloEventId}`,
+            `[events/ingest] bounce resolved by ${sendMatch} fallback — skipping sdr_sends mutation + Apollo removal (send=${sendRow.id} lead=${leadId} event=${apolloEventId})`,
           );
-        } else if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
+        }
+        if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
           try {
             // Stop the sequence on a bounce: clear Sequence_Started so the lead is no longer
             // "in sequence", and leave a bounced comment. Deduped against any other bounce event
@@ -3379,9 +3474,10 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
             console.error("Pipedrive sync on bounce failed:", e.message);
           }
         }
-        // Hard-stop remaining Apollo follow-ups to a bouncing address.
+        // Hard-stop remaining Apollo follow-ups to a bouncing address. EXACT-MATCH ONLY
+        // (see the reply branch); the Gmail NDR watcher covers the fallback case.
         const bounceSeqId = sendRow?.apollo_sequence_id || sequenceId;
-        if (sendRow?.apollo_contact_id && bounceSeqId && process.env.APOLLO_API_KEY) {
+        if (mayMutateSend && sendRow?.apollo_contact_id && bounceSeqId && process.env.APOLLO_API_KEY) {
           try {
             await apolloClient.removeContactsFromSequence(bounceSeqId, [sendRow.apollo_contact_id], "remove");
           } catch (e) {
@@ -3427,7 +3523,7 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
       await pool.query(
         `UPDATE sdr_engagement_events
          SET process_status = 'processed', processed_at = NOW()
-         WHERE apollo_event_id = $1`,
+         WHERE apollo_event_id = $1 AND process_status IS DISTINCT FROM 'backfilled'`,
         [apolloEventId],
       );
     }
@@ -4064,8 +4160,13 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       } else {
         const v = await emailVerify.verifyEmail(targetEmail);
         if (v && !v.skipped && draft.pipedrive_lead_id) {
+          // Persist the CANONICAL verdict, not the raw provider string — same rule as the
+          // cache-read branch just above (canonicalVerdict() normalizes MillionVerifier /
+          // NeverBounce / ZeroBounce's differing vocabularies into the closed
+          // valid|soft|hard_fail|skipped set). v.status is always set here (we're in the
+          // !v.skipped branch), but canonicalVerdict() is idempotent/fail-open on any input.
           await writeVerifyCache(pool, draft.pipedrive_lead_id, {
-            status: v.status || (v.ok ? "valid" : "invalid"), verifiedValue: targetEmail,
+            status: emailVerify.canonicalVerdict(v.status || (v.ok ? "valid" : "invalid")), verifiedValue: targetEmail,
           }).catch((e) => console.error("send-gate cache write failed:", e.message));
         }
         if (!v.ok) blocked = { status: v.status, sub_status: v.sub_status, suggestion: v.suggestion };

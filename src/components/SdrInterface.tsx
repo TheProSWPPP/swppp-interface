@@ -2323,6 +2323,10 @@ function QueueView({
       if (err.status === 429 && err.data?.code === "daily_cap_reached") {
         pushToast("error", `Daily cap reached for ${err.data.mailbox} — ${err.data.sentToday}/${err.data.cap} sent (warmup day ${err.data.rampDay}). Cap rises as the inbox warms; try again tomorrow.`);
         await load();
+      } else if (err.status === 409 && err.data?.code === "mailbox_inactive") {
+        // Assigned mailbox was deactivated (or never armed) since the draft was created.
+        pushToast("error", `Mailbox ${err.data.mailbox || "assigned to this draft"} is not active — cannot send. Activate it in SDR → Mailboxes.`);
+        await load(); // status may have flipped to 'failed'
       } else if (err.status === 409 && err.data?.code === "already_outreached") {
         // Dedup guard: lead already contacted in Pipedrive.
         const who = err.data.personName || "This lead";

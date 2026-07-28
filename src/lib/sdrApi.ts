@@ -627,7 +627,9 @@ export const sdrApi = {
 
   // `override: true` lets an admin send to an already-contacted lead (server returns
   // 409 {code:"already_outreached"} otherwise). The thrown error's `.data` carries
-  // { code, daysAgo, personName, lastOutgoing } for the UI to surface.
+  // { code, daysAgo, personName, lastOutgoing } for the UI to surface. The server can also
+  // return 429 {code:"daily_cap_reached", mailbox, sentToday, cap, rampDay} or 409
+  // {code:"mailbox_inactive", mailbox} — see onApprove()'s error branches in SdrInterface.tsx.
   approveAndSendDraft: (id: string, override = false) =>
     sdrFetch<{ draft: SdrDraft; send: Record<string, unknown>; apollo_response: unknown }>(
       `/api/sdr/drafts/${id}/approve-and-send`,
