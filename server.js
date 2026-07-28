@@ -17,6 +17,7 @@ import * as apolloClient from "./lib/apolloClient.js";
 import * as pipedriveClient from "./lib/pipedriveClient.js";
 import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
+import { sdrDraftVerifyEnabled, checkDraftEmail } from "./lib/sdrDraftVerify.js";
 import { runAutoSwitch, autoSwitchEnabled } from "./lib/sdrAutoSwitch.js";
 import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
@@ -3666,6 +3667,28 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
       }
     }
 
+    // Pre-generate email verification (item C, flag SDR_DRAFT_VERIFY, default OFF — see
+    // lib/sdrDraftVerify.js). OFF today: sdrDraftVerifyEnabled() short-circuits and this block
+    // is a no-op, so the request takes the exact same path as before this change. When ON, an
+    // earlier checkpoint than the always-on verification block in approve-and-send below — it
+    // blocks draft CREATION on a confident-bad address instead of only blocking the eventual
+    // send. admin can force through via override:true (same flag already used for the dedup
+    // check above), or skip_verify:true to bypass entirely (matches approve-and-send's escape
+    // hatch).
+    if (sdrDraftVerifyEnabled() && req.body?.skip_verify !== true) {
+      const adminForcing = req.body?.override === true && req.sdrUser?.role === "admin";
+      const { blocked } = await checkDraftEmail(pool, {
+        leadId: payload.pipedrive_lead_id,
+        email: payload.contact_email_snapshot,
+      });
+      if (blocked && !adminForcing) {
+        return res.status(422).json({
+          code: "email_unverified", status: blocked.status, sub_status: blocked.sub_status, suggestion: blocked.suggestion,
+          message: `Email ${payload.contact_email_snapshot} failed verification (${blocked.status}) — draft not generated.${blocked.suggestion ? ` Suggested: ${blocked.suggestion}` : ""}`,
+        });
+      }
+    }
+
     // Idempotency — same lead + trigger with an open draft
     const dup = await pool.query(
       `SELECT id, status FROM sdr_drafts
@@ -4012,7 +4035,12 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
 
       let blocked = null; // { status, sub_status, suggestion }
       if (cacheFresh) {
-        if (["invalid", "disposable"].includes(cache.email_verify_status)) {
+        // Gate on the CANONICAL verdict, not a hard-coded NeverBounce-shaped denylist — a raw
+        // ["invalid","disposable"].includes(...) check silently misses ZeroBounce's own
+        // confident-bad verdicts (spamtrap/abuse/do_not_mail), letting a cached hard-fail
+        // through. canonicalVerdict() normalizes any of the three providers' vocabularies (and
+        // is idempotent on values already canonical) — see lib/emailVerify.js.
+        if (emailVerify.canonicalVerdict(cache.email_verify_status) === "hard_fail") {
           blocked = { status: cache.email_verify_status, sub_status: null, suggestion: null };
         }
       } else {
