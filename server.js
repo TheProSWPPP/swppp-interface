@@ -1259,14 +1259,27 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
 }
 
 // Apollo engagement poll: per-lead replies + bounces fed into /api/sdr/events/ingest.
-// Every ~2 min (in-process cron, not n8n). First run 60s after boot.
+// In-process cron, not n8n. First run 60s after boot.
+//
+// CADENCE = 15 min, NOT 2 min. Apollo caps POST /api/v1/emailer_messages/search at
+// 2000 calls/day PER ENDPOINT (verified live: x-rate-limit-24-hour: 2000). At 2 min ×
+// 4 sequences that was 2,880 calls/day = 144% of the cap before any UI traffic, so the
+// bucket emptied ~16.7h into every window and reply polling was silently blind for ~7h
+// a day. With correct pagination (31 pages/cycle) the same cadence would have been
+// 22,320 calls/day = 1,116% of cap. 15 min = 96 cycles/day; combined with the tiered
+// scan inside pollEngagement (page 1 only except every 12th cycle) that lands at
+// ~736 calls/day ≈ 37% of cap, leaving headroom for the UI endpoints.
+//
+// Reply latency is not the cost here: Gmail is the primary reply detector
+// (pollInboxReplies below, 5-min, different endpoint bucket). What this cadence delays
+// is spam_blocked detection and step-tracking write-back, both latency-tolerant.
 if (process.env.DATABASE_URL && process.env.APOLLO_API_KEY) {
   const runEngPoll = () =>
     pollEngagement(pool, { baseUrl: `http://127.0.0.1:${port}`, callbackSecret: N8N_CALLBACK_SECRET })
-      .then((r) => { if (r && (r.emitted || r.skipped)) console.log("[engagement-poll]", JSON.stringify(r)); })
+      .then((r) => { if (r && (r.emitted || r.skipped || r.rateLimited)) console.log("[engagement-poll]", JSON.stringify(r)); })
       .catch((e) => console.error("[engagement-poll] failed:", e.message));
   setTimeout(runEngPoll, 60_000);
-  setInterval(runEngPoll, 2 * 60 * 1000);
+  setInterval(runEngPoll, 15 * 60 * 1000);
 }
 
 // Inbox reply watch: a safety net that turns lead replies Apollo can't see (permit
@@ -2677,6 +2690,15 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
   }
 });
 
+// Shared 5-minute cache for the outbox's Apollo read. /api/sdr/outbox used to make one
+// POST /emailer_messages/search PER REQUEST, and the frontend polls it every 60s PER OPEN
+// TAB — 1,440 calls/day/tab against the same 2000/day endpoint bucket the engagement poll
+// depends on. The payload is a schedule that moves on the order of hours, so a 5-min TTL
+// costs nothing in freshness. Cached BEFORE per-user filtering (the mailbox scoping below
+// is applied to the cached rows), so N users share one Apollo call.
+const OUTBOX_CACHE_TTL_MS = 5 * 60 * 1000;
+let outboxCache = null; // { at:number, key:string, msgs:object[] }
+
 // SDR outbox — what's enrolled in Apollo and SCHEDULED to send but hasn't gone out yet
 // (Apollo holds each step until its schedule + the mailbox's daily limit allow). This is
 // "next to be sent", which the Queue can't show because send-mode enrolls straight to Apollo.
@@ -2687,8 +2709,26 @@ app.get("/api/sdr/outbox", async (req, res) => {
       .map((t) => process.env[`APOLLO_SEQ_${t}`])
       .filter(Boolean);
     if (!seqIds.length) return res.json({ scheduled: [] });
-    const data = await apolloClient.searchEmailerMessages({ campaignIds: seqIds, perPage: 100 });
-    const allMsgs = data.emailer_messages || [];
+    const cacheKey = seqIds.join(",");
+    let allMsgs;
+    if (outboxCache && outboxCache.key === cacheKey && Date.now() - outboxCache.at < OUTBOX_CACHE_TTL_MS) {
+      allMsgs = outboxCache.msgs;
+    } else {
+      try {
+        const data = await apolloClient.searchEmailerMessages({ campaignIds: seqIds, perPage: 100 });
+        allMsgs = data.emailer_messages || [];
+        outboxCache = { at: Date.now(), key: cacheKey, msgs: allMsgs };
+      } catch (e) {
+        // Rate-limited or Apollo down: serve the last good copy rather than 500ing the tab
+        // (and rather than the tab retrying in 60s and burning another call).
+        if (outboxCache && outboxCache.key === cacheKey) {
+          console.warn("[sdr/outbox] Apollo fetch failed, serving stale cache:", e.message);
+          allMsgs = outboxCache.msgs;
+        } else {
+          throw e;
+        }
+      }
+    }
     // A contact who replied anywhere in the sequence should stop receiving follow-ups —
     // drop every pending step for any recipient Apollo has flagged as replied.
     const repliedEmails = new Set(
@@ -3015,6 +3055,25 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
     ev.id || ev.event_id ||
     `synthetic:${crypto.createHash("sha1").update([eventType, emailerMessageId, contactEmail, sequenceId, occurredAt].join("|")).digest("hex")}`;
 
+  // ── Age guard on Pipedrive side effects (see lib/apolloEngagementPoll.js) ──────────
+  // The reply and bounce branches below had NO age check, unlike the email_sent branch
+  // (2-day cutoff) and the high-intent branch (96h). That was survivable only because the
+  // poll's pagination was broken and it never saw past page 1. Fixing pagination means the
+  // first correct pass walks the whole message history: live DB 2026-07-27 shows 866 leads
+  // with an Apollo touch but only 132 with a recorded reply/bounce, so up to 734 leads would
+  // have taken a back-blasted Pipedrive note in a single run.
+  //
+  // Enforced HERE, not only in the poll, so any caller (Apollo webhook, manual replay,
+  // a future importer) is protected. DB insert and Apollo sequence removal stay
+  // unconditional — both are idempotent and both are things we want done for history.
+  // Only addNote / addActivity / updateLead are suppressed.
+  const EVENT_SIDE_EFFECT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  const occurredMs = Date.parse(occurredAt);
+  const staleForSideEffects =
+    ev.stale === true ||
+    !Number.isFinite(occurredMs) ||
+    occurredMs < Date.now() - EVENT_SIDE_EFFECT_MAX_AGE_MS;
+
   try {
     // 1. Find the originating sdr_sends row for Pipedrive lead context.
     //    Match priority: emailer_message_id → sequence+email → email-only (latest sent).
@@ -3196,7 +3255,13 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
           );
         }
         // Clear Pipedrive Sequence_Started + drop ONE reply note with the interface link.
-        if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
+        // Age-gated: a reply older than 7 days is history, not a lead to chase today.
+        if (staleForSideEffects) {
+          sideEffect = "stale-skipped";
+          console.log(
+            `[events/ingest] stale-skipped reply side effects lead=${leadId} occurred_at=${occurredAt} event=${apolloEventId}`,
+          );
+        } else if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
           try {
             await pipedriveClient.updateLead(leadId, { [pdSequenceStartedKey]: "" });
             const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
@@ -3265,7 +3330,14 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
             [sendRow.id],
           );
         }
-        if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
+        // Age-gated (same reasoning as the reply branch): a bounce older than 7 days has
+        // already been acted on — re-noting it just spams the lead's Pipedrive timeline.
+        if (staleForSideEffects) {
+          sideEffect = "stale-skipped";
+          console.log(
+            `[events/ingest] stale-skipped bounce side effects lead=${leadId} occurred_at=${occurredAt} event=${apolloEventId}`,
+          );
+        } else if (leadId && process.env.PIPEDRIVE_API_TOKEN) {
           try {
             // Stop the sequence on a bounce: clear Sequence_Started so the lead is no longer
             // "in sequence", and leave a bounced comment. Deduped against any other bounce event
