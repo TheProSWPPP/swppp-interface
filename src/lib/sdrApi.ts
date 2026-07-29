@@ -8,12 +8,18 @@ export type SdrRole = "sdr" | "admin";
 export interface SdrUserPublic {
   username: string;
   display_name: string;
-  role: SdrRole;
+  /**
+   * Optional on purpose. `GET /api/sdr/auth/users` is unauthenticated (it fuels the login
+   * picker) and no longer publishes `role`, so an anonymous caller cannot see which seat is
+   * the admin. The authenticated login response still carries it — see SdrUser below.
+   */
+  role?: SdrRole;
 }
 
 export interface SdrUser extends SdrUserPublic {
   id: string;
   email: string;
+  role: SdrRole; // always present once authenticated
 }
 
 export interface SdrMailbox {
@@ -416,10 +422,27 @@ export interface SdrInboxMessage {
 }
 
 export const sdrApi = {
+  getUser,
+
   // `require_password` mirrors the server's REQUIRE_PASSWORD env flag, which is
   // off by default. When it's off the picker stays one-click, exactly as before.
   listUsers: () =>
     sdrFetch<{ users: SdrUserPublic[]; require_password?: boolean }>("/api/sdr/auth/users", { auth: false }),
+
+  // Priority dismissed/seen state, per user, server-side. The caller treats every one of
+  // these as best-effort: localStorage remains the synchronous cache the UI renders from.
+  priorityState: () =>
+    sdrFetch<{ dismissed: string[]; seen: string[] }>("/api/sdr/priority/state"),
+  setPriorityState: (draftId: string, state: "dismissed" | "seen") =>
+    sdrFetch<{ ok: true }>("/api/sdr/priority/state", {
+      method: "POST",
+      body: JSON.stringify({ draft_id: draftId, state }),
+    }),
+  clearPriorityState: (state: "dismissed" | "seen" = "dismissed") =>
+    sdrFetch<{ ok: true; cleared: number }>("/api/sdr/priority/state", {
+      method: "DELETE",
+      body: JSON.stringify({ state }),
+    }),
 
   login: (username: string, password?: string) =>
     sdrFetch<{ token: string; expires_in: number; user: SdrUser }>("/api/sdr/auth/login", {

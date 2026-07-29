@@ -19,7 +19,7 @@ import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
 import { sdrDraftVerifyEnabled, checkDraftEmail } from "./lib/sdrDraftVerify.js";
 import { runAutoSwitch, autoSwitchEnabled } from "./lib/sdrAutoSwitch.js";
-import { ownerScope, withLeadLock } from "./lib/sdrAccess.js";
+import { ownerScope, withLeadLock, leadVisibilityScope, leadVisibleTo } from "./lib/sdrAccess.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
@@ -869,7 +869,7 @@ async function initDB() {
         payload JSONB NOT NULL,
         processed_at TIMESTAMPTZ,
         process_status TEXT NOT NULL DEFAULT 'pending'
-          CHECK (process_status IN ('pending','processed','skipped','error')),
+          CHECK (process_status IN ('pending','processed','skipped','error','backfilled')),
         process_error TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
@@ -880,6 +880,19 @@ async function initDB() {
     await pool.query(
       `ALTER TABLE sdr_engagement_events ADD CONSTRAINT sdr_engagement_events_source_check
          CHECK (source IN ('apollo','pipedrive','gmail','self_tracking'))`,
+    );
+    // Widen the process_status CHECK the same way, and for the same reason it happened twice.
+    // `lib/engagementSideEffectPolicy.js` returns 'backfilled' for record-only events, but the
+    // original CHECK never listed it, so EVERY insert during the 2026-07-28 backfill sweep died
+    // on constraint 23514. `emit()` in lib/apolloEngagementPoll.js swallows non-2xx, so the
+    // sweep recorded ZERO rows, reported success, and stamped its watermark — after which the
+    // next full scan replayed 35 events aged 5-20 days through the normal path and wrote ~35
+    // duplicate notes into the client's Pipedrive. Proven, not inferred: an INSERT carrying
+    // 'backfilled' inside a rolled-back transaction returns 23514 against the live DB today.
+    await pool.query(`ALTER TABLE sdr_engagement_events DROP CONSTRAINT IF EXISTS sdr_engagement_events_process_status_check`);
+    await pool.query(
+      `ALTER TABLE sdr_engagement_events ADD CONSTRAINT sdr_engagement_events_process_status_check
+         CHECK (process_status IN ('pending','processed','skipped','error','backfilled'))`,
     );
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_lead_time ON sdr_engagement_events(pipedrive_lead_id, occurred_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_events_type ON sdr_engagement_events(event_type)`);
@@ -988,6 +1001,26 @@ async function initDB() {
         );
       }
     }
+
+    // Priority "dismissed" / "seen" state, per USER rather than per browser. It lived in
+    // localStorage under two global keys, so two people sharing a machine shared each other's
+    // dismissals, and one person on two machines saw the same item twice. Keyed on draft_id
+    // because that is what GET /api/sdr/engagement/summary returns as the Priority item id.
+    // CASCADE on user_id only. There is deliberately NO foreign key on draft_id: the Priority
+    // feed is a projection, a dismissal is a statement about what this person chose not to look
+    // at, and it should not be resurrected because a draft row was later replaced. Rows for
+    // vanished drafts are inert, since the client only ever intersects this set against the
+    // drafts the feed currently returns.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sdr_priority_state (
+        user_id UUID NOT NULL REFERENCES sdr_users(id) ON DELETE CASCADE,
+        draft_id UUID NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('dismissed','seen')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (user_id, draft_id, state)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_priority_state_user ON sdr_priority_state(user_id, state)`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS nurture_audit (
@@ -1432,11 +1465,25 @@ app.post("/api/sdr/auth/login", async (req, res) => {
 });
 
 // SDR — list selectable users (passwordless picker fuel)
+//
+// This route is deliberately UNAUTHENTICATED (see the bypass at :475-477) because it is what
+// the login picker renders before anyone has a token. So it cannot be gated, only narrowed.
+//
+// `role` is dropped: the picker only used it for a badge, and publishing it told an
+// unauthenticated caller which of the seven accounts is the admin seat. `username` and
+// `display_name` stay because the picker cannot function without them — the roster IS the
+// login mechanism while REQUIRE_PASSWORD is off.
+//
+// Be honest about what this is worth: with passwordless login, anyone who can load the SPA can
+// mint a token for any name on this list, including derek's admin token. Hiding `role` removes
+// a signpost, not the door. The door is REQUIRE_PASSWORD, which is Ivan's flag to flip, and
+// every user now has a `password_set_at` column waiting for it. The ORDER BY still uses `role`
+// so admins sort first; it is just no longer serialised to the client.
 app.get("/api/sdr/auth/users", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   try {
     const { rows } = await pool.query(
-      `SELECT username, display_name, role
+      `SELECT username, display_name
        FROM sdr_users WHERE active = TRUE ORDER BY role DESC, username`,
     );
     // `require_password` is additive — the picker reads `.users` and ignores it
@@ -1626,8 +1673,15 @@ async function contactCooldownDays() {
   return v;
 }
 
+// Admin only, matching the PATCH below. The write was gated from the start and the read never
+// was, so any SDR could read that the engine is set to `send` (drafts AND enrols with no human
+// approval), the score floor, the cooldown, and the engagement watermarks. Safe to gate: the
+// sole caller is MailboxesView (SdrInterface.tsx:3925), which already wraps the fetch in an
+// empty catch, and both panels that render the values are behind `role === "admin"` in JSX.
+// `SELECT *` also meant every column this table ever gains was published by default.
 app.get("/api/sdr/settings", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
   try {
     const { rows } = await pool.query(`SELECT * FROM sdr_settings WHERE id = 1`);
     res.json({ settings: rows[0] || { auto_outreach_enabled: false, auto_outreach_mode: "queue", auto_min_score: null, contact_cooldown_days: 14 } });
@@ -1696,6 +1750,63 @@ app.post("/api/sdr/auto-outreach/run", async (req, res) => {
   } catch (err) {
     console.error("POST /api/sdr/auto-outreach/run error:", err);
     res.status(500).json({ error: err.message || "Auto-outreach run failed" });
+  }
+});
+
+// ── Priority dismissed/seen state, per user ───────────────────────────────────────────────
+// Server-side twin of what used to be two global localStorage keys. Scoped by req.sdrUser.sub
+// with no way to address another user's rows: the user id is never read from the request body.
+app.get("/api/sdr/priority/state", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (!req.sdrUser?.sub) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { rows } = await pool.query(
+      `SELECT draft_id, state FROM sdr_priority_state WHERE user_id = $1`,
+      [req.sdrUser.sub],
+    );
+    res.json({
+      dismissed: rows.filter((r) => r.state === "dismissed").map((r) => r.draft_id),
+      seen: rows.filter((r) => r.state === "seen").map((r) => r.draft_id),
+    });
+  } catch (err) {
+    console.error("GET /api/sdr/priority/state error:", err);
+    res.status(500).json({ error: "Failed to load priority state" });
+  }
+});
+
+app.post("/api/sdr/priority/state", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (!req.sdrUser?.sub) return res.status(401).json({ error: "Unauthorized" });
+  const draftId = String(req.body?.draft_id || "").trim();
+  const state = String(req.body?.state || "").trim();
+  const UUID_RE_P = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!UUID_RE_P.test(draftId)) return res.status(400).json({ error: "draft_id must be a UUID" });
+  if (!["dismissed", "seen"].includes(state)) return res.status(400).json({ error: "state must be 'dismissed' or 'seen'" });
+  try {
+    await pool.query(
+      `INSERT INTO sdr_priority_state (user_id, draft_id, state) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, draft_id, state) DO NOTHING`,
+      [req.sdrUser.sub, draftId, state],
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /api/sdr/priority/state error:", err);
+    res.status(500).json({ error: "Failed to save priority state" });
+  }
+});
+
+// "Restore dismissed" — clears one state class for the calling user only.
+app.delete("/api/sdr/priority/state", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (!req.sdrUser?.sub) return res.status(401).json({ error: "Unauthorized" });
+  const state = String(req.body?.state || "dismissed").trim();
+  if (!["dismissed", "seen"].includes(state)) return res.status(400).json({ error: "state must be 'dismissed' or 'seen'" });
+  try {
+    const r = await pool.query(`DELETE FROM sdr_priority_state WHERE user_id = $1 AND state = $2`, [req.sdrUser.sub, state]);
+    res.json({ ok: true, cleared: r.rowCount });
+  } catch (err) {
+    console.error("DELETE /api/sdr/priority/state error:", err);
+    res.status(500).json({ error: "Failed to clear priority state" });
   }
 });
 
@@ -1794,6 +1905,16 @@ app.get("/api/sdr/leads", async (req, res) => {
       const p = `$${params.length}`;
       where.push(`(s.lead_title ILIKE ${p} OR s.person_name ILIKE ${p} OR s.person_email ILIKE ${p})`);
     }
+    // Per-user lead visibility. Applied LAST so it can never be dropped by an early return in
+    // one of the filter branches above, and applied to `where` (not to the SELECT) so it also
+    // constrains `COUNT(*) OVER()` — an unscoped total is how `?page=` walking survives a
+    // scoped page. `?q=` above ILIKEs person_email, so without this clause the search box is a
+    // contact oracle over the whole book.
+    const vis = leadVisibilityScope(req.sdrUser, "s");
+    if (vis.requires) {
+      params.push(vis.value);
+      where.push(vis.sql(`$${params.length}`));
+    }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     // Pagination (1-based page; default 50/page, hard max 200).
@@ -1868,6 +1989,16 @@ app.get("/api/sdr/leads", async (req, res) => {
     // Apollo enrollment, not Pipedrive's Sequence_Started — a finished Pipedrive sequence
     // counts as contacted, not in-sequence. Keys match what the leads view reads
     // (clear / contacted_recent / contacted_stale / sequenced).
+    // The facets are a SEPARATE query with its own WHERE, so they do not inherit the scope
+    // above and have to be told. Skipping this ships a table that correctly shrinks under a
+    // "Total leads 8,831" tile that still counts the whole book — which both looks like a bug
+    // and discloses the exact size of the pool being withheld.
+    const facetParams = [];
+    let facetWhere = "";
+    if (vis.requires) {
+      facetParams.push(vis.value);
+      facetWhere = `WHERE ${vis.sql(`$${facetParams.length}`)}`;
+    }
     const { rows: facetRows } = await pool.query(
       `SELECT CASE
                 WHEN EXISTS(SELECT 1 FROM sdr_sends x
@@ -1877,7 +2008,8 @@ app.get("/api/sdr/leads", async (req, res) => {
                 WHEN s.outreach_status = 'contacted_stale' THEN 'contacted_stale'
                 ELSE 'contacted_recent'
               END AS k, COUNT(*)::int n
-         FROM sdr_lead_state s GROUP BY 1`,
+         FROM sdr_lead_state s ${facetWhere} GROUP BY 1`,
+      facetParams,
     );
     const byStatus = Object.fromEntries(facetRows.map((r) => [r.k, r.n]));
     const grandTotal = facetRows.reduce((a, r) => a + r.n, 0);
@@ -1901,12 +2033,23 @@ app.get("/api/sdr/leads", async (req, res) => {
 app.get("/api/sdr/leads/filters", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   try {
+    // Scoped for the same reason as the facets: these counts are built from the full lead set,
+    // so unscoped they leak the shape of the whole book (stages, triggers and their volumes)
+    // before a single lead row is fetched. The drawer re-fetches this on every open
+    // (SdrInterface.tsx:1424), so it is a hot path as well as a leaky one.
+    const vis = leadVisibilityScope(req.sdrUser, "s");
+    const p = vis.requires ? [vis.value] : [];
+    const visSql = vis.requires ? vis.sql("$1") : "TRUE";
     const { rows: stages } = await pool.query(
-      `SELECT project_stage AS v, COUNT(*)::int n FROM sdr_lead_state
-       WHERE project_stage IS NOT NULL AND project_stage <> '' GROUP BY 1 ORDER BY 2 DESC`,
+      `SELECT project_stage AS v, COUNT(*)::int n FROM sdr_lead_state s
+       WHERE project_stage IS NOT NULL AND project_stage <> '' AND ${visSql}
+       GROUP BY 1 ORDER BY 2 DESC`,
+      p,
     );
     const { rows: triggers } = await pool.query(
-      `SELECT COALESCE(trigger_type, 'none') AS v, COUNT(*)::int n FROM sdr_lead_state GROUP BY 1 ORDER BY 2 DESC`,
+      `SELECT COALESCE(trigger_type, 'none') AS v, COUNT(*)::int n FROM sdr_lead_state s
+        WHERE ${visSql} GROUP BY 1 ORDER BY 2 DESC`,
+      p,
     );
     res.json({ stages, triggers });
   } catch (err) {
@@ -1923,6 +2066,11 @@ app.post("/api/sdr/leads/:leadId/note", async (req, res) => {
   const content = String(req.body?.content || "").trim();
   if (!content) return res.status(400).json({ error: "content required" });
   try {
+    // This writes into the client's live CRM. Before this guard, any SDR could POST a note
+    // onto ANY lead id in Derek's Pipedrive: the route validated `content` and nothing else.
+    if (!(await leadVisibleTo(pool, req.sdrUser, leadId))) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
     const who = req.sdrUser?.username || "interface";
     // Tag the note with who added it from the SDR console for traceability.
     const body = `${content}\n\n— added by ${who} via SDR console`;
@@ -1959,6 +2107,14 @@ app.get("/api/sdr/leads/:leadId/detail", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   const { leadId } = req.params;
   try {
+    // THE route that made the list fix cosmetic. This returns d.subject, d.body,
+    // d.assigned_user_id and the sending mailbox for EVERY draft on the lead, so it fully
+    // defeated the correctly-scoped GET /api/sdr/drafts/:id: cameron, who owns nothing, read
+    // Derek's draft bodies verbatim, and three owner-exclusive leads returned byte-identical
+    // payloads to every identity tested. 404 rather than 403 — a 403 confirms the lead exists.
+    if (!(await leadVisibleTo(pool, req.sdrUser, leadId))) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
     const { rows: leadRows } = await pool.query(
       `SELECT s.*,
               CASE WHEN s.last_outgoing_mail_time IS NULL THEN NULL
@@ -1985,14 +2141,20 @@ app.get("/api/sdr/leads/:leadId/detail", async (req, res) => {
 
     const [{ rows: drafts }, { rows: sends }, { rows: events }] = await Promise.all([
       pool.query(
+        // Gating the LEAD is not enough, because this selects per DRAFT. Six leads currently
+        // carry drafts from more than one person, and on those the lead-level guard passes for
+        // every co-owner while this query hands each of them everyone else's subject, body,
+        // sending mailbox and signature. A non-admin gets only their own drafts.
         `SELECT d.id, d.trigger_type, d.status, d.subject, d.body, d.created_at, d.sent_at, d.assigned_user_id,
                 COALESCE(u.display_name, u.username) AS assigned_to,
                 mb.email AS sent_from, mb.signature_html AS sender_signature
          FROM sdr_drafts d
          LEFT JOIN sdr_users u ON u.id = d.assigned_user_id
          LEFT JOIN sdr_mailboxes mb ON mb.id = d.assigned_mailbox_id
-         WHERE d.pipedrive_lead_id = $1 ORDER BY d.created_at DESC`,
-        [leadId],
+         WHERE d.pipedrive_lead_id = $1
+           AND ($2::boolean OR d.assigned_user_id = $3)
+         ORDER BY d.created_at DESC`,
+        [leadId, req.sdrUser?.role === "admin", req.sdrUser?.sub || null],
       ),
       pool.query(
         `SELECT id, apollo_sequence_id, status, sent_at FROM sdr_sends
@@ -2057,6 +2219,11 @@ app.patch("/api/sdr/leads/:leadId", async (req, res) => {
   if (!stage && !hasTriggerField) return res.status(400).json({ error: "project_stage or trigger_override required" });
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   try {
+    // Ungated before this: any SDR could rewrite the Project Stage of any lead in the client's
+    // Pipedrive, and stage drives trigger_type, which drives which sequence the engine enrols.
+    if (!(await leadVisibleTo(pool, req.sdrUser, leadId))) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
     // Stage write-back hits Pipedrive; trigger_override is Postgres-only.
     if (stage) {
       if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
@@ -2098,6 +2265,10 @@ app.post("/api/sdr/leads/:leadId/activity", async (req, res) => {
   const done = !!req.body?.done;
   if (!subject) return res.status(400).json({ error: "subject required" });
   try {
+    // Third of the three ungated CRM writes on this route family. Same guard, same reason.
+    if (!(await leadVisibleTo(pool, req.sdrUser, leadId))) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
     const who = req.sdrUser?.username || "interface";
     const act = await pipedriveClient.addActivity({
       leadId,
@@ -2401,8 +2572,15 @@ app.post("/api/sdr/inbox/threads/:id/handled", express.json(), async (req, res) 
   try {
     const threadId = req.params.id;
     const handled = req.body?.handled !== false; // default true
+    const requestedMailbox = req.body?.mailbox || req.query.mailbox;
     if (handled) {
-      const mailbox = await resolveMailbox(req.sdrUser, req.body?.mailbox || req.query.mailbox).catch(() => null);
+      // `.catch(() => null)` used to swallow resolveMailbox's 403 here, so marking a thread in
+      // a colleague's mailbox as handled returned 200 and wrote a row with a NULL mailbox. Only
+      // the "no mailbox connected" case may be tolerated; an explicit, inaccessible mailbox is
+      // an authorization failure and has to surface as one.
+      const mailbox = requestedMailbox
+        ? await resolveMailbox(req.sdrUser, requestedMailbox)
+        : await resolveMailbox(req.sdrUser, undefined).catch(() => null);
       await pool.query(
         `INSERT INTO sdr_inbox_handled (thread_id, mailbox_email, handled_by)
            VALUES ($1, $2, $3)
@@ -2417,7 +2595,20 @@ app.post("/api/sdr/inbox/threads/:id/handled", express.json(), async (req, res) 
         } catch { /* mailbox offline — the handled flag still stands */ }
       }
     } else {
-      await pool.query(`DELETE FROM sdr_inbox_handled WHERE thread_id = $1`, [threadId]);
+      // Un-handling had no ownership check at all. Constrain the delete to rows whose mailbox
+      // this user can actually see, so one rep cannot re-raise a thread in another rep's inbox.
+      // Rows with a NULL mailbox_email are the legacy ones the swallowed-403 bug wrote; they
+      // stay deletable by anyone rather than becoming permanently stuck.
+      if (req.sdrUser?.role === "admin") {
+        await pool.query(`DELETE FROM sdr_inbox_handled WHERE thread_id = $1`, [threadId]);
+      } else {
+        const visible = (await visibleMailboxes(req.sdrUser)).map((v) => v.email);
+        await pool.query(
+          `DELETE FROM sdr_inbox_handled
+            WHERE thread_id = $1 AND (mailbox_email IS NULL OR mailbox_email = ANY($2))`,
+          [threadId, visible],
+        );
+      }
     }
     res.json({ ok: true, thread_id: threadId, handled });
   } catch (e) {
@@ -2513,6 +2704,13 @@ app.post("/api/sdr/inbox/threads/:id/compose", express.json({ limit: "4mb" }), a
 app.get("/api/sdr/leads/:leadId/thread", async (req, res) => {
   try {
     const { leadId } = req.params;
+    // Metadata-only leak (it hands back which mailbox and which Gmail threadId), but the
+    // threadId names a colleague's inbox and the lead it belongs to. Same rule as the drawer.
+    // Returns the empty shape rather than 404 so the drawer degrades to "no thread" instead
+    // of erroring, matching what this route already does for a lead with no contact email.
+    if (!(await leadVisibleTo(pool, req.sdrUser, leadId))) {
+      return res.json({ mailbox: null, threadId: null });
+    }
     const { rows: leadRows } = await pool.query(
       `SELECT lower(person_email) email FROM sdr_lead_state WHERE pipedrive_lead_id = $1`,
       [leadId],
@@ -2652,12 +2850,22 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
 
     // 2) Recent SENDS from our own send records (reliable; no warmup noise). A lead/operator
     //    that already has a reply above is shown as that thread, not duplicated as a send row.
+    // The inbound half above is scoped by `visibleMailboxes`, but these two were not scoped at
+    // all: every SDR received the last 40 interface sends and the last 40 permit sends from
+    // everyone's mailbox. Measured before the fix: 80 identical outbound items from dc@, th@
+    // and jg@ for derek, michael and cameron alike. Scope on the mailbox that sent, using every
+    // VISIBLE mailbox rather than only the connected ones, so a rep whose Gmail token has
+    // lapsed still sees their own outbound history.
+    const ownEmails = vis.map((v) => v.email);
+    const isAdmin = req.sdrUser?.role === "admin";
     const sendItems = [];
     const [sdrSends, permitSends] = await Promise.all([
       pool.query(
         `SELECT o.pipedrive_lead_id, o.sender_name, o.sender_email, o.subject, o.sent_at, s.lead_title, s.person_email
            FROM sdr_outreach_log o JOIN sdr_lead_state s ON s.pipedrive_lead_id = o.pipedrive_lead_id
-          WHERE o.source = 'interface' ORDER BY o.sent_at DESC LIMIT 40`,
+          WHERE o.source = 'interface' AND ($1::boolean OR lower(o.sender_email) = ANY($2))
+          ORDER BY o.sent_at DESC LIMIT 40`,
+        [isAdmin, ownEmails],
       ),
       pool.query(
         `SELECT ps.operator_key, ps.sent_at, po.operator_name, m.email AS mailbox_email,
@@ -2667,7 +2875,9 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
            LEFT JOIN sdr_mailboxes m ON m.id = ps.mailbox_id
            LEFT JOIN LATERAL (SELECT email, contact_name FROM permit_operator_email pe
                                WHERE pe.operator_key = ps.operator_key LIMIT 1) pe ON TRUE
+          WHERE ($1::boolean OR lower(m.email) = ANY($2))
           ORDER BY ps.sent_at DESC LIMIT 40`,
+        [isAdmin, ownEmails],
       ),
     ]);
     for (const r of sdrSends.rows) {
@@ -3378,12 +3588,36 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
             // Skip the note + activity if another reply event already flagged this lead in
             // the last 48h (e.g. the inbox reply-watch beat us to it). Shared 48h guard
             // across both paths = exactly one follow-up task per reply.
+            //
+            // TWO windows, OR'd. Not one replacing the other.
+            //
+            // The NOW()-anchored window is the original and it catches the common case: the
+            // Gmail inbox-watch sees a reply within minutes, the Apollo poll sees the same reply
+            // shortly after, both are recent, one note goes out.
+            //
+            // It misses a late-ingested event. On 2026-07-28 a poll re-emitted a reply that
+            // occurred on 07-08; its Gmail twin (`gmail:19f41e5f7d3a7904:replied`, 83 minutes
+            // apart in occurred_at) sat 20 days outside a NOW()-anchored window, so the lead got
+            // a second "REPLY received, follow up" note about a reply already handled.
+            //
+            // The occurred_at-anchored window catches that. It cannot replace the first one:
+            // replayed over all 2,215 rows, anchoring ONLY on occurred_at would newly fire 3
+            // duplicate notes, because the two sources timestamp the same reply up to 288 hours
+            // apart (6 of 44 apollo/gmail twins are more than 48h apart). Either window alone
+            // has a blind spot the other covers, so the union is the only correct form.
+            //
+            // Neither is an age gate. That was vetoed for good reason (34% of real replies
+            // arrive >7d after first touch, so silencing on age silences real replies). A late
+            // reply with no twin still fires every side effect; only a second record of the
+            // SAME reply is suppressed, which is what this guard was always for.
             const { rows: dupe } = await pool.query(
               `SELECT 1 FROM sdr_engagement_events
                 WHERE pipedrive_lead_id = $1 AND event_type IN ('email_replied','reply_received')
                   AND apollo_event_id IS DISTINCT FROM $2
-                  AND occurred_at > NOW() - INTERVAL '48 hours' LIMIT 1`,
-              [leadId, apolloEventId],
+                  AND (occurred_at > NOW() - INTERVAL '48 hours'
+                       OR occurred_at BETWEEN $3::timestamptz - INTERVAL '48 hours'
+                                          AND $3::timestamptz + INTERVAL '48 hours') LIMIT 1`,
+              [leadId, apolloEventId, occurredAt],
             );
             if (!dupe.length) {
               await pipedriveClient.addNote({
@@ -3456,13 +3690,17 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
             // Stop the sequence on a bounce: clear Sequence_Started so the lead is no longer
             // "in sequence", and leave a bounced comment. Deduped against any other bounce event
             // on this lead in the last 48h (e.g. the inbox NDR watcher) so it's one note.
+            // Union of a NOW()-anchored and an occurred_at-anchored window; see the reply
+            // branch above for why neither one alone is sufficient.
             await pipedriveClient.updateLead(leadId, { [pdSequenceStartedKey]: "" });
             const { rows: dupeB } = await pool.query(
               `SELECT 1 FROM sdr_engagement_events
                 WHERE pipedrive_lead_id = $1 AND event_type IN ('email_bounced','bounce')
                   AND apollo_event_id IS DISTINCT FROM $2
-                  AND occurred_at > NOW() - INTERVAL '48 hours' LIMIT 1`,
-              [leadId, apolloEventId],
+                  AND (occurred_at > NOW() - INTERVAL '48 hours'
+                       OR occurred_at BETWEEN $3::timestamptz - INTERVAL '48 hours'
+                                          AND $3::timestamptz + INTERVAL '48 hours') LIMIT 1`,
+              [leadId, apolloEventId, occurredAt],
             );
             if (!dupeB.length) {
               await pipedriveClient.addNote({
@@ -3545,6 +3783,79 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
 
 // Pipedrive field key for Sequence_Started (used by /events/ingest)
 const pdSequenceStartedKey = "48c4bb758e8642d6372c7fff9df3c0ea716170f1";
+
+// ── Lead-owner assignment at outreach (BORN DEAD: SDR_ASSIGN_OWNER, default off) ──────────
+//
+// Derek's ask: when a .co sequence starts, the lead should belong to the rep who sent it, so
+// they know to nurture it. Today 8,773 of 8,831 leads are Derek's because nothing in this app
+// has ever written `owner_id` — every hit in the codebase is a read.
+//
+// WHY THIS SHIPS OFF, and what has to be true before it is turned on:
+//
+//   n8n workflow `pcUKAkMkvoKQ4kPY` is ACTIVE, its `sdr-trigger` webhook is live-registered,
+//   its four hardcoded per-user Pipedrive tokens still authenticate, and it PATCHes `owner_id`
+//   on both of its branches. 57 leads currently carry non-Derek owners in exactly its rotation
+//   roster (Michael 21, Terry 18, Josie 18), which is proof it works, not proof it is idle.
+//
+//   Worse for us specifically: its SENDER_BY_USER_ID map predates Cameron, Sarah and Daniela,
+//   so for 26444374 / 26444385 / 26444363 the lookup returns undefined and it falls through to
+//   its own rotation, silently overwriting whatever we wrote. Assigning a lead to one of the
+//   three newest reps is therefore the case most likely to end up wrong.
+//
+//   Retiring pcUK is explicitly out of scope for this run. Until it is retired or its map is
+//   extended, SDR_ASSIGN_OWNER stays unset. Sticky is a policy, not a lock: it has no
+//   idempotency and pcUK does not honour it.
+const ASSIGN_OWNER_ENABLED = String(process.env.SDR_ASSIGN_OWNER || "").toLowerCase() === "true";
+const DEREK_PD_USER_ID = 19499202;
+
+/**
+ * The Pipedrive user id to assign at outreach, or null to leave ownership alone.
+ *
+ * Sticky (locked §3.3): a lead already owned by a rep keeps that rep, so ownership does not
+ * move mid-nurture. Only leads sitting on Derek (the import default, 99.3% of the book) or on
+ * nobody get moved. Any failure returns null — assignment is the optional part of this write.
+ */
+/**
+ * May this user attach that mailbox to a draft?
+ *
+ * `assigned_user_id` on a draft has been guarded since day one (server.js "Cannot assign draft
+ * to another user"), but `assigned_mailbox_id` never was, on either the create or the patch
+ * route. So an SDR could hold a draft assigned to themselves that sends from a colleague's
+ * mailbox. That was already wrong (the mail goes out over someone else's name and burns their
+ * daily cap); with owner assignment reading `pipedrive_sender_id` off the sending mailbox, it
+ * also becomes a way to point the CRM owner write at whoever you like.
+ *
+ * @returns {Promise<string|null>} an error message, or null if allowed
+ */
+async function mailboxAssignmentError(pool_, user, mailboxId) {
+  if (!mailboxId) return null;
+  if (user?.role === "admin") return null;
+  const { rows } = await pool_.query(`SELECT owner_user_id FROM sdr_mailboxes WHERE id = $1`, [mailboxId]);
+  if (!rows.length) return "Unknown mailbox";
+  if (rows[0].owner_user_id !== user?.sub) return "Cannot send from another user's mailbox";
+  return null;
+}
+
+async function resolveOutreachOwner(leadId, mailbox) {
+  if (!ASSIGN_OWNER_ENABLED) return null;
+  const senderId = Number(mailbox?.pipedrive_sender_id);
+  if (!Number.isFinite(senderId) || senderId <= 0) return null; // no seat mapped → leave as-is
+  if (senderId === DEREK_PD_USER_ID) return null; // already the default owner, nothing to say
+  try {
+    const lead = await pipedriveClient.getLead(leadId);
+    const current = Number(lead?.owner_id);
+    // Non-Derek, non-zero owner = a rep already has it. Leave it.
+    if (Number.isFinite(current) && current > 0 && current !== DEREK_PD_USER_ID) return null;
+    // `{to, from}` rather than a bare id so the caller can audit the pair. `owner_id` has no
+    // history in Pipedrive, so without the `from` value a batch of writes has no undo path.
+    return { to: senderId, from: Number.isFinite(current) ? current : null };
+  } catch (e) {
+    // Never guess. If we cannot read the current owner we cannot honour sticky, so we decline
+    // to write rather than risk taking a lead off the rep who is already working it.
+    console.error(`[assign-owner] could not read current owner for ${leadId} (${e.message}) — leaving ownership unchanged`);
+    return null;
+  }
+}
 
 // Apollo contact custom fields carrying the approved draft into the sequence
 // step-1 template (created via API 2026-06-11; override via env if recreated)
@@ -3877,6 +4188,16 @@ app.post("/api/sdr/drafts", async (req, res) => {
   }
 
   try {
+    // A write that grants a read. Without this guard an SDR could create a draft on a lead they
+    // cannot see, which by the visibility predicate makes that lead theirs and flips every
+    // by-id guard on it open. The 409 below leaks too: it returns the existing draft's UUID,
+    // so an ungated caller could confirm a colleague's draft exists on a lead they were 404'd
+    // from. Both are closed by checking visibility before either.
+    if (!(await leadVisibleTo(pool, req.sdrUser, pipedrive_lead_id))) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+    const mbErr = await mailboxAssignmentError(pool, req.sdrUser, assigned_mailbox_id);
+    if (mbErr) return res.status(403).json({ error: mbErr });
     const dup = await pool.query(
       `SELECT id FROM sdr_drafts
        WHERE pipedrive_lead_id = $1 AND trigger_type = $2
@@ -3899,7 +4220,10 @@ app.post("/api/sdr/drafts", async (req, res) => {
         pipedrive_lead_id, pipedrive_contact_id || null, pipedrive_org_id || null,
         contact_id_snapshot, contact_email_snapshot, org_id_snapshot || null,
         trigger_type, apollo_sequence_id || null, apollo_template_id || null,
-        subject, body, assigned_mailbox_id || null, assigned_user_id || null,
+        // Default the assignee to the creator. An unassigned draft belongs to nobody, which is
+        // both a lost lead and (before the visibility predicate excluded them) a way to hide a
+        // shared-pool lead from every SDR at once.
+        subject, body, assigned_mailbox_id || null, assigned_user_id || req.sdrUser?.sub || null,
         scheduled_for || null, metadata || {},
       ],
     );
@@ -3922,6 +4246,8 @@ app.patch("/api/sdr/drafts/:id", async (req, res) => {
     return res.status(403).json({ error: "Only admin can change apollo_sequence_id" });
   }
   try {
+    const mbErr = await mailboxAssignmentError(pool, req.sdrUser, assigned_mailbox_id);
+    if (mbErr) return res.status(403).json({ error: mbErr });
     const scope = ownerScope(req.sdrUser, "assigned_user_id");
     const params = [req.params.id];
     let where = `id = $1 AND status IN ('pending','approved','edited')`;
@@ -4193,7 +4519,8 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
 
     // Resolve mailbox → apollo_mailbox_id
     const { rows: mbRows } = await pool.query(
-      `SELECT id, email, apollo_mailbox_id, active, warmup_started_at, signature_html FROM sdr_mailboxes WHERE id = $1`,
+      `SELECT id, email, apollo_mailbox_id, active, warmup_started_at, signature_html, pipedrive_sender_id
+         FROM sdr_mailboxes WHERE id = $1`,
       [draft.assigned_mailbox_id],
     );
     const mailbox = mbRows[0];
@@ -4393,9 +4720,52 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     // in the lead's Pipedrive timeline. No new custom field — state lives in Postgres.
     if (process.env.PIPEDRIVE_API_TOKEN) {
       try {
-        await pipedriveClient.updateLead(draft.pipedrive_lead_id, {
+        const leadPatch = {
           [pdSequenceStartedKey]: `Apollo:${draft.trigger_type} ${new Date().toISOString().slice(0, 10)}`,
-        });
+        };
+        // Owner assignment (Derek's ask 4 of 2026-07-27: assign the lead to the person when the
+        // .co sequence starts, so they know to nurture it). BORN DEAD behind SDR_ASSIGN_OWNER.
+        // See resolveOutreachOwner above for what has to be true before Ivan flips it: an n8n
+        // workflow is still writing this same field and does not know the three newest reps.
+        const ownerMove = await resolveOutreachOwner(draft.pipedrive_lead_id, mailbox);
+        const ownerFrom = ownerMove?.from ?? null;
+        if (ownerMove) leadPatch.owner_id = ownerMove.to;
+
+        try {
+          await pipedriveClient.updateLead(draft.pipedrive_lead_id, leadPatch);
+          // Audit every SUCCESSFUL owner move, not just the failures. Without this there is no
+          // undo path: `owner_id` has no history in Pipedrive, so a week of writes could only be
+          // reversed by guessing. With it, `SELECT ... FROM nurture_audit WHERE action =
+          // 'lead.owner_assign'` reconstructs every from→to pair exactly.
+          if (leadPatch.owner_id) {
+            await pool.query(
+              `INSERT INTO nurture_audit (sdr_user, action, target_kind, target_id, summary)
+               VALUES ($1, 'lead.owner_assign', 'pipedrive_lead', $2, $3)`,
+              [
+                req.sdrUser?.username || "auto",
+                String(draft.pipedrive_lead_id),
+                JSON.stringify({ from: ownerFrom, to: leadPatch.owner_id, mailbox: mailbox.email }),
+              ],
+            ).catch((e) => console.error("[assign-owner] audit write failed:", e.message));
+          }
+        } catch (e) {
+          // `Sequence_Started` marks the lead in-sequence for Pipedrive-side views and for the
+          // n8n workflows that read it. It is NOT this app's own re-send gate, which is local
+          // Postgres state (`sdr_sends` + draft status) written before this block runs. Still
+          // worth protecting: `owner_id` is `mandatory_flag: true, bulk_edit_allowed: false` and
+          // can be refused for permission reasons the shared token cannot see in advance, and
+          // there is no reason a rejected owner should also cost us the field that tells
+          // Pipedrive this lead is in sequence. Retry without the owner. Mirrors the
+          // retry-without-user_id fallback addActivity already has (pipedriveClient.js:93).
+          if (!leadPatch.owner_id) throw e;
+          console.error(`[assign-owner] lead PATCH with owner_id ${leadPatch.owner_id} failed (${e.message}) — retrying without it so Sequence_Started still lands`);
+          delete leadPatch.owner_id;
+          await pipedriveClient.updateLead(draft.pipedrive_lead_id, leadPatch);
+          // Deliberately "uncertain" and not "failed": a timeout-class error can be raised on a
+          // PATCH that actually landed, so this records that we do not know, which is the true
+          // state. The nurture_audit row above is the reliable record of a confirmed write.
+          result.owner_assign = `uncertain: ${e.message}`;
+        }
         const appBase = process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app";
         // Append the full sent email (subject + body + signature) so the timeline note
         // shows exactly what went out. Pipedrive notes render HTML; escape the user text

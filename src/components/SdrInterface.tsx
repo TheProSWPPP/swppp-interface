@@ -435,10 +435,10 @@ function UserPicker({ onSignIn }: { onSignIn: (u: SdrUser) => void }) {
               </div>
               <div className="flex-1">
                 <div className="text-sm font-semibold text-slate-900">{u.display_name}</div>
-                <div className="text-xs text-slate-500 flex items-center gap-1">
-                  {u.role === "admin" && <ShieldCheck className="h-3 w-3 text-brand-600" />}
-                  {u.role}
-                </div>
+                {/* No role badge: /api/sdr/auth/users is unauthenticated (it fuels this
+                    picker), so publishing `role` announced which seat is the admin to anyone
+                    who could reach the page. Everyone recognises their own name without it. */}
+                <div className="text-xs text-slate-500">{u.username}</div>
               </div>
               <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-brand-500" />
             </button>
@@ -2817,46 +2817,95 @@ function isHot(l: SdrEngagementLead): boolean {
   return l.opens >= 3 || l.clicks > 0;
 }
 
-// Priority "notifications" the rep has dismissed. Persisted client-side (per browser) so a
-// dismissed lead stays hidden from the Priority list AND the tab badge across reloads.
+// Priority "dismissed" / "seen" state.
+//
+// The server is the source of truth (`/api/sdr/priority/state`, keyed on the JWT's user id),
+// so a rep's dismissals follow them between machines. localStorage stays as a synchronous
+// read-through cache, because both sets are read during render and inside the badge's
+// interval — an async read there would flash the badge on every poll.
+//
+// The cache keys are namespaced PER USER. That matters on its own: the old global keys meant
+// two people sharing a browser shared each other's dismissals, and that half of the bug is now
+// fixed even when the network is down and the server never answers.
+//
+// Server writes are fire-and-forget. A failed write costs this device's copy of one dismissal
+// on the next login, and never blocks or breaks the UI.
 const PRIORITY_DISMISS_KEY = "sdr.priority.dismissed";
-function loadDismissed(): Set<string> {
+const PRIORITY_SEEN_KEY = "sdr.priority.seen";
+
+function priorityKey(base: string): string {
+  const id = sdrApi.getUser()?.id;
+  return id ? `${base}.${id}` : base;
+}
+
+function loadSet(base: string): Set<string> {
   try {
-    return new Set(JSON.parse(localStorage.getItem(PRIORITY_DISMISS_KEY) || "[]"));
+    const key = priorityKey(base);
+    const raw = localStorage.getItem(key);
+    if (raw !== null) return new Set(JSON.parse(raw));
+    // One-time carry-over from the old un-namespaced key, so the four people already using
+    // this do not watch every dismissed item reappear the first time they load after deploy.
+    // Whoever loads first inherits the shared pre-existing set, which is the same state they
+    // had yesterday; from then on each user's copy diverges as it should.
+    if (key !== base) {
+      const legacy = localStorage.getItem(base);
+      if (legacy !== null) {
+        localStorage.setItem(key, legacy);
+        return new Set(JSON.parse(legacy));
+      }
+    }
+    return new Set();
   } catch {
     return new Set();
   }
 }
-function saveDismissed(s: Set<string>) {
+function saveSet(base: string, s: Set<string>) {
   try {
-    localStorage.setItem(PRIORITY_DISMISS_KEY, JSON.stringify([...s]));
+    localStorage.setItem(priorityKey(base), JSON.stringify([...s]));
   } catch {
-    /* localStorage unavailable — dismissals just won't persist */
+    /* localStorage unavailable — state just won't persist on this device */
   }
 }
 
-// Priority items the rep has SEEN (clicked into). Distinct from dismissed: a seen item
-// stays in the list, it just stops counting toward the tab's notification badge. Persisted
-// per browser so the badge stays cleared across reloads.
-const PRIORITY_SEEN_KEY = "sdr.priority.seen";
+function loadDismissed(): Set<string> {
+  return loadSet(PRIORITY_DISMISS_KEY);
+}
+function saveDismissed(s: Set<string>) {
+  saveSet(PRIORITY_DISMISS_KEY, s);
+}
 function loadSeen(): Set<string> {
+  return loadSet(PRIORITY_SEEN_KEY);
+}
+
+// Pull the server's copy and union it into the local cache. Union rather than replace so a
+// dismissal made offline is not silently undone by a stale server read.
+async function syncPriorityStateFromServer(): Promise<{ dismissed: Set<string>; seen: Set<string> } | null> {
   try {
-    return new Set(JSON.parse(localStorage.getItem(PRIORITY_SEEN_KEY) || "[]"));
+    const remote = await sdrApi.priorityState();
+    const dismissed = loadDismissed();
+    const seen = loadSeen();
+    remote.dismissed.forEach((id) => dismissed.add(id));
+    remote.seen.forEach((id) => seen.add(id));
+    saveSet(PRIORITY_DISMISS_KEY, dismissed);
+    saveSet(PRIORITY_SEEN_KEY, seen);
+    return { dismissed, seen };
   } catch {
-    return new Set();
+    return null; // offline or 401 — the local cache is still correct for this device
   }
 }
+
 // Mark a priority lead seen and notify the badge to recompute live (no refetch).
 function markPrioritySeen(id: string) {
   try {
     const s = loadSeen();
     if (s.has(id)) return;
     s.add(id);
-    localStorage.setItem(PRIORITY_SEEN_KEY, JSON.stringify([...s]));
+    saveSet(PRIORITY_SEEN_KEY, s);
     window.dispatchEvent(new Event("sdr:priority-seen"));
   } catch {
     /* localStorage unavailable — badge just won't persist as cleared */
   }
+  void sdrApi.setPriorityState(id, "seen").catch(() => {});
 }
 
 function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", text: string) => void }) {
@@ -2872,6 +2921,7 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
       saveDismissed(next);
       return next;
     });
+    void sdrApi.setPriorityState(id, "dismissed").catch(() => {});
   }
   function restoreDismissed() {
     setDismissed(() => {
@@ -2879,6 +2929,7 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
       saveDismissed(empty);
       return empty;
     });
+    void sdrApi.clearPriorityState("dismissed").catch(() => {});
   }
 
   const load = useCallback(() => {
@@ -2893,6 +2944,20 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
     const interval = setInterval(load, QUEUE_POLL_MS);
     return () => clearInterval(interval);
   }, [load]);
+
+  // Pull this user's dismissals from the server once on mount, so a dismissal made on their
+  // laptop is already applied when they open the tab on another machine. Best-effort: on any
+  // failure the local cache stands and the UI is unchanged.
+  useEffect(() => {
+    let stop = false;
+    void syncPriorityStateFromServer().then((s) => {
+      if (!stop && s) {
+        setDismissed(new Set(s.dismissed));
+        window.dispatchEvent(new Event("sdr:priority-seen")); // let the badge pick up remote `seen`
+      }
+    });
+    return () => { stop = true; };
+  }, []);
 
   if (error)
     return <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>;
