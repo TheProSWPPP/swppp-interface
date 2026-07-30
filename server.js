@@ -20,6 +20,8 @@ import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRe
 import { sdrDraftVerifyEnabled, checkDraftEmail } from "./lib/sdrDraftVerify.js";
 import { runAutoSwitch, autoSwitchEnabled } from "./lib/sdrAutoSwitch.js";
 import { ownerScope, withLeadLock, leadVisibilityScope, leadVisibleTo } from "./lib/sdrAccess.js";
+import { staleDraftBlock } from "./lib/draftFreshness.js";
+import { isCustomerLead, refreshCustomerIndex, customerIndexStats } from "./lib/customerSuppression.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
@@ -440,6 +442,7 @@ app.use((req, res, next) => {
   // Skip auth for health check and external webhook endpoints
   if (
     req.path === "/health" ||
+    (req.path === "/api/version" && req.method === "GET") ||
     (req.path === "/api/projects" && req.method === "POST") ||
     (req.path === "/api/ai-content/callback" && req.method === "POST") ||
     (req.path === "/api/leads/upload/callback" && req.method === "POST") ||
@@ -468,16 +471,18 @@ app.use((req, res, next) => {
     return next();
   }
 
-  // SDR login + user picker are unauthenticated (login issues JWT; users fuels the picker)
-  if (req.path === "/api/sdr/auth/login" && req.method === "POST") {
-    return next();
-  }
-  if (req.path === "/api/sdr/auth/users" && req.method === "GET") {
-    return next();
-  }
+  // SDR login + user picker cannot require a JWT (login ISSUES the JWT; the picker runs
+  // before anyone holds one). They used to skip auth entirely, which meant anyone on the
+  // internet could list the roster, POST {"username":"derek"} and receive an admin token —
+  // the whole lead book, no credentials. They now fall through to the Basic-auth wall
+  // below, which every legitimate user already passes to load the SPA at all.
+  // Do NOT return next() here. Do NOT let them reach the Bearer branch either.
+  const isSdrPreAuthRoute =
+    (req.path === "/api/sdr/auth/login" && req.method === "POST") ||
+    (req.path === "/api/sdr/auth/users" && req.method === "GET");
 
   // SDR routes accept JWT bearer
-  if (req.path.startsWith("/api/sdr/")) {
+  if (req.path.startsWith("/api/sdr/") && !isSdrPreAuthRoute) {
     const authHeader = req.headers.authorization || "";
     if (authHeader.startsWith("Bearer ")) {
       const claims = verifySdrJwt(authHeader.slice(7).trim());
@@ -1255,7 +1260,16 @@ async function enrollAutoDrafts(createdDrafts, { override = false } = {}) {
   const out = { enrolled: 0, skipped: 0 };
   for (const d of createdDrafts || []) {
     try {
-      const token = jwt.sign({ sub: d.assigned_user_id, username: "auto-outreach", role: "admin" }, JWT_SECRET, { expiresIn: 300 });
+      // `machine: true` marks this as the engine acting, not a person clicking. `override`
+      // below unlocks ONLY the recent-contact dedup guard, which is what it was built for.
+      // Gates that represent a human judgement call (draft staleness, existing-customer
+      // suppression) refuse a machine override — otherwise the engine would quietly bypass
+      // the very rules it is most likely to trip. See the `machine` checks in approve-and-send.
+      const token = jwt.sign(
+        { sub: d.assigned_user_id, username: "auto-outreach", role: "admin", machine: true },
+        JWT_SECRET,
+        { expiresIn: 300 },
+      );
       const resp = await fetch(`http://127.0.0.1:${port}/api/sdr/drafts/${d.id}/approve-and-send`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -1392,6 +1406,18 @@ let memoryContent = [];
 // API Routes
 app.get("/health", (req, res) => {
   res.json({ status: "ok", database: !!process.env.DATABASE_URL });
+});
+
+// Build identity. The 2026-07-30 review could not prove the deployed code was the code it
+// read, because nothing exposed a commit. Railway injects RAILWAY_GIT_COMMIT_SHA on deploy.
+// Unauthenticated on purpose: a commit sha is not a secret and an audit needs it without keys.
+app.get("/api/version", (req, res) => {
+  res.json({
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA || null,
+    branch: process.env.RAILWAY_GIT_BRANCH || null,
+    deployed_at: process.env.RAILWAY_DEPLOYMENT_CREATED_AT || null,
+    service: process.env.RAILWAY_SERVICE_NAME || null,
+  });
 });
 
 // SDR identity. Two modes, selected by the REQUIRE_PASSWORD env flag:
@@ -4044,6 +4070,13 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
   if (req.sdrUser && assigned_user_id && req.sdrUser.role !== "admin" && assigned_user_id !== req.sdrUser.sub) {
     return res.status(403).json({ error: "Cannot assign draft to another user" });
   }
+  // Lead visibility. `6b8394a` closed this write-grants-read hole on the sibling
+  // POST /api/sdr/drafts and missed this route, which is the one the UI actually calls:
+  // drafting against a colleague's private lead created a draft the caller could then read.
+  // n8n (callback_secret, no req.sdrUser) is unscoped by design.
+  if (req.sdrUser && !(await leadVisibleTo(pool, pipedrive_lead_id, req.sdrUser))) {
+    return res.status(404).json({ error: "Lead not found" });
+  }
   try {
     const payload = await buildDraftFromLead({
       pipedriveLeadId: pipedrive_lead_id,
@@ -4386,6 +4419,51 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     }
     if (!draft.assigned_mailbox_id) {
       return res.status(400).json({ error: "Draft has no assigned_mailbox_id" });
+    }
+
+    // Staleness gate. A draft written weeks ago describes a lead state that has moved on.
+    // See lib/draftFreshness.js. Admin override, same shape as the dedup override below.
+    {
+      const stale = staleDraftBlock(draft);
+      if (stale) {
+        if (req.body?.override === true && req.sdrUser?.role === "admin" && !req.sdrUser?.machine) {
+          console.log(
+            `[stale-draft] admin override by ${req.sdrUser?.username || req.sdrUser?.sub} — ` +
+              `draft ${draft.id} is ${stale.ageDays}d old`,
+          );
+        } else {
+          return res.status(409).json({
+            code: "draft_too_old",
+            ageDays: stale.ageDays,
+            maxAgeDays: stale.maxAgeDays,
+            message:
+              `This draft was written ${stale.ageDays} days ago (limit ${stale.maxAgeDays}). ` +
+              `The lead may have moved on since. Regenerate it, or ask an admin to override.`,
+          });
+        }
+      }
+    }
+
+    // Existing-customer gate. Derek asked for this on 2026-07-29. The signal is his own
+    // Pipedrive `Customer` label, resolved across duplicate org records — see
+    // lib/customerSuppression.js. Cold .co outreach only; the permit engine is untouched.
+    // Admin override, because a customer on a genuinely new project may still want the email.
+    {
+      const cust = await isCustomerLead(draft.pipedrive_lead_id);
+      if (cust) {
+        if (req.body?.override === true && req.sdrUser?.role === "admin" && !req.sdrUser?.machine) {
+          console.log(
+            `[customer-suppression] admin override by ${req.sdrUser?.username || req.sdrUser?.sub} — ` +
+              `lead ${draft.pipedrive_lead_id} (${cust.matchedOn})`,
+          );
+        } else {
+          return res.status(409).json({
+            code: "existing_customer",
+            matchedOn: cust.matchedOn,
+            message: `Not sending: ${cust.reason}. Cold outreach to an existing customer is suppressed. Admin override required.`,
+          });
+        }
+      }
     }
 
     // Dedup guard: never silently re-email an already-contacted lead. Live re-check
