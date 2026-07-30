@@ -2601,6 +2601,21 @@ app.get("/api/sdr/inbox/send-as", async (req, res) => {
   }
 });
 
+// All headers on one message. Admin only, read-only. Exists to answer "which system actually
+// sent this", which the curated thread view cannot: X-Google-Original-From (Gmail rewrote the
+// From), Sender (delegated send), and the Received chain / Message-ID domain.
+app.get("/api/sdr/inbox/messages/:id/headers", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  try {
+    const mailbox = await resolveMailbox(req.sdrUser, req.query.mailbox);
+    if (!mailbox) return res.status(409).json({ error: "No connected mailbox" });
+    const token = await accessTokenForMailbox(mailbox);
+    res.json({ mailbox, ...(await gmailInbox.getMessageHeaders(token, req.params.id)) });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // Thread list for a mailbox (scoped). Each thread linked to its lead by sender email.
 app.get("/api/sdr/inbox/threads", async (req, res) => {
   try {
