@@ -2575,6 +2575,32 @@ app.get("/api/sdr/inbox/accounts", async (req, res) => {
   }
 });
 
+// What display name does each connected mailbox actually send under, per Google?
+//
+// Outbound headers are built as `From: <bare address>` with no name, so Gmail fills it from
+// these sendAs settings. When cold drips started going out as "Derek Chinners" from other
+// people's mailboxes, nothing in the system could show what Google thought each mailbox was
+// called and the cause was misdiagnosed twice. Admin only, read-only against Gmail.
+app.get("/api/sdr/inbox/send-as", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  try {
+    const { rows } = await pool.query(`SELECT mailbox_email FROM sdr_inbox_accounts ORDER BY mailbox_email`);
+    const out = [];
+    for (const r of rows) {
+      try {
+        const token = await accessTokenForMailbox(r.mailbox_email);
+        out.push({ mailbox: r.mailbox_email, sendAs: await gmailInbox.listSendAs(token) });
+      } catch (e) {
+        out.push({ mailbox: r.mailbox_email, error: e.message });
+      }
+    }
+    res.json({ accounts: out });
+  } catch (e) {
+    console.error("GET /api/sdr/inbox/send-as error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Thread list for a mailbox (scoped). Each thread linked to its lead by sender email.
 app.get("/api/sdr/inbox/threads", async (req, res) => {
   try {
