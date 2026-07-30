@@ -1249,6 +1249,16 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
       })
       .catch((e) => console.error("[sync] sdr_lead_state failed:", e.message));
   setTimeout(runSync, 30_000);
+  // Warm the existing-customer index off the send path, so the first approve-and-send of the
+  // day is not the thing paying for ~32 pages of Pipedrive orgs. Non-fatal: the gate fetches
+  // on demand and fails open if this never completes.
+  setTimeout(
+    () =>
+      refreshCustomerIndex().catch((e) =>
+        console.warn("[customer-suppression] boot warm-up failed (gate will fetch on demand):", e.message),
+      ),
+    45_000,
+  );
   setInterval(runSync, 6 * 60 * 60 * 1000);
 }
 
@@ -1705,6 +1715,21 @@ async function contactCooldownDays() {
 // sole caller is MailboxesView (SdrInterface.tsx:3925), which already wraps the fetch in an
 // empty catch, and both panels that render the values are behind `role === "admin"` in JSX.
 // `SELECT *` also meant every column this table ever gains was published by default.
+// Diagnostic for the existing-customer gate. Suppression that cannot be inspected is
+// suppression nobody trusts: this reports whether the Pipedrive Customer-label index actually
+// built, how big it is, and when. Admin only. `?refresh=1` forces a rebuild.
+app.get("/api/sdr/customer-index", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  try {
+    if (req.query.refresh === "1") await refreshCustomerIndex({ force: true });
+    else await refreshCustomerIndex();
+    res.json(customerIndexStats());
+  } catch (err) {
+    console.error("GET /api/sdr/customer-index error:", err);
+    res.status(500).json({ error: "Failed to build customer index", detail: err.message, stats: customerIndexStats() });
+  }
+});
+
 app.get("/api/sdr/settings", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
