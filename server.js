@@ -21,6 +21,7 @@ import { sdrDraftVerifyEnabled, checkDraftEmail } from "./lib/sdrDraftVerify.js"
 import { runAutoSwitch, autoSwitchEnabled } from "./lib/sdrAutoSwitch.js";
 import { ownerScope, withLeadLock, leadVisibilityScope, leadVisibleTo } from "./lib/sdrAccess.js";
 import { staleDraftBlock } from "./lib/draftFreshness.js";
+import { normalizeLeadCsv } from "./lib/leadCsvNormalize.js";
 import { isCustomerLead, refreshCustomerIndex, customerIndexStats } from "./lib/customerSuppression.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
@@ -6386,10 +6387,19 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
     return res.status(500).json({ error: `Job creation failed: ${err.message}` });
   }
 
-  let csvBase64;
+  let csvBase64, normalized;
   try {
     const fileBuffer = fs.readFileSync(req.file.path);
-    csvBase64 = fileBuffer.toString("base64");
+    // Map Milo's bid-aggregator headers onto the canonical shape BEFORE n8n parses the file,
+    // so one upload button serves both sheets. A file matching neither shape passes through
+    // byte-identical rather than being guessed at. See lib/leadCsvNormalize.js.
+    normalized = normalizeLeadCsv(fileBuffer.toString("utf8"));
+    csvBase64 = Buffer.from(normalized.csv, "utf8").toString("base64");
+    if (normalized.source !== "cmd") {
+      console.log(
+        `[lead-import] job ${jobId}: source=${normalized.source} renamed=[${normalized.renamed}] injected=[${normalized.injected}]`,
+      );
+    }
   } finally {
     try { fs.unlinkSync(req.file.path); } catch {}
   }
@@ -6414,7 +6424,13 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
     ).catch(() => {});
   });
 
-  res.json({ job_id: jobId, status: "uploaded" });
+  res.json({
+    job_id: jobId,
+    status: "uploaded",
+    source: normalized.source,
+    renamed: normalized.renamed,
+    injected: normalized.injected,
+  });
 });
 
 // Auto-mark stuck jobs as error if no progress for STUCK_MINUTES.
