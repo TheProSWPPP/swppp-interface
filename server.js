@@ -3876,27 +3876,26 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
 // Pipedrive field key for Sequence_Started (used by /events/ingest)
 const pdSequenceStartedKey = "48c4bb758e8642d6372c7fff9df3c0ea716170f1";
 
-// ── Lead-owner assignment at outreach (BORN DEAD: SDR_ASSIGN_OWNER, default off) ──────────
+// ── Lead-owner assignment at outreach (SDR_ASSIGN_OWNER, LIVE 2026-08-03) ─────────────────
 //
 // Derek's ask: when a .co sequence starts, the lead should belong to the rep who sent it, so
-// they know to nurture it. Today 8,773 of 8,831 leads are Derek's because nothing in this app
-// has ever written `owner_id` — every hit in the codebase is a read.
+// they know to nurture it. Before this, 8,773 of 8,831 leads were Derek's because nothing in
+// this app had ever written `owner_id` — every hit in the codebase was a read.
 //
-// WHY THIS SHIPS OFF, and what has to be true before it is turned on:
+// This shipped off for three months because n8n workflow `pcUKAkMkvoKQ4kPY` also PATCHes
+// `owner_id`, and its hardcoded SENDER_BY_USER_ID roster (Derek/Michael/Josie/Terry) predates
+// Cameron, Sarah and Daniela — for 26444374 / 26444385 / 26444363 its lookup returns undefined
+// and it falls through to its own rotation, silently overwriting whatever we wrote.
 //
-//   n8n workflow `pcUKAkMkvoKQ4kPY` is ACTIVE, its `sdr-trigger` webhook is live-registered,
-//   its four hardcoded per-user Pipedrive tokens still authenticate, and it PATCHes `owner_id`
-//   on both of its branches. 57 leads currently carry non-Derek owners in exactly its rotation
-//   roster (Michael 21, Terry 18, Josie 18), which is proof it works, not proof it is idle.
+// That contention is gone. pcUK wrote its last lead on 2026-05-07 (measured on its own
+// fingerprint: the `senderSignature` field 7d0c154f…, which nothing else writes — 224 leads
+// carry it, none created after 2026-05-07). It was active with a registered webhook that
+// nothing had called in three months, so on 2026-08-03 it was deactivated and its
+// `POST /webhook/sdr-trigger` now 404s. Pre-change JSON:
+// ~/.claude/backups/pcuk-deactivate-2026-08-03/. Re-activating it re-opens the conflict.
 //
-//   Worse for us specifically: its SENDER_BY_USER_ID map predates Cameron, Sarah and Daniela,
-//   so for 26444374 / 26444385 / 26444363 the lookup returns undefined and it falls through to
-//   its own rotation, silently overwriting whatever we wrote. Assigning a lead to one of the
-//   three newest reps is therefore the case most likely to end up wrong.
-//
-//   Retiring pcUK is explicitly out of scope for this run. Until it is retired or its map is
-//   extended, SDR_ASSIGN_OWNER stays unset. Sticky is a policy, not a lock: it has no
-//   idempotency and pcUK does not honour it.
+// Sticky is a policy, not a lock: it has no idempotency, so this app is now the only writer
+// by arrangement rather than by enforcement.
 const ASSIGN_OWNER_ENABLED = String(process.env.SDR_ASSIGN_OWNER || "").toLowerCase() === "true";
 const DEREK_PD_USER_ID = 19499202;
 
@@ -4868,9 +4867,9 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           [pdSequenceStartedKey]: `Apollo:${draft.trigger_type} ${new Date().toISOString().slice(0, 10)}`,
         };
         // Owner assignment (Derek's ask 4 of 2026-07-27: assign the lead to the person when the
-        // .co sequence starts, so they know to nurture it). BORN DEAD behind SDR_ASSIGN_OWNER.
-        // See resolveOutreachOwner above for what has to be true before Ivan flips it: an n8n
-        // workflow is still writing this same field and does not know the three newest reps.
+        // .co sequence starts, so they know to nurture it). Behind SDR_ASSIGN_OWNER, live since
+        // 2026-08-03. See resolveOutreachOwner above for why it sat off until then, and for the
+        // one thing that would re-break it (re-activating n8n `pcUKAkMkvoKQ4kPY`).
         const ownerMove = await resolveOutreachOwner(draft.pipedrive_lead_id, mailbox);
         const ownerFrom = ownerMove?.from ?? null;
         if (ownerMove) leadPatch.owner_id = ownerMove.to;
