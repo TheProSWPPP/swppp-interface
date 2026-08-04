@@ -936,7 +936,8 @@ type LeadSortKey =
   | "last_contact"
   | "bid_date"
   | "start_date"
-  | "lead_score";
+  | "lead_score"
+  | "project_value";
 
 // Apollo sequence id → trigger label, for showing which sequence a lead is in.
 const SEQUENCE_LABEL: Record<string, string> = {
@@ -955,6 +956,14 @@ const SEND_STAGE_LABEL: Record<string, string> = {
   unsubscribed: "Unsubscribed",
   failed: "Send failed",
 };
+
+// Project values span $2,774 to $464M, so a plain currency string is unreadable at a glance
+// in a dense table. Compact form keeps the column narrow and the magnitude obvious.
+function formatProjectValue(v: number): string {
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 1)}M`;
+  if (v >= 1_000) return `$${Math.round(v / 1_000)}k`;
+  return `$${Math.round(v)}`;
+}
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -1302,6 +1311,7 @@ function LeadsView({
                   <th className="px-4 py-3">Contact</th>
                   <LeadTh label="Stage" sortKey="project_stage" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Score" sortKey="lead_score" sort={sort} dir={dir} onSort={toggleSort} />
+                  <LeadTh label="Project value" sortKey="project_value" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Bid date" sortKey="bid_date" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Start date" sortKey="start_date" sort={sort} dir={dir} onSort={toggleSort} />
                   <LeadTh label="Contact status" sortKey="outreach_status" sort={sort} dir={dir} onSort={toggleSort} />
@@ -2070,6 +2080,18 @@ function LeadRow({
             title="Pipedrive Lead Score — 40+ hot · 20+ warm · below 0 cold"
           >
             {Math.round(lead.lead_score)}
+          </span>
+        )}
+      </td>
+      {/* Project value — construction budget from the CMD sheet's "Confirmed Value" column.
+          Blank rather than $0 when unknown: 4 of the July rows carried text like "na", and
+          reading those as zero would imply a tiny job rather than a missing figure. */}
+      <td className="px-4 py-3.5 align-top whitespace-nowrap tabular-nums text-slate-600">
+        {lead.project_value == null ? (
+          <span className="text-slate-300">—</span>
+        ) : (
+          <span title="Project value from CMD. Scoring: $5M+ adds 40, $1M+ adds 25, under $500k takes off 20.">
+            {formatProjectValue(lead.project_value)}
           </span>
         )}
       </td>

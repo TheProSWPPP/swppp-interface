@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Upload, CheckCircle2, AlertCircle, Loader2, FileText, Trash2 } from "lucide-react";
 import {
   uploadLeadsCsv,
+  type UploadResult,
   getLeadImportStatus,
   listRecentLeadImports,
   deleteJob,
@@ -116,6 +117,7 @@ export default function LeadUpload() {
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [mapping, setMapping] = useState<UploadResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Restore active job from localStorage on mount (survive tab navigation)
@@ -171,8 +173,9 @@ export default function LeadUpload() {
     }
     setIsUploading(true);
     try {
-      const { job_id } = await uploadLeadsCsv(file);
-      const job = await getLeadImportStatus(job_id);
+      const result = await uploadLeadsCsv(file);
+      setMapping(result.source && result.source !== "cmd" ? result : null);
+      const job = await getLeadImportStatus(result.job_id);
       setActiveJob(job);
       refreshRecent();
     } catch (e) {
@@ -244,6 +247,27 @@ export default function LeadUpload() {
 
       {activeJob && (
         <div className="mt-6">
+          {mapping?.source === "bid-aggregator" && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <div className="font-semibold">Read as a bid aggregator sheet</div>
+              <div className="mt-1">
+                Renamed {mapping.renamed?.join(", ") || "nothing"}. Filled in{" "}
+                {mapping.injected?.join(", ") || "nothing"}. Every row is set to Stage CM, which is
+                the bidding sequence rather than a congratulations one. Check the rows below before
+                approving.
+              </div>
+            </div>
+          )}
+          {mapping?.source === "unknown" && (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+              <div className="font-semibold">Column names not recognised</div>
+              <div className="mt-1">
+                The file went through untouched, so nothing was mangled, but the importer may not
+                find the columns it needs. Expected either the MBT layout or Milo's aggregator
+                layout.
+              </div>
+            </div>
+          )}
           <h2 className="text-sm font-semibold text-slate-700 mb-2">Current import</h2>
           <ProgressRow job={activeJob} onDelete={() => handleDelete(activeJob.id)} />
         </div>

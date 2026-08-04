@@ -18,7 +18,18 @@ export interface LeadImportJob {
   updated_at: string;
 }
 
-export async function uploadLeadsCsv(file: File): Promise<{ job_id: string; status: LeadImportStatus }> {
+export interface UploadResult {
+  job_id: string;
+  status: LeadImportStatus;
+  /** Which sheet the server read this as. "unknown" means it was passed through untouched. */
+  source?: "cmd" | "bid-aggregator" | "unknown";
+  /** Columns renamed onto the canonical shape (aggregator sheet only). */
+  renamed?: string[];
+  /** Columns the server filled in because the sheet lacks them. */
+  injected?: string[];
+}
+
+export async function uploadLeadsCsv(file: File): Promise<UploadResult> {
   const fd = new FormData();
   fd.append("file", file);
   const res = await fetch("/api/leads/upload", {

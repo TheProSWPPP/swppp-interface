@@ -190,6 +190,7 @@ export interface SdrLead {
   trigger_override: string | null;
   owner_name: string | null;
   lead_score: number | null;
+  project_value: number | null;
   send_status: string | null;
   send_sequence_id: string | null;
   send_sent_at: string | null;
