@@ -9,6 +9,9 @@
 // POSTing to it 404s; every existing custom lead field here (Lead Score, Project Stage,
 // Lead Origin) is really a deal field, confirmed 2026-08-03.
 //
+// Monetary, not double: Pipedrive renders monetary as currency, and field_type is IMMUTABLE
+// after creation (a PUT changing it returns 200 and silently keeps the old type).
+//
 // Idempotent: if a field with this name already exists it prints the existing key.
 const TOKEN = process.env.PIPEDRIVE_API_TOKEN || "3089d0ffb03a7f996c5f10156fd4ebfaad9fca28";
 const NAME = "Project Value";
@@ -23,7 +26,7 @@ if (existing) {
 const res = await fetch(`https://api.pipedrive.com/v1/dealFields?api_token=${TOKEN}&limit=500`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ name: NAME, field_type: "double" }),
+  body: JSON.stringify({ name: NAME, field_type: "monetary" }),
 });
 const body = await res.json();
 if (!res.ok || !body.success) {

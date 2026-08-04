@@ -7,7 +7,7 @@ const T = process.env.PIPEDRIVE_API_TOKEN || "3089d0ffb03a7f996c5f10156fd4ebfaad
 const SCORE = "e2b854536230112bff77d6b0ce33bdb49f2916eb";
 const STAGE = "7c1852c27664d1118f75660223a6af9e99d10f2c";
 const ORIGIN = "6abd1d3e43212a7baf864cd4d2a210add6a96f60";
-const PVALUE = "750d7ed67136d20d11679c7b7923704663d84a56";
+const PVALUE = "63ad9184b6bc1c3bc60bf0a62b4b963e9ea17369";
 
 let start = 0, all = [], p = 0;
 while (p < 60) {
