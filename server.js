@@ -949,6 +949,7 @@ async function initDB() {
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS owner_name TEXT`);
     // Pipedrive "Lead Score" (numeric, higher = better) — drives priority/ranked auto-enroll.
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS lead_score DOUBLE PRECISION`);
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS project_value DOUBLE PRECISION`);
     // Pipedrive organization id — lets the auto-switch engine detect a company change mid-sequence.
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS pipedrive_org_id TEXT`);
     // Email verification state (NeverBounce, added 2026-07-02) — Postgres-only, per the
@@ -1916,6 +1917,7 @@ const LEAD_SORT_COLUMNS = {
   bid_date: "s.bid_date",
   start_date: "s.start_date",
   lead_score: "s.lead_score",
+  project_value: "s.project_value",
   synced_at: "s.synced_at",
 };
 
