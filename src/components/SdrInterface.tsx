@@ -65,8 +65,11 @@ import {
   type SdrInboxMessage,
 } from "../lib/sdrApi";
 import { cn } from "../utils";
-// Same thresholds the server gates on, so the card can never disagree with the cap it shows.
-import { BOUNCE_WARN_RATE, BOUNCE_HIGH_RATE } from "../../lib/sendRamp.js";
+
+// Mirrors the gate in lib/sendRamp.js. Not imported from there: that module is server-side
+// JS with no types, and `tsc -b` fails the build on it (TS7016). Keep the two in step.
+const BOUNCE_WARN_RATE = 0.04;
+const BOUNCE_HIGH_RATE = 0.08;
 import CampaignsView from "./nurture/CampaignsView";
 import ListsView from "./nurture/ListsView";
 import ContactsView from "./nurture/ContactsView";
