@@ -36,12 +36,12 @@ import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { sweepSentOutreach, upsertOutreach } from "./lib/outreachSync.js";
 import * as gmailInbox from "./lib/gmailInbox.js";
-import { dailyCap, rampDay } from "./lib/sendRamp.js";
+import { dailyCap, rampDay, bounceStepPenalty, mailboxBounceHealth } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
 import * as apolloBudget from "./lib/apolloMessageSearchBudget.js";
 import { resolveEventPolicy } from "./lib/engagementSideEffectPolicy.js";
 import { pollInboxReplies, classifyInbound } from "./lib/inboxReplyWatch.js";
-import { runAutoOutreach, pruneStaleQueuedDrafts } from "./lib/autoOutreach.js";
+import { runAutoOutreach, pruneStaleQueuedDrafts, expireStaleQueuedDrafts } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
 const { Pool } = pg;
@@ -1228,6 +1228,8 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
         try {
           const pruned = await pruneStaleQueuedDrafts(pool);
           if (pruned) console.log(`[auto-outreach] pruned ${pruned} stale queued draft(s)`);
+          const expired = await expireStaleQueuedDrafts(pool);
+          if (expired) console.log(`[auto-outreach] expired ${expired} aged-out queued draft(s)`);
         } catch (e) {
           console.error("[auto-outreach] prune failed:", e.message);
         }
@@ -1563,11 +1565,20 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
     // Attach the ramped daily cap + warmup day so the UI can show "3/5 sent today".
     // sent_today counts the shared sdr_sends log (the one per-mailbox cap that the
     // SDR and TXR050000/permit cold systems both draw from).
-    const mailboxes = rows.map((m) => ({
-      ...m,
-      daily_cap: dailyCap(m.warmup_started_at),
-      warmup_day: rampDay(m.warmup_started_at),
-    }));
+    // bounce_rate rides along so a mailbox that has been held back shows WHY, rather than
+    // looking like the ramp arbitrarily stalled.
+    const health = await mailboxBounceHealth(pool);
+    const mailboxes = rows.map((m) => {
+      const h = health.get(m.id);
+      return {
+        ...m,
+        daily_cap: dailyCap(m.warmup_started_at, { target: m.daily_send_limit, health: h }),
+        warmup_day: rampDay(m.warmup_started_at),
+        bounce_sent: h?.sent ?? 0,
+        bounce_count: h?.bounced ?? 0,
+        bounce_rate: h?.sent ? h.bounced / h.sent : null,
+      };
+    });
     res.json({ mailboxes });
   } catch (err) {
     console.error("GET /api/sdr/mailboxes error:", err);
@@ -4665,7 +4676,8 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
 
     // Resolve mailbox → apollo_mailbox_id
     const { rows: mbRows } = await pool.query(
-      `SELECT id, email, apollo_mailbox_id, active, warmup_started_at, signature_html, pipedrive_sender_id
+      `SELECT id, email, apollo_mailbox_id, active, warmup_started_at, signature_html, pipedrive_sender_id,
+              daily_send_limit
          FROM sdr_mailboxes WHERE id = $1`,
       [draft.assigned_mailbox_id],
     );
@@ -4681,23 +4693,30 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       return res.status(409).json({ code: "mailbox_inactive", mailbox: mailbox.email, error: `Mailbox ${mailbox.email} is not active — cannot send.` });
     }
 
-    // Warmup ramp: enforce the per-mailbox daily send cap (gradual climb to 40).
-    // The clock starts on first send (warmup_started_at null → day 1). Hard cap,
-    // no override (adjust the ramp to change it). The count is the SHARED per-mailbox
-    // total — both the SDR and TXR050000/permit cold systems record into sdr_sends.
+    // Warmup ramp: enforce the per-mailbox daily send cap (gradual climb to 40, held back
+    // by the mailbox's own daily_send_limit and its recent bounce rate). The clock starts on
+    // first send (warmup_started_at null → day 1). Hard cap, no override (adjust the ramp to
+    // change it). The count is the SHARED per-mailbox total — both the SDR and
+    // TXR050000/permit cold systems record into sdr_sends.
     {
       const startedAt = mailbox.warmup_started_at; // null until first send → day 1
-      const cap = dailyCap(startedAt);
+      const health = (await mailboxBounceHealth(pool, { mailboxId: mailbox.id })).get(mailbox.id);
+      const cap = dailyCap(startedAt, { target: mailbox.daily_send_limit, health });
       const sentToday = await mailboxSentToday(mailbox.id);
       if (sentToday >= cap) {
         const day = rampDay(startedAt);
+        const bounceNote =
+          health?.sent && bounceStepPenalty(health)
+            ? ` This mailbox is held back a step: ${health.bounced} of its last ${health.sent} sends bounced.`
+            : "";
         return res.status(429).json({
           code: "daily_cap_reached",
           mailbox: mailbox.email,
           sentToday,
           cap,
           rampDay: day,
-          message: `Daily send cap reached for ${mailbox.email}: ${sentToday}/${cap} sent today (warmup day ${day}). The cap rises as the inbox warms up — try again tomorrow.`,
+          bounceRate: health?.sent ? health.bounced / health.sent : null,
+          message: `Daily send cap reached for ${mailbox.email}: ${sentToday}/${cap} sent today (warmup day ${day}). The cap rises as the inbox warms up — try again tomorrow.${bounceNote}`,
         });
       }
     }

@@ -41,6 +41,10 @@ export interface SdrMailbox {
   sent_today: number;
   daily_cap: number;
   warmup_day: number;
+  // Trailing 14-day bounce health. A mailbox over 4% is held a rung back on the ramp.
+  bounce_sent: number;
+  bounce_count: number;
+  bounce_rate: number | null;
 }
 
 // --- Team admin (admin-only surface, added 2026-07-28) -----------------------

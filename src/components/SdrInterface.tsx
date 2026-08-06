@@ -65,6 +65,8 @@ import {
   type SdrInboxMessage,
 } from "../lib/sdrApi";
 import { cn } from "../utils";
+// Same thresholds the server gates on, so the card can never disagree with the cap it shows.
+import { BOUNCE_WARN_RATE, BOUNCE_HIGH_RATE } from "../../lib/sendRamp.js";
 import CampaignsView from "./nurture/CampaignsView";
 import ListsView from "./nurture/ListsView";
 import ContactsView from "./nurture/ContactsView";
@@ -4248,10 +4250,23 @@ function MailboxesView({ user }: { user: SdrUser }) {
                 <div className="mt-1 text-[11px] text-slate-400">
                   Warmup day {m.warmup_day ?? "—"} · ramping to {m.daily_send_limit}/day
                 </div>
+                {/* A held-back mailbox otherwise looks like the ramp stalled for no reason. */}
+                {m.bounce_rate != null && m.bounce_rate >= BOUNCE_WARN_RATE && (
+                  <div className={cn("mt-1 text-[11px] font-medium", m.bounce_rate >= BOUNCE_HIGH_RATE ? "text-rose-600" : "text-amber-600")}>
+                    Held back: {m.bounce_count} of the last {m.bounce_sent} sends bounced ({(m.bounce_rate * 100).toFixed(1)}%).
+                    The cap climbs again once that drops under {(BOUNCE_WARN_RATE * 100).toFixed(0)}%.
+                  </div>
+                )}
               </div>
               <dl className="text-xs text-slate-500 space-y-0.5">
                 <div className="flex justify-between"><dt>Today's cap (ramp)</dt><dd className="font-mono text-slate-700">{m.daily_cap ?? "—"}/day</dd></div>
                 <div className="flex justify-between"><dt>Warmup target</dt><dd className="font-mono text-slate-700">{m.daily_send_limit}/day</dd></div>
+                <div className="flex justify-between">
+                  <dt>Bounce rate (14d)</dt>
+                  <dd className={cn("font-mono", m.bounce_rate != null && m.bounce_rate >= BOUNCE_WARN_RATE ? "text-rose-600" : "text-slate-700")}>
+                    {m.bounce_rate == null ? "—" : `${(m.bounce_rate * 100).toFixed(1)}%`}
+                  </dd>
+                </div>
                 <div className="flex justify-between"><dt>Deliverability</dt><dd className="font-mono text-slate-700">{m.deliverability_score ?? "—"}</dd></div>
                 <div className="flex justify-between"><dt>Apollo ID</dt><dd className="font-mono text-slate-700 truncate ml-2">{m.apollo_mailbox_id?.slice(0, 12) || "(unlinked)"}</dd></div>
               </dl>
