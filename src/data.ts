@@ -114,6 +114,15 @@ export const US_STATES = [
   "West Virginia", "Wisconsin", "Wyoming",
 ] as const;
 
+// Scope value for articles that are deliberately NOT state-specific
+// (e.g. "Do you need a SWPPP for your project?"). Stored in the same
+// `state` column so it groups/filters like a state, but excluded from
+// the 50-state coverage stats.
+export const NATIONWIDE = "Nationwide";
+
+// Options for the State dropdown in the AI content creator.
+export const CONTENT_SCOPES = [NATIONWIDE, ...US_STATES] as const;
+
 export const projects: Project[] = [
   {
     id: "1",

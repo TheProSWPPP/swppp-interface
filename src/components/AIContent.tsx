@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { AIContentItem } from "../data";
-import { US_STATES } from "../data";
+import { US_STATES, NATIONWIDE } from "../data";
 import AIContentList from "./AIContentList";
 import AIContentDetail from "./AIContentDetail";
 import SeoIdeas from "./SeoIdeas";
@@ -437,6 +437,15 @@ function StatesDashboard({
     };
   }
 
+  // Nationwide is a scope, not a state — tracked separately so it never skews coverage stats
+  const nationwideItems = items.filter((i) => i.state === NATIONWIDE);
+  const nationwide = {
+    pillar: nationwideItems.find((i) => i.type === "pillar") || null,
+    spokes: nationwideItems.filter((i) => i.type === "spoke").length,
+    comparisons: nationwideItems.filter((i) => i.type === "comparison").length,
+    total: nationwideItems.length,
+  };
+
   const statesWithContent = US_STATES.filter((s) => stateData[s].total > 0);
   const statesWithoutContent = US_STATES.filter((s) => stateData[s].total === 0);
   const statesNeedingPillar = US_STATES.filter((s) => stateData[s].total > 0 && !stateData[s].pillar);
@@ -481,6 +490,26 @@ function StatesDashboard({
           </div>
         </div>
       )}
+
+      {/* Nationwide (not a state — generalized articles) */}
+      <button
+        onClick={() => onSelectState(NATIONWIDE)}
+        className="w-full rounded-xl border border-brand-200 bg-brand-50 p-4 text-left transition-all duration-200 hover:border-brand-400 hover:shadow-md"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold text-brand-900">Nationwide</p>
+            <p className="text-xs text-brand-600 mt-0.5">Generalized articles — not tied to one state</p>
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            {nationwide.pillar && <span className="font-semibold text-brand-700">Pillar</span>}
+            <span className="text-slate-500">{nationwide.spokes} article{nationwide.spokes !== 1 ? "s" : ""}</span>
+            {nationwide.comparisons > 0 && (
+              <span className="text-emerald-600">{nationwide.comparisons} comparison{nationwide.comparisons !== 1 ? "s" : ""}</span>
+            )}
+          </div>
+        </div>
+      </button>
 
       {/* State Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-2">
