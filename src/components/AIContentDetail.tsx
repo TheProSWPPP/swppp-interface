@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { AIContentItem, PillarVersion } from "../data";
-import { US_STATES } from "../data";
+import { CONTENT_SCOPES, NATIONWIDE } from "../data";
 import { cn } from "../utils";
 import {
   ArrowLeft,
@@ -191,7 +191,9 @@ export default function AIContentDetail({
                   <select value={editState} onChange={(e) => { setEditState(e.target.value); setHasChanges(true); }}
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm bg-white">
                     <option value="">Select...</option>
-                    {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {CONTENT_SCOPES.map((s) => (
+                      <option key={s} value={s}>{s === NATIONWIDE ? "Nationwide (not state-specific)" : s}</option>
+                    ))}
                   </select>
                 </div>
                 {hasChanges && (

@@ -5253,6 +5253,12 @@ app.post("/api/projects/delete", async (req, res) => {
 
 // ==================== AI Content Routes ====================
 
+// Scope value for articles that are deliberately not state-specific.
+// Stored in the ai_content.state column so it groups/filters like a state.
+// Must match NATIONWIDE in src/data.ts and the check in the n8n
+// "Pro SWPPP SEO Articles to WP" workflow (Extract Webhook Data node).
+const AI_CONTENT_NATIONWIDE = "Nationwide";
+
 app.get("/api/ai-content/stats", async (req, res) => {
   if (!process.env.DATABASE_URL) {
     const stats = { queued: 0, generating: 0, draft: 0, published: 0, failed: 0, spoke: 0, pillar: 0, comparison: 0 };
@@ -5488,10 +5494,13 @@ app.get("/api/ai-content", async (req, res) => {
 app.post("/api/ai-content", async (req, res) => {
   let { type, keyword, state, pillarId, force } = req.body;
 
-  // Pillar auto-generates keyword from state
+  // Pillar auto-generates keyword from state.
+  // "Nationwide" is a scope, not a state — it gets a generalized, federal-baseline keyword.
   if (type === "pillar") {
     if (!state) return res.status(400).json({ error: "state required for pillar articles" });
-    keyword = `Construction & Industrial SWPPP Requirements in ${state}`;
+    keyword = state === AI_CONTENT_NATIONWIDE
+      ? "Construction & Industrial SWPPP Requirements: The Nationwide Guide"
+      : `Construction & Industrial SWPPP Requirements in ${state}`;
     // Enforce one CURRENT pillar per state unless explicitly forced (versioning is handled via separate route)
     if (!force) {
       if (process.env.DATABASE_URL) {

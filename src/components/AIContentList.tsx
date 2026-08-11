@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import type { AIContentItem, ContentType } from "../data";
-import { US_STATES } from "../data";
+import { CONTENT_SCOPES, NATIONWIDE } from "../data";
 import { cn } from "../utils";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -106,7 +106,11 @@ export default function AIContentList({
 
   const uniqueStates = useMemo(() => {
     const states = new Set(allItems.map((i) => i.state).filter(Boolean));
-    return Array.from(states).sort();
+    // Nationwide is a scope, not a state — hoist it to the top instead of letting it
+    // sort alphabetically (it would land between Montana and Nebraska).
+    const hasNationwide = states.delete(NATIONWIDE);
+    const sorted = Array.from(states).sort();
+    return hasNationwide ? [NATIONWIDE, ...sorted] : sorted;
   }, [allItems]);
 
   const toggleSort = (key: SortKey) => {
@@ -218,9 +222,10 @@ export default function AIContentList({
                   </label>
                   <select value={newState} onChange={(e) => setNewState(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm bg-white">
                     <option value="">Select...</option>
-                    {US_STATES.map((s) => (
+                    {CONTENT_SCOPES.map((s) => (
                       <option key={s} value={s}>
-                        {s}{newType === "pillar" && statesWithPillar.has(s) ? " (has pillar)" : ""}
+                        {s === NATIONWIDE ? "Nationwide (not state-specific)" : s}
+                        {newType === "pillar" && statesWithPillar.has(s) ? " (has pillar)" : ""}
                       </option>
                     ))}
                   </select>
@@ -233,7 +238,13 @@ export default function AIContentList({
                 </button>
               </div>
               {newType === "pillar" && newState && (
-                <p className="text-xs text-slate-400 mt-2">Will create: "Construction & Industrial SWPPP Requirements in {newState}"</p>
+                <p className="text-xs text-slate-400 mt-2">
+                  Will create: "Construction & Industrial SWPPP Requirements
+                  {newState === NATIONWIDE ? ": The Nationwide Guide" : ` in ${newState}`}"
+                </p>
+              )}
+              {newType !== "pillar" && newState === NATIONWIDE && (
+                <p className="text-xs text-slate-400 mt-2">Generalized article — no state-specific agencies, permits, or fines.</p>
               )}
             </div>
           </motion.div>
@@ -265,7 +276,9 @@ export default function AIContentList({
         {uniqueStates.length > 0 && (
           <select value={filterState} onChange={(e) => setFilterState(e.target.value)} className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white">
             <option value="">All States</option>
-            {uniqueStates.map((s) => <option key={s} value={s!}>{s}</option>)}
+            {uniqueStates.map((s) => (
+              <option key={s} value={s!}>{s === NATIONWIDE ? "Nationwide (no state)" : s}</option>
+            ))}
           </select>
         )}
       </div>
