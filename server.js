@@ -987,6 +987,22 @@ async function initDB() {
     //    persisted so a redeploy neither forces nor skips a sweep.
     await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS engagement_backfill_done_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS engagement_last_full_scan_at TIMESTAMPTZ`);
+    // The two supply gates on auto-outreach. Both ship OFF (values that reproduce the old
+    // hardcoded behaviour exactly) because auto_outreach_mode is 'send' — widening either one
+    // starts real mail on the next pass, so it has to be a deliberate flip, not a deploy.
+    //
+    //  recontact_after_days  — NULL: only outreach_status 'clear' is eligible, which is a
+    //    PERMANENT lockout. deriveStatus() returns 'clear' only when last_outgoing_mail_time is
+    //    NULL, and Pipedrive never un-sets that field, so one email from anyone ever (a rep by
+    //    hand, or Derek's Pipedrive-native LBFU/CM sequences sending as dc@proswppp.com) retires
+    //    the lead from this engine for good. 3,448 leads sat in 'contacted_stale' on 2026-08-19,
+    //    only 10 of which we had ever sent to. Set to N to re-admit a stale lead N days after
+    //    that last foreign email. Keep N >= 90: Derek's sequence is a ~13-day 4-step walk, so 90
+    //    days guarantees it has finished and archived rather than us cutting into a live drip.
+    //  start_date_grace_days — 0: only projects that have not broken ground. Set to N to also
+    //    admit projects that started up to N days ago.
+    await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS recontact_after_days INT`);
+    await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS start_date_grace_days INT NOT NULL DEFAULT 0`);
     await pool.query(`INSERT INTO sdr_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
     // Editable first-touch draft copy per trigger. Seeded from the code templates; the
     // draft generator reads here first and falls back to code, so generation can't break.
@@ -1758,12 +1774,23 @@ app.get("/api/sdr/settings", async (req, res) => {
 app.patch("/api/sdr/settings", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
-  const { auto_outreach_enabled, auto_outreach_mode, auto_min_score, contact_cooldown_days } = req.body || {};
+  const { auto_outreach_enabled, auto_outreach_mode, auto_min_score, contact_cooldown_days,
+          recontact_after_days, start_date_grace_days } = req.body || {};
   if (auto_outreach_mode !== undefined && !["queue", "send"].includes(auto_outreach_mode)) {
     return res.status(400).json({ error: "auto_outreach_mode must be 'queue' or 'send'" });
   }
   if (contact_cooldown_days !== undefined && (!Number.isInteger(contact_cooldown_days) || contact_cooldown_days < 0 || contact_cooldown_days > 365)) {
     return res.status(400).json({ error: "contact_cooldown_days must be an integer between 0 and 365" });
+  }
+  // Floor of 90, not 0: below that we risk cutting into a still-running Pipedrive sequence on
+  // the main domain, which is the exact double-touch Derek complained about on 2026-08-10.
+  // null disables the re-admission entirely (back to 'clear'-only).
+  if (recontact_after_days !== undefined && recontact_after_days !== null
+      && (!Number.isInteger(recontact_after_days) || recontact_after_days < 90 || recontact_after_days > 3650)) {
+    return res.status(400).json({ error: "recontact_after_days must be null or an integer between 90 and 3650" });
+  }
+  if (start_date_grace_days !== undefined && (!Number.isInteger(start_date_grace_days) || start_date_grace_days < 0 || start_date_grace_days > 365)) {
+    return res.status(400).json({ error: "start_date_grace_days must be an integer between 0 and 365" });
   }
   try {
     const { rows } = await pool.query(
@@ -1774,6 +1801,10 @@ app.patch("/api/sdr/settings", async (req, res) => {
                                       WHEN $4::float8 IS NOT NULL THEN $4::float8
                                       ELSE auto_min_score END,
          contact_cooldown_days = COALESCE($6, contact_cooldown_days),
+         recontact_after_days  = CASE WHEN $7::text = 'unset' THEN NULL
+                                      WHEN $8::int IS NOT NULL THEN $8::int
+                                      ELSE recontact_after_days END,
+         start_date_grace_days = COALESCE($9, start_date_grace_days),
          updated_at = NOW(), updated_by = $5
        WHERE id = 1 RETURNING *`,
       [
@@ -1783,6 +1814,9 @@ app.patch("/api/sdr/settings", async (req, res) => {
         typeof auto_min_score === "number" ? auto_min_score : null,
         req.sdrUser?.username || req.sdrUser?.sub,
         Number.isInteger(contact_cooldown_days) ? contact_cooldown_days : null,
+        recontact_after_days === null ? "unset" : null,
+        Number.isInteger(recontact_after_days) ? recontact_after_days : null,
+        Number.isInteger(start_date_grace_days) ? start_date_grace_days : null,
       ],
     );
     _cooldownCache = { v: 14, exp: 0 }; // bust the cache so the new window applies immediately
