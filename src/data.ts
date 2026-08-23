@@ -123,6 +123,13 @@ export const NATIONWIDE = "Nationwide";
 // Options for the State dropdown in the AI content creator.
 export const CONTENT_SCOPES = [NATIONWIDE, ...US_STATES] as const;
 
+// Topic a pillar gets when no explicit one is typed. Must stay in sync with
+// defaultPillarKeyword() in server.js — the server is the one that actually assigns it.
+export const defaultPillarKeyword = (state: string) =>
+  state === NATIONWIDE
+    ? "Construction & Industrial SWPPP Requirements: The Nationwide Guide"
+    : `Construction & Industrial SWPPP Requirements in ${state}`;
+
 export const projects: Project[] = [
   {
     id: "1",

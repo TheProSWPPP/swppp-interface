@@ -5293,6 +5293,13 @@ app.post("/api/projects/delete", async (req, res) => {
 // "Pro SWPPP SEO Articles to WP" workflow (Extract Webhook Data node).
 const AI_CONTENT_NATIONWIDE = "Nationwide";
 
+// The auto-built topic for a scope's canonical pillar. A pillar created WITHOUT an
+// explicit topic gets this; a pillar created WITH one keeps the topic the user typed.
+const defaultPillarKeyword = (state) =>
+  state === AI_CONTENT_NATIONWIDE
+    ? "Construction & Industrial SWPPP Requirements: The Nationwide Guide"
+    : `Construction & Industrial SWPPP Requirements in ${state}`;
+
 app.get("/api/ai-content/stats", async (req, res) => {
   if (!process.env.DATABASE_URL) {
     const stats = { queued: 0, generating: 0, draft: 0, published: 0, failed: 0, spoke: 0, pillar: 0, comparison: 0 };
@@ -5528,20 +5535,24 @@ app.get("/api/ai-content", async (req, res) => {
 app.post("/api/ai-content", async (req, res) => {
   let { type, keyword, state, pillarId, force } = req.body;
 
-  // Pillar auto-generates keyword from state.
+  // Pillar topic is optional. Blank = the scope's canonical guide, auto-built from state.
   // "Nationwide" is a scope, not a state — it gets a generalized, federal-baseline keyword.
+  let isCustomPillarTopic = false;
   if (type === "pillar") {
     if (!state) return res.status(400).json({ error: "state required for pillar articles" });
-    keyword = state === AI_CONTENT_NATIONWIDE
-      ? "Construction & Industrial SWPPP Requirements: The Nationwide Guide"
-      : `Construction & Industrial SWPPP Requirements in ${state}`;
-    // Enforce one CURRENT pillar per state unless explicitly forced (versioning is handled via separate route)
-    if (!force) {
+    const canonical = defaultPillarKeyword(state);
+    const typed = typeof keyword === "string" ? keyword.trim() : "";
+    isCustomPillarTopic = typed !== "" && typed !== canonical;
+    keyword = isCustomPillarTopic ? typed : canonical;
+    // Only the CANONICAL pillar is one-per-scope (spokes auto-link to it, and the States
+    // dashboard counts it as that state's coverage). Custom-topic pillars are unconstrained,
+    // so one scope — Nationwide especially — can carry many topic pillars side by side.
+    if (!force && !isCustomPillarTopic) {
       if (process.env.DATABASE_URL) {
-        const existing = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1 AND is_current = TRUE", [state]);
+        const existing = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1 AND keyword = $2 AND is_current = TRUE", [state, keyword]);
         if (existing.rows.length > 0) return res.status(409).json({ error: `Pillar already exists for ${state}`, existingId: existing.rows[0].id });
       } else {
-        const existing = memoryContent.find((c) => c.type === "pillar" && c.state === state && c.isCurrent !== false);
+        const existing = memoryContent.find((c) => c.type === "pillar" && c.state === state && c.keyword === keyword && c.isCurrent !== false);
         if (existing) return res.status(409).json({ error: `Pillar already exists for ${state}`, existingId: existing.id });
       }
     }
@@ -5549,13 +5560,22 @@ app.post("/api/ai-content", async (req, res) => {
 
   if (!type || !keyword) return res.status(400).json({ error: "type and keyword required" });
 
-  // Auto-link spoke to state pillar if not specified — pick the CURRENT version
+  // Auto-link spoke to state pillar if not specified — pick the CURRENT version.
+  // A scope can now hold several topic pillars, so always prefer the canonical one;
+  // a custom-topic pillar is only picked up if no canonical pillar exists yet.
   if (type === "spoke" && state && !pillarId) {
+    const canonical = defaultPillarKeyword(state);
     if (process.env.DATABASE_URL) {
-      const pillar = await pool.query("SELECT id FROM ai_content WHERE type = 'pillar' AND state = $1 AND is_current = TRUE ORDER BY version DESC LIMIT 1", [state]);
+      const pillar = await pool.query(
+        `SELECT id FROM ai_content
+         WHERE type = 'pillar' AND state = $1 AND is_current = TRUE
+         ORDER BY (keyword = $2) DESC, version DESC, created_at ASC LIMIT 1`,
+        [state, canonical]
+      );
       if (pillar.rows.length > 0) pillarId = pillar.rows[0].id;
     } else {
-      const pillar = memoryContent.find((c) => c.type === "pillar" && c.state === state && c.isCurrent !== false);
+      const candidates = memoryContent.filter((c) => c.type === "pillar" && c.state === state && c.isCurrent !== false);
+      const pillar = candidates.find((c) => c.keyword === canonical) || candidates[0];
       if (pillar) pillarId = pillar.id;
     }
   }
@@ -5850,14 +5870,25 @@ app.post("/api/ai-content/callback", async (req, res) => {
 app.get("/api/ai-content/pillar/:state/versions", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.json([]);
   const { state } = req.params;
+  const { base } = req.query;
   try {
-    const r = await pool.query(
-      `SELECT id, version, status, title, wordpress_url, generated_at, published_at, is_current, base_pillar_id
-       FROM ai_content
-       WHERE type = 'pillar' AND state = $1
-       ORDER BY version DESC, created_at DESC`,
-      [state]
-    );
+    // A scope can hold several topic pillars, each its own lineage. When the caller knows
+    // the lineage (base_pillar_id) scope to it; without it, fall back to the whole state.
+    const r = base
+      ? await pool.query(
+          `SELECT id, version, status, title, wordpress_url, generated_at, published_at, is_current, base_pillar_id
+           FROM ai_content
+           WHERE type = 'pillar' AND base_pillar_id = $1
+           ORDER BY version DESC, created_at DESC`,
+          [base]
+        )
+      : await pool.query(
+          `SELECT id, version, status, title, wordpress_url, generated_at, published_at, is_current, base_pillar_id
+           FROM ai_content
+           WHERE type = 'pillar' AND state = $1
+           ORDER BY version DESC, created_at DESC`,
+          [state]
+        );
     res.json(r.rows.map((row) => ({
       id: row.id,
       version: row.version,
