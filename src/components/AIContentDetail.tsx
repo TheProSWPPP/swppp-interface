@@ -63,16 +63,20 @@ export default function AIContentDetail({
   const pillar = item.pillarId ? allItems.find((i) => i.id === item.pillarId) : null;
   const spokes = item.type === "pillar" ? allItems.filter((i) => i.pillarId === item.id) : [];
 
+  // Versions are scoped to this pillar's own lineage — a scope (Nationwide especially)
+  // can hold several topic pillars, and they are not versions of each other.
+  const versionsUrl = `/api/ai-content/pillar/${encodeURIComponent(item.state || "")}/versions?base=${encodeURIComponent(item.basePillarId || item.id)}`;
+
   // Load versions when this is a pillar
   useEffect(() => {
     if (!isPillar || !item.state) { setVersions([]); return; }
     setVersionLoading(true);
-    fetch(`/api/ai-content/pillar/${encodeURIComponent(item.state)}/versions`, { credentials: "include" })
+    fetch(versionsUrl, { credentials: "include" })
       .then((r) => r.ok ? r.json() : [])
       .then((data: PillarVersion[]) => setVersions(Array.isArray(data) ? data : []))
       .catch(() => setVersions([]))
       .finally(() => setVersionLoading(false));
-  }, [isPillar, item.state, item.id, item.status]);
+  }, [isPillar, item.state, item.id, item.status, versionsUrl]);
 
   const handleSave = () => {
     const updates: Partial<AIContentItem> = {};
@@ -95,7 +99,7 @@ export default function AIContentDetail({
       const res = await fetch(`/api/ai-content/${item.id}/regenerate-as-new-version`, { method: "POST", credentials: "include" });
       if (!res.ok) throw new Error(await res.text());
       // refresh versions list
-      const refresh = await fetch(`/api/ai-content/pillar/${encodeURIComponent(item.state || "")}/versions`, { credentials: "include" });
+      const refresh = await fetch(versionsUrl, { credentials: "include" });
       if (refresh.ok) setVersions(await refresh.json());
     } catch (err) {
       alert("Failed to start new version: " + (err as Error).message);
@@ -110,7 +114,7 @@ export default function AIContentDetail({
     try {
       const res = await fetch(`/api/ai-content/${versionId}/set-current`, { method: "POST", credentials: "include" });
       if (!res.ok) throw new Error(await res.text());
-      const refresh = await fetch(`/api/ai-content/pillar/${encodeURIComponent(item.state || "")}/versions`, { credentials: "include" });
+      const refresh = await fetch(versionsUrl, { credentials: "include" });
       if (refresh.ok) setVersions(await refresh.json());
     } catch (err) {
       alert("Failed to promote: " + (err as Error).message);

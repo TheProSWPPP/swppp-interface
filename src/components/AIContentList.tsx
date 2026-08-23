@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import type { AIContentItem, ContentType } from "../data";
-import { CONTENT_SCOPES, NATIONWIDE } from "../data";
+import { CONTENT_SCOPES, NATIONWIDE, defaultPillarKeyword } from "../data";
 import { cn } from "../utils";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -131,7 +131,8 @@ export default function AIContentList({
   const handleAdd = () => {
     if (newType === "pillar") {
       if (!newState) return;
-      onCreate({ type: "pillar", state: newState });
+      // Topic is optional for pillars — blank falls back to the scope's canonical guide.
+      onCreate({ type: "pillar", state: newState, keyword: newKeyword.trim() || undefined });
     } else {
       if (!newKeyword.trim()) return;
       onCreate({ type: newType, keyword: newKeyword.trim(), state: newState || undefined });
@@ -205,17 +206,21 @@ export default function AIContentList({
                     <option value="comparison">Comparison</option>
                   </select>
                 </div>
-                {newType !== "pillar" && (
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Keyword</label>
-                    <input
-                      type="text" value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-                      placeholder={newType === "comparison" ? "Best SWPPP Services in Texas 2026" : "SWPPP requirements for..."}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm"
-                    />
-                  </div>
-                )}
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    {newType === "pillar" ? "Article Topic (optional)" : "Keyword"}
+                  </label>
+                  <input
+                    type="text" value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+                    placeholder={
+                      newType === "comparison" ? "Best SWPPP Services in Texas 2026"
+                        : newType === "pillar" ? (newState ? defaultPillarKeyword(newState) : "Leave blank for the standard guide")
+                        : "SWPPP requirements for..."
+                    }
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm"
+                  />
+                </div>
                 <div className="w-40">
                   <label className="block text-xs font-medium text-slate-600 mb-1">
                     State{newType === "pillar" ? " *" : ""}
@@ -239,8 +244,8 @@ export default function AIContentList({
               </div>
               {newType === "pillar" && newState && (
                 <p className="text-xs text-slate-400 mt-2">
-                  Will create: "Construction & Industrial SWPPP Requirements
-                  {newState === NATIONWIDE ? ": The Nationwide Guide" : ` in ${newState}`}"
+                  Will create: "{newKeyword.trim() || defaultPillarKeyword(newState)}"
+                  {!newKeyword.trim() && " — type a topic above to write a different pillar for this scope."}
                 </p>
               )}
               {newType !== "pillar" && newState === NATIONWIDE && (
