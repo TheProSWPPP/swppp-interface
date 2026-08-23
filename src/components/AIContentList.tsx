@@ -208,7 +208,7 @@ export default function AIContentList({
                 </div>
                 <div className="flex-1">
                   <label className="block text-xs font-medium text-slate-600 mb-1">
-                    {newType === "pillar" ? "Article Topic (optional)" : "Keyword"}
+                    {newType === "pillar" ? "Keyword (optional)" : "Keyword"}
                   </label>
                   <input
                     type="text" value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)}
@@ -245,7 +245,7 @@ export default function AIContentList({
               {newType === "pillar" && newState && (
                 <p className="text-xs text-slate-400 mt-2">
                   Will create: "{newKeyword.trim() || defaultPillarKeyword(newState)}"
-                  {!newKeyword.trim() && " — type a topic above to write a different pillar for this scope."}
+                  {!newKeyword.trim() && " — type a keyword above to write a different pillar for this scope."}
                 </p>
               )}
               {newType !== "pillar" && newState === NATIONWIDE && (
