@@ -1783,12 +1783,20 @@ app.patch("/api/sdr/settings", async (req, res) => {
   if (contact_cooldown_days !== undefined && (!Number.isInteger(contact_cooldown_days) || contact_cooldown_days < 0 || contact_cooldown_days > 365)) {
     return res.status(400).json({ error: "contact_cooldown_days must be an integer between 0 and 365" });
   }
-  // Floor of 90, not 0: below that we risk cutting into a still-running Pipedrive sequence on
-  // the main domain, which is the exact double-touch Derek complained about on 2026-08-10.
+  // Floor of 30, not 0: below that we risk cutting into a still-running Pipedrive sequence on
+  // the main domain, which is the exact double-touch Derek complained about on 2026-08-10. That
+  // sequence is a ~13-day 4-step walk and the gate measures from its LAST step, so 30 days
+  // leaves it more than a fortnight to finish and archive.
+  //
+  // Was 90 until 2026-09-03. Ivan's call: a new project is a new reason to email, and holding a
+  // bidder for a full quarter over a job they already lost costs more than it protects. The
+  // widening is smaller than it looks — 30, 45 and 60 select an IDENTICAL lead set today,
+  // because nobody in the pool was emailed between 30 and 60 days ago, and the soonest any
+  // re-admitted lead was last emailed is 62 days.
   // null disables the re-admission entirely (back to 'clear'-only).
   if (recontact_after_days !== undefined && recontact_after_days !== null
-      && (!Number.isInteger(recontact_after_days) || recontact_after_days < 90 || recontact_after_days > 3650)) {
-    return res.status(400).json({ error: "recontact_after_days must be null or an integer between 90 and 3650" });
+      && (!Number.isInteger(recontact_after_days) || recontact_after_days < 30 || recontact_after_days > 3650)) {
+    return res.status(400).json({ error: "recontact_after_days must be null or an integer between 30 and 3650" });
   }
   if (start_date_grace_days !== undefined && (!Number.isInteger(start_date_grace_days) || start_date_grace_days < 0 || start_date_grace_days > 365)) {
     return res.status(400).json({ error: "start_date_grace_days must be an integer between 0 and 365" });
