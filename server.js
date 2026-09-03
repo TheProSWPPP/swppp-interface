@@ -19,6 +19,7 @@ import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
 import { sdrDraftVerifyEnabled, checkDraftEmail } from "./lib/sdrDraftVerify.js";
 import { runAutoSwitch, autoSwitchEnabled } from "./lib/sdrAutoSwitch.js";
+import { isCampaignCollision, campaignsToRelease, lastSendDaysAgo } from "./lib/apolloCollision.js";
 import { ownerScope, withLeadLock, leadVisibilityScope, leadVisibleTo } from "./lib/sdrAccess.js";
 import { staleDraftBlock } from "./lib/draftFreshness.js";
 import { normalizeLeadCsv } from "./lib/leadCsvNormalize.js";
@@ -4813,12 +4814,14 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         // email-confidence gate — otherwise Apollo silently DROPS contacts it considers unverified
         // (into skipped_contact_ids), including ones we create from a bare email that Apollo has no
         // status for, losing addresses we've already vetted.
-        enrollResponse = await apolloClient.addContactsToSequence(
-          draft.apollo_sequence_id,
-          [apolloContactId],
-          mailbox.apollo_mailbox_id,
-          { sequence_unverified_email: true },
-        );
+        const enrollContact = () =>
+          apolloClient.addContactsToSequence(
+            draft.apollo_sequence_id,
+            [apolloContactId],
+            mailbox.apollo_mailbox_id,
+            { sequence_unverified_email: true },
+          );
+        enrollResponse = await enrollContact();
 
         // Apollo returns HTTP 200 even when it silently DROPS the contact (e.g.
         // `contacts_finished_in_other_campaigns` for a lead already touched by another
@@ -4827,12 +4830,53 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         // ledger, or fire a Pipedrive activity — that would attribute outreach that
         // never left the building. Throw before `enrolled` flips so the draft is left
         // un-sent with the reason surfaced.
-        const skipReason = enrollResponse?.skipped_contact_ids?.[apolloContactId];
-        const addedOk =
-          !skipReason &&
-          Array.isArray(enrollResponse?.contacts) &&
-          enrollResponse.contacts.length > 0;
-        if (!addedOk) {
+        const addedOk = (resp) =>
+          !resp?.skipped_contact_ids?.[apolloContactId] &&
+          Array.isArray(resp?.contacts) &&
+          resp.contacts.length > 0;
+        let skipReason = enrollResponse?.skipped_contact_ids?.[apolloContactId];
+
+        // Cross-project collision. Apollo dedups by CONTACT and we sell by PROJECT, so an
+        // estimator who bids ten jobs takes one email from us and the other nine are refused.
+        // If every campaign this contact belongs to has FINISHED, release them and retry once.
+        // The decision comes from Apollo's own `contact_campaign_statuses` rather than its skip
+        // string, which names the wrong campaign and the wrong state — see lib/apolloCollision.js.
+        if (!addedOk(enrollResponse) && isCampaignCollision(skipReason)) {
+          const { release, blockedBy } = campaignsToRelease(match?.contact);
+          // Space the second pitch. The cooldown gate earlier in this handler cannot see a
+          // cross-project send — it reads the Pipedrive person field, which our .co sends
+          // mostly never stamp — so enforce Derek's own cooldown here against our send ledger.
+          const { rows: priorSends } = await client.query(
+            `SELECT sent_at FROM sdr_sends WHERE apollo_contact_id = $1`,
+            [String(apolloContactId)],
+          );
+          const daysAgo = lastSendDaysAgo(priorSends);
+          const cooldown = await contactCooldownDays();
+          const tooRecent = daysAgo !== null && daysAgo <= cooldown;
+
+          if (blockedBy) {
+            console.log(
+              `[apollo-collision] not releasing ${draft.contact_email_snapshot} — campaign status ${blockedBy}`,
+            );
+          } else if (tooRecent) {
+            console.log(
+              `[apollo-collision] not releasing ${draft.contact_email_snapshot} — last emailed ` +
+                `${daysAgo}d ago, inside the ${cooldown}d contact cooldown`,
+            );
+          } else if (release.length) {
+            for (const seqId of release) {
+              await apolloClient.removeContactsFromSequence(seqId, [apolloContactId], "remove");
+            }
+            console.log(
+              `[apollo-collision] released ${draft.contact_email_snapshot} from ${release.length} ` +
+                `finished campaign(s) to enroll lead ${draft.pipedrive_lead_id} into ${draft.apollo_sequence_id}`,
+            );
+            enrollResponse = await enrollContact();
+            skipReason = enrollResponse?.skipped_contact_ids?.[apolloContactId];
+          }
+        }
+
+        if (!addedOk(enrollResponse)) {
           const reason = skipReason || "not added (Apollo returned no enrolled contact)";
           const e = new Error(`Apollo did not enroll the contact: ${reason}`);
           e.status = 409;
