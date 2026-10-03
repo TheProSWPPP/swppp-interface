@@ -152,6 +152,11 @@ export interface SdrDraft {
   approved_by: string | null;
   sent_at: string | null;
   error_message: string | null;
+  enrollment_status?: 'pending'|'running'|'accepted'|'review'|'exhausted'|null;
+  enrollment_category?: string|null;
+  enrollment_attempts?: number|null;
+  enrollment_first_attempt_at?: string|null;
+  enrollment_next_retry_at?: string|null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -289,9 +294,12 @@ export interface SdrSequenceStep {
 export interface SdrSequence {
   id: string;
   name: string;
-  active: boolean;
-  num_steps: number;
+  active: boolean | null;
+  num_steps: number | null;
   steps: SdrSequenceStep[];
+  coverage?: "complete" | "partial";
+  errorCategory?: string | null;
+  omitted_steps?: Array<{position:number|null;step_type:string|null;reason:string}>;
 }
 
 export interface SdrFirstTouchTemplate {
@@ -461,6 +469,7 @@ export const sdrApi = {
   me: () => sdrFetch<{ user: { sub: string; username: string; role: SdrRole } }>("/api/sdr/auth/me"),
 
   listMailboxes: () => sdrFetch<{ mailboxes: SdrMailbox[] }>("/api/sdr/mailboxes"),
+  getSenderVerification: () => sdrFetch<{ accounts: { mailbox: string; error?: string; sendAs?: unknown[] }[] }>("/api/sdr/inbox/send-as"),
 
   syncMailboxesFromApollo: () =>
     sdrFetch<{ synced_count: number; synced: { email: string; apollo_id: string }[] }>(
@@ -618,6 +627,7 @@ export const sdrApi = {
       }[];
     }>("/api/sdr/outbox"),
 
+  listWorkDrafts: (view: 'open' | 'failed') => sdrFetch<{drafts:SdrDraft[];hasMore:boolean}>(`/api/sdr/operations/drafts?view=${view}`),
   listDrafts: (status?: SdrDraftStatus) => {
     const q = status ? `?status=${status}` : "";
     return sdrFetch<{ drafts: SdrDraft[] }>(`/api/sdr/drafts${q}`);
@@ -627,7 +637,7 @@ export const sdrApi = {
 
   engagementSummary: () => sdrFetch<SdrEngagementSummary>("/api/sdr/engagement/summary"),
 
-  listSequences: () => sdrFetch<{ sequences: SdrSequence[] }>("/api/sdr/sequences"),
+  listSequences: () => sdrFetch<{ sequences: SdrSequence[]; coverage?: "complete" | "partial"; errorCategory?:string|null }>("/api/sdr/sequences"),
 
   updateSequenceTemplate: (templateId: string, fields: { subject?: string; body_html?: string }) =>
     sdrFetch<{ ok: boolean }>("/api/sdr/sequences/templates/" + templateId, {

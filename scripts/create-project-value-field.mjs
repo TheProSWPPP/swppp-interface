@@ -13,7 +13,8 @@
 // after creation (a PUT changing it returns 200 and silently keeps the old type).
 //
 // Idempotent: if a field with this name already exists it prints the existing key.
-const TOKEN = process.env.PIPEDRIVE_API_TOKEN || "3089d0ffb03a7f996c5f10156fd4ebfaad9fca28";
+const TOKEN = process.env.PIPEDRIVE_API_TOKEN;
+if (!process.env.PIPEDRIVE_API_TOKEN) throw new Error('PIPEDRIVE_API_TOKEN is required');
 const NAME = "Project Value";
 
 const list = await (await fetch(`https://api.pipedrive.com/v1/dealFields?api_token=${TOKEN}&limit=500`)).json();
