@@ -3,7 +3,8 @@
 //
 // Usage: node scripts/score-baseline.mjs [outfile]
 import fs from "fs";
-const T = process.env.PIPEDRIVE_API_TOKEN || "3089d0ffb03a7f996c5f10156fd4ebfaad9fca28";
+const T = process.env.PIPEDRIVE_API_TOKEN;
+if (!process.env.PIPEDRIVE_API_TOKEN) throw new Error('PIPEDRIVE_API_TOKEN is required');
 const SCORE = "e2b854536230112bff77d6b0ce33bdb49f2916eb";
 const STAGE = "7c1852c27664d1118f75660223a6af9e99d10f2c";
 const ORIGIN = "6abd1d3e43212a7baf864cd4d2a210add6a96f60";

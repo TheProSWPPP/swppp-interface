@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {previewEmailDocument, firstTouchPreview} from '../lib/sdrPreviewEmail';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -9,14 +10,11 @@ import {
   ChevronUp,
   ChevronsUpDown,
   ExternalLink,
-  FileSearch,
   Clock,
   Flame,
   Inbox,
   Calendar,
-  LayoutGrid,
   ListChecks,
-  LogOut,
   Mail,
   MousePointerClick,
   Phone,
@@ -28,12 +26,9 @@ import {
   Bell,
   Send,
   ShieldCheck,
-  Snowflake,
   Sparkles,
-  Sprout,
   StickyNote,
   Target,
-  Users,
   X,
   XCircle,
   Eye,
@@ -76,6 +71,12 @@ import ContactsView from "./nurture/ContactsView";
 import AutomationsView from "./nurture/AutomationsView";
 import PermitsTab from "./permits/PermitsTab";
 import TeamView from "./sdr/TeamView";
+import SdrWorkspace from "./sdr/dashboard/SdrWorkspace";
+import SenderVerification from "./sdr/dashboard/SenderVerification";
+
+import RecentRepliesInbox from "./sdr/dashboard/RecentRepliesInbox";
+import type { ReplyContext } from "../lib/sdrOperationsApi";
+const SdrDashboard = lazy(() => import("./sdr/dashboard/SdrDashboard"));
 
 type SdrTab = "leads" | "queue" | "engaged" | "inbox" | "dashboard" | "mailboxes" | "templates" | "sequences" | "permits" | "team";
 type OutreachLane = "cold" | "nurture";
@@ -224,10 +225,6 @@ function outreachAttribution(lead: SdrLead): { who: string; src: string; title: 
 
 function initials(name: string): string {
   return name.split(/\s+/).map((s) => s[0]).join("").slice(0, 2).toUpperCase();
-}
-
-function pct(n: number, d: number): string {
-  return d ? `${Math.round((n / d) * 100)}%` : "—";
 }
 
 // --------------------------------------------------------------------------
@@ -489,7 +486,7 @@ function NotificationBell({
         onClick={() => setOpen((v) => !v)}
         title="Replies + priority leads"
         aria-label={`Notifications${count ? `: ${count}` : ""}`}
-        className="relative rounded-xl border border-white/30 bg-white/10 p-2 text-white hover:bg-white/20"
+        className="sdr-notification-button"
       >
         <Bell className="h-4 w-4" />
         {count > 0 && (
@@ -576,7 +573,9 @@ function NotificationBell({
 
 function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void }) {
   const [lane, setLane] = useState<OutreachLane>(() => getLane());
-  const [tab, setTab] = useState<SdrTab>("leads");
+  const [tab, setTab] = useState<SdrTab>("dashboard");
+  const [queueInitialFilter,setQueueInitialFilter]=useState<"open"|"failed">("open");
+  const [recentRepliesContext, setRecentRepliesContext] = useState<ReplyContext | null>(null);
   const [nurtureTab, setNurtureTab] = useState<NurtureTab>("campaigns");
   const [drillListId, setDrillListId] = useState<number | null>(null);
   // Deep-link from Pipedrive: open this lead's drawer at the console level.
@@ -658,6 +657,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   const [needsReplyThreads, setNeedsReplyThreads] = useState<OverviewThread[]>([]);
   const [pendingInbox, setPendingInbox] = useState<{ threadId?: string; mailbox?: string; leadId?: string } | null>(null);
   const goInbox = useCallback((target: { threadId?: string; mailbox?: string; leadId?: string }) => {
+    setRecentRepliesContext(null);
     setPendingInbox(target);
     setTab("inbox");
   }, []);
@@ -730,76 +730,18 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   return (
     <div className="sdr-root">
       <ToastStack toasts={toasts} dismiss={dismiss} />
-      <div className="flex items-center justify-between mb-5 rounded-2xl bg-gradient-to-r from-brand-800 to-brand-600 px-6 py-5 text-white shadow-sm">
-        <div>
-          <div className="text-xs uppercase tracking-[0.2em] font-bold text-brand-100">Pro SWPPP · SDR</div>
-          <h2 className="text-2xl font-bold text-white">Outreach console</h2>
-        </div>
-        <div className="flex items-center gap-3">
-          <NotificationBell threads={needsReplyThreads} hotLeads={hotLeads} onOpenThread={goInbox} onOpenLead={openHotLead} />
-          <div className="text-right">
-            <div className="text-sm font-semibold text-white">{user.display_name}</div>
-            <div className="text-xs text-brand-100 flex items-center justify-end gap-1">
-              {user.role === "admin" && <ShieldCheck className="h-3 w-3 text-brand-100" />}
-              {user.role}
-            </div>
-          </div>
-          <button
-            onClick={onSignOut}
-            className="rounded-xl border border-white/30 bg-white/10 px-3 py-2 text-sm font-medium text-white hover:bg-white/20 flex items-center gap-2"
-          >
-            <LogOut className="h-4 w-4" />
-            Switch user
-          </button>
-        </div>
-      </div>
-
-      {/* Lane toggle */}
-      <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 mb-5" role="group" aria-label="Outreach lane">
-        <button
-          onClick={() => switchLane("cold")}
-          aria-pressed={lane === "cold"}
-          className={cn(
-            "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
-            lane === "cold" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
-          )}
-        >
-          <Snowflake className="h-4 w-4" />
-          Cold · Apollo
-        </button>
-        <button
-          onClick={() => switchLane("nurture")}
-          aria-pressed={lane === "nurture"}
-          className={cn(
-            "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
-            lane === "nurture" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-700",
-          )}
-        >
-          <Sprout className="h-4 w-4" />
-          Nurture · Brevo
-        </button>
-      </div>
-
+      <SdrWorkspace user={user} lane={lane} active={lane === "cold" ? tab : nurtureTab}
+        onLaneChange={switchLane} onSignOut={onSignOut}
+        badges={{engaged:hotCount,inbox:inboxNeedsReply}}
+        notifications={<NotificationBell threads={needsReplyThreads} hotLeads={hotLeads} onOpenThread={goInbox} onOpenLead={openHotLead} />}
+        onNavigate={(value) => { if(value === "queue") setQueueInitialFilter("open"); setRecentRepliesContext(null); if (lane === "cold") setTab(value as SdrTab); else { setNurtureTab(value as NurtureTab); if (value !== "automations") setDrillListId(null); } }}>
       {lane === "cold" ? (
         <>
-          <div className="flex flex-wrap items-center gap-1 mb-6 rounded-xl border border-slate-200 bg-slate-50 p-1.5">
-            <TabButton current={tab} value="leads" onClick={setTab} icon={<Target className="h-4 w-4" />}>Leads</TabButton>
-            <TabButton current={tab} value="queue" onClick={setTab} icon={<Inbox className="h-4 w-4" />}>Queue</TabButton>
-            <TabButton current={tab} value="engaged" onClick={setTab} icon={<Flame className="h-4 w-4" />} badge={hotCount}>Priority</TabButton>
-            <TabButton current={tab} value="inbox" onClick={setTab} icon={<Inbox className="h-4 w-4" />} badge={inboxNeedsReply}>Inbox</TabButton>
-            <TabButton current={tab} value="dashboard" onClick={setTab} icon={<LayoutGrid className="h-4 w-4" />}>Dashboard</TabButton>
-            <TabButton current={tab} value="mailboxes" onClick={setTab} icon={<Mail className="h-4 w-4" />}>Mailboxes</TabButton>
-            <TabButton current={tab} value="templates" onClick={setTab} icon={<ListChecks className="h-4 w-4" />}>Templates</TabButton>
-            <TabButton current={tab} value="permits" onClick={setTab} icon={<FileSearch className="h-4 w-4" />}>Permits</TabButton>
-            {user.role === "admin" && (
-              <TabButton current={tab} value="team" onClick={setTab} icon={<Users className="h-4 w-4" />}>Team</TabButton>
-            )}
-          </div>
           {tab === "leads" && <LeadsView user={user} pushToast={push} onGenerated={() => setTab("queue")} />}
-          {tab === "queue" && <QueueView user={user} mailboxById={mailboxById} pushToast={push} />}
+          {tab === "queue" && <QueueView key={queueInitialFilter} initialFilter={queueInitialFilter} user={user} mailboxById={mailboxById} pushToast={push} />}
           {tab === "engaged" && <EngagedView pushToast={push} />}
-          {tab === "inbox" && <InboxView user={user} pushToast={push} pending={pendingInbox} onConsumed={() => setPendingInbox(null)} />}
-          {tab === "dashboard" && <DashboardView />}
+          {tab === "inbox" && (recentRepliesContext ? <RecentRepliesInbox key={JSON.stringify(recentRepliesContext)} context={recentRepliesContext} onBack={() => { setRecentRepliesContext(null); setTab("dashboard"); }} onOpenThread={goInbox} onOpenProject={setDeepLeadId} /> : <InboxView user={user} pushToast={push} pending={pendingInbox} onConsumed={() => setPendingInbox(null)} />)}
+          {tab === "dashboard" && <Suspense fallback={<div className="py-12 text-center text-sm text-slate-500">Loading dashboard…</div>}><SdrDashboard user={user} onOpenReplies={(context) => { setRecentRepliesContext(context); setTab("inbox"); }} mailboxes={Object.values(mailboxById)} onNavigate={(target) => { setRecentRepliesContext(null); if(target === "queue-failed") {setQueueInitialFilter("failed");setTab("queue");} else if (["leads", "queue", "inbox", "mailboxes", "templates"].includes(target)) {if(target === "queue") setQueueInitialFilter("open");setTab(target as SdrTab);} }} /></Suspense>}
           {tab === "mailboxes" && <MailboxesView user={user} />}
           {(tab === "templates" || tab === "sequences") && <MessagingView user={user} pushToast={push} />}
           {tab === "permits" && <PermitsTab pushToast={(m, k) => push(k ?? "success", m)} />}
@@ -807,12 +749,6 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
         </>
       ) : (
         <>
-          <div className="flex items-center gap-1 mb-6 border-b border-slate-200">
-            <NurtureTabButton current={nurtureTab} value="campaigns" onClick={(v) => { setNurtureTab(v); setDrillListId(null); }} icon={<Send className="h-4 w-4" />}>Campaigns</NurtureTabButton>
-            <NurtureTabButton current={nurtureTab} value="lists" onClick={(v) => { setNurtureTab(v); setDrillListId(null); }} icon={<LayoutGrid className="h-4 w-4" />}>Lists</NurtureTabButton>
-            <NurtureTabButton current={nurtureTab} value="contacts" onClick={(v) => { setNurtureTab(v); setDrillListId(null); }} icon={<Inbox className="h-4 w-4" />}>Contacts</NurtureTabButton>
-            <NurtureTabButton current={nurtureTab} value="automations" onClick={(v) => setNurtureTab(v)} icon={<RefreshCw className="h-4 w-4" />}>Automations</NurtureTabButton>
-          </div>
           {nurtureTab === "campaigns" && <CampaignsView pushToast={push} />}
           {nurtureTab === "lists" && (
             <ListsView
@@ -825,6 +761,8 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
         </>
       )}
 
+      </SdrWorkspace>
+
       {/* Deep-link from Pipedrive (#/sdr?lead=<id>) → open that lead's detail */}
       {deepLeadId && (
         <LeadDetailDrawer
@@ -834,68 +772,6 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
         />
       )}
     </div>
-  );
-}
-
-function NurtureTabButton({
-  current, value, onClick, icon, children,
-}: {
-  current: NurtureTab; value: NurtureTab; onClick: (v: NurtureTab) => void; icon: React.ReactNode; children: React.ReactNode;
-}) {
-  const active = current === value;
-  return (
-    <button
-      onClick={() => onClick(value)}
-      className={cn(
-        "flex items-center gap-2 px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors",
-        active ? "border-emerald-600 text-emerald-600" : "border-transparent text-slate-500 hover:text-slate-900",
-      )}
-    >
-      {icon}
-      {children}
-    </button>
-  );
-}
-
-function TabButton({
-  current,
-  value,
-  onClick,
-  icon,
-  children,
-  badge,
-}: {
-  current: SdrTab;
-  value: SdrTab;
-  onClick: (v: SdrTab) => void;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-  badge?: number;
-}) {
-  const active = current === value;
-  return (
-    <button
-      onClick={() => onClick(value)}
-      className={cn(
-        "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors",
-        active
-          ? "bg-brand-600 text-white shadow-sm"
-          : "text-slate-500 hover:bg-slate-100 hover:text-slate-900",
-      )}
-    >
-      {icon}
-      {children}
-      {badge != null && badge > 0 && (
-        <span
-          className={cn(
-            "ml-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none",
-            active ? "bg-white text-brand-700" : "bg-rose-500 text-white",
-          )}
-        >
-          {badge}
-        </span>
-      )}
-    </button>
   );
 }
 
@@ -1746,11 +1622,9 @@ function LeadDetailDrawer({
                             {t.body && (
                               <details className="mt-1">
                                 <summary className="cursor-pointer text-xs text-brand-600 hover:underline">View email</summary>
-                                <div
-                                  className="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-800"
-                                  style={{ fontFamily: 'Georgia, "Times New Roman", serif', color: "#1a5276" }}
-                                  dangerouslySetInnerHTML={{ __html: firstTouchPreview(t.body, t.signature || undefined) }}
-                                />
+                                <div className="mt-1 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                  <MessageBody html={firstTouchPreview(t.body, t.signature || undefined, false)} title="Outreach email preview" />
+                                </div>
                               </details>
                             )}
                           </div>
@@ -2274,6 +2148,7 @@ function OutreachConfirmModal({
 const QUEUE_POLL_MS = 60_000;
 
 function QueueView({
+  initialFilter = "open",
   user,
   mailboxById,
   pushToast,
@@ -2281,26 +2156,34 @@ function QueueView({
   user: SdrUser;
   mailboxById: Record<string, SdrMailbox>;
   pushToast: (kind: "success" | "error", text: string) => void;
+  initialFilter?: "open" | "failed";
 }) {
+  const readEpoch=useRef(0);
+  const invalidatePendingReads=useCallback(()=>{readEpoch.current++;},[]);
+  const [hasMore,setHasMore]=useState(false);
   const [drafts, setDrafts] = useState<SdrDraft[] | null>(null);
   const [scheduled, setScheduled] = useState<Awaited<ReturnType<typeof sdrApi.getOutbox>>["scheduled"]>([]);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<"open" | "all">("open");
+  const [statusFilter, setStatusFilter] = useState<"open" | "all" | "failed">(initialFilter);
 
   const load = useCallback(async () => {
+    const epoch=++readEpoch.current;
     try {
-      const d = await sdrApi.listDrafts();
+      const d = statusFilter === "all" ? await sdrApi.listDrafts() : await sdrApi.listWorkDrafts(statusFilter);
+      if(epoch !== readEpoch.current) return;
       setDrafts(d.drafts);
+      setHasMore("hasMore" in d && d.hasMore === true);
       setError(null);
     } catch (e) {
+      if(epoch !== readEpoch.current) return;
       setError((e as Error).message);
     }
     // Apollo "scheduled but not yet sent" queue — best-effort, never blocks the drafts view.
-    sdrApi.getOutbox().then((o) => setScheduled(o.scheduled)).catch(() => {});
-  }, []);
+    if(statusFilter !== "failed") sdrApi.getOutbox().then((o) => {if(epoch===readEpoch.current) setScheduled(o.scheduled);}).catch(() => {});
+  }, [statusFilter]);
 
   // Initial load + poll + refresh when the tab regains focus
   useEffect(() => {
@@ -2309,13 +2192,15 @@ function QueueView({
     const onFocus = () => load();
     window.addEventListener("focus", onFocus);
     return () => {
+      invalidatePendingReads();
       clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
-  }, [load]);
+  }, [load,invalidatePendingReads]);
 
   const filtered = useMemo(() => {
     if (!drafts) return [];
+    if(statusFilter === "failed") return drafts.filter(d => d.status === "failed");
     if (statusFilter === "open") {
       return drafts.filter((d) => ["pending", "approved", "edited"].includes(d.status));
     }
@@ -2435,7 +2320,9 @@ function QueueView({
 
   return (
     <div>
-      {drafts && (
+      <h1 className="mb-2 text-2xl font-semibold text-slate-900">{statusFilter === "failed" ? "Recent failed drafts" : "Outreach queue"}</h1>
+      <p className="mb-4 text-sm text-slate-600">Counts for the loaded {statusFilter === "failed" ? "failed-draft" : statusFilter === "open" ? "open-draft" : "recent-draft"} view. {statusFilter === "all" ? "Latest 200 drafts; older history is not shown." : hasMore ? "Showing the latest 250 matching drafts. More matching drafts exist." : ""}</p>
+      {drafts && statusFilter !== "failed" && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <StatTile label="Open" value={counts.open} icon={<Inbox className="h-4 w-4" />} tone="indigo" />
           <StatTile label="Awaiting review" value={counts.pending} icon={<ListChecks className="h-4 w-4" />} tone="slate" />
@@ -2444,8 +2331,10 @@ function QueueView({
         </div>
       )}
 
+      {drafts && statusFilter === "failed" && <p className="mb-4 inline-flex rounded-lg bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-800">{drafts.length} matching failed drafts</p>}
+
       {/* Scheduled to send — enrolled in Apollo, waiting on the sending schedule / daily cap. */}
-      {scheduled.length > 0 && (
+      {statusFilter !== "failed" && scheduled.length > 0 && (
         <div className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
             <Clock className="h-4 w-4 text-amber-500" />
@@ -2481,7 +2370,7 @@ function QueueView({
           </ul>
         </div>
       )}
-      <div className="flex items-center justify-between mb-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setStatusFilter("open")}
@@ -2492,6 +2381,7 @@ function QueueView({
           >
             Open
           </button>
+          <button type="button" onClick={()=>setStatusFilter("failed")} className={cn("min-h-11 rounded-xl px-3 py-1.5 text-sm font-semibold",statusFilter === "failed" ? "bg-rose-100 text-rose-800" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}>Recent failures</button>
           <button
             onClick={() => setStatusFilter("all")}
             className={cn(
@@ -2513,6 +2403,7 @@ function QueueView({
         </div>
       </div>
 
+      {statusFilter === "failed" && <p className="mb-4 text-sm text-slate-600">Currently failed drafts updated in the last 7 days. Open a draft to review its error before retrying.</p>}
       {error && (
         <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error}
@@ -2642,6 +2533,16 @@ function DraftRow({
 
       {expanded && (
         <div className="border-t border-slate-100 px-4 py-4 bg-slate-50/50 space-y-3">
+          <section aria-label="Draft email preview" className="rounded-xl border border-slate-200 bg-white p-4">
+            <p className="mb-3 text-xs font-semibold text-slate-500">Email preview{dirty ? " · unsaved edits" : ""}</p>
+            <dl className="mb-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 border-b border-slate-100 pb-3 text-sm">
+              <dt className="text-slate-500">From</dt><dd className="break-all text-slate-800">{mailbox?.email || "Sender unavailable"}</dd>
+              <dt className="text-slate-500">To</dt><dd className="break-all text-slate-800">{draft.contact_email_snapshot}</dd>
+              <dt className="text-slate-500">Subject</dt><dd className="break-words font-medium text-slate-900">{subject || "(no subject)"}</dd>
+            </dl>
+            <MessageBody html={firstTouchPreview(body, mailbox?.signature_html || undefined, false)} title="Draft email" />
+            <p className="mt-3 text-xs text-slate-500">{mailbox?.signature_html ? "Signature from the assigned mailbox. Apollo adds it when sending." : "Sender signature is unavailable in this preview."}</p>
+          </section>
           <div>
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Subject</label>
             <input
@@ -2674,6 +2575,12 @@ function DraftRow({
             <div>
               Sender: <span className="font-mono">{mailbox?.email || draft.assigned_mailbox_id || "(none)"}</span>
             </div>
+            {draft.enrollment_status && draft.enrollment_status !== 'accepted' && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+              <strong>{draft.enrollment_status==='pending'?'Waiting for a safe retry':draft.enrollment_status==='running'?'Checking enrollment':draft.enrollment_status==='exhausted'?'Retry limit reached':'Needs review before sending'}</strong>
+              <div>{draft.enrollment_category==='capacity'?'Sender’s daily limit reached':draft.enrollment_category==='crm_unverified'?'Pipedrive lead could not be verified':draft.enrollment_category==='enrollment_uncertain'?'The previous sending result is unconfirmed':draft.enrollment_category==='contact_changed'?'The project contact changed':draft.enrollment_category==='draft_stale'?'Draft context changed or was edited':draft.enrollment_category?.replaceAll('_',' ')}</div>
+              <div>{draft.enrollment_attempts||0} attempt(s){draft.enrollment_first_attempt_at?` · First attempt ${new Date(draft.enrollment_first_attempt_at).toLocaleDateString('en-US',{timeZone:'America/Chicago'})}`:''}</div>
+              {draft.enrollment_next_retry_at&&<div>Next check: {new Date(draft.enrollment_next_retry_at).toLocaleString('en-US',{timeZone:'America/Chicago'})} CT</div>}
+            </div>}
             {draft.reject_reason && <div>Reject reason: <span className="italic">{draft.reject_reason}</span></div>}
             {draft.error_message && (
               <div className="text-rose-600">Error: <span className="italic">{draft.error_message}</span></div>
@@ -3127,134 +3034,6 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
 // Dashboard
 // --------------------------------------------------------------------------
 
-function DashboardView() {
-  const [drafts, setDrafts] = useState<SdrDraft[] | null>(null);
-  const [summary, setSummary] = useState<SdrEngagementSummary | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    sdrApi
-      .listDrafts()
-      .then((d) => setDrafts(d.drafts))
-      .catch((e) => setError(e.message));
-    sdrApi
-      .engagementSummary()
-      .then(setSummary)
-      .catch(() => {}); // rates are additive — dashboard still works without them
-  }, []);
-
-  if (error)
-    return <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>;
-  if (!drafts) return <div className="text-center text-slate-400 py-12">Loading…</div>;
-
-  const counts = {
-    pending: drafts.filter((d) => d.status === "pending" || d.status === "edited").length,
-    sent: drafts.filter((d) => d.status === "sent").length,
-    rejected: drafts.filter((d) => d.status === "rejected").length,
-    failed: drafts.filter((d) => d.status === "failed").length,
-  };
-  const recent = [...drafts]
-    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-    .slice(0, 10);
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatTile label="In queue" value={counts.pending} icon={<Inbox className="h-4 w-4" />} tone="indigo" />
-        <StatTile label="Sent" value={counts.sent} icon={<CheckCircle2 className="h-4 w-4" />} tone="emerald" />
-        <StatTile label="Rejected" value={counts.rejected} icon={<XCircle className="h-4 w-4" />} tone="slate" />
-        <StatTile label="Failed" value={counts.failed} icon={<AlertCircle className="h-4 w-4" />} tone="rose" />
-      </div>
-
-      {summary && summary.by_trigger.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <RatesTable
-            title="By trigger type"
-            rows={summary.by_trigger.map((r) => ({
-              label: `${r.trigger_type} — ${TRIGGER_LABELS[r.trigger_type]}`,
-              ...r,
-            }))}
-          />
-          <RatesTable
-            title="By sender"
-            rows={summary.by_sender.map((r) => ({ label: r.display_name || r.username, ...r }))}
-          />
-        </div>
-      )}
-
-      <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100">
-          <div className="text-sm font-semibold text-slate-900">Recent activity</div>
-        </div>
-        {recent.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm text-slate-400">Nothing yet.</div>
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {recent.map((d) => (
-              <li key={d.id} className="px-4 py-2 flex items-center gap-3 text-sm">
-                <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded ring-1 ring-inset", TRIGGER_COLORS[d.trigger_type])}>
-                  {d.trigger_type}
-                </span>
-                <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded", STATUS_COLORS[d.status])}>
-                  {d.status}
-                </span>
-                <span className="flex-1 truncate text-slate-700">
-                  {(d.metadata as { pipedrive_lead_title?: string })?.pipedrive_lead_title || `Lead #${d.pipedrive_lead_id}`}
-                </span>
-                <span className="text-xs text-slate-400">{formatRelative(d.sent_at || d.updated_at)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function RatesTable({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: { label: string; sent: number; opened: number; clicked: number; replied: number }[];
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-100">
-        <div className="text-sm font-semibold text-slate-900">{title}</div>
-      </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-xs text-slate-400 uppercase tracking-wide">
-            <th className="text-left font-semibold px-4 py-2"></th>
-            <th className="text-right font-semibold px-2 py-2">Sent</th>
-            <th className="text-right font-semibold px-2 py-2">Open</th>
-            <th className="text-right font-semibold px-2 py-2">Click</th>
-            <th className="text-right font-semibold px-4 py-2">Reply</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {rows.map((r) => (
-            <tr key={r.label}>
-              <td className="px-4 py-2 text-slate-700 font-medium">{r.label}</td>
-              <td className="px-2 py-2 text-right font-mono text-slate-900">{r.sent}</td>
-              <td className="px-2 py-2 text-right font-mono text-slate-700" title={`${r.opened} of ${r.sent}`}>
-                {pct(r.opened, r.sent)}
-              </td>
-              <td className="px-2 py-2 text-right font-mono text-slate-700" title={`${r.clicked} of ${r.sent}`}>
-                {pct(r.clicked, r.sent)}
-              </td>
-              <td className="px-4 py-2 text-right font-mono text-slate-700" title={`${r.replied} of ${r.sent}`}>
-                {pct(r.replied, r.sent)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function StatTile({
   label,
   value,
@@ -3359,40 +3138,42 @@ function CopyEmailButton({
 // staying safe: sandbox without `allow-scripts` neutralizes any JS in the email; we keep
 // `allow-same-origin` only so we can measure the content height and auto-size the frame.
 // Plain-text messages fall back to the pre-wrapped text view.
-function MessageBody({ html, body }: { html?: string | null; body?: string }) {
+function MessageBody({ html, body, title = "Email message" }: { html?: string | null; body?: string; title?: string }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(0);
-  const clean = (html || "").trim();
-  const srcDoc = clean
-    ? `<!doctype html><html><head><meta charset="utf-8"><base target="_blank">` +
-      `<style>html,body{margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1e293b;word-break:break-word;overflow-wrap:anywhere}` +
-      `img{max-width:100%;height:auto}a{color:#1d4ed8}blockquote{margin:0 0 0 .5rem;padding-left:.75rem;border-left:2px solid #e2e8f0;color:#64748b}table{max-width:100%}</style></head>` +
-      `<body>${clean}</body></html>`
-    : "";
+  const readOnlyPreview = document.documentElement.dataset.sdrPreview === "read-only";
+  const original = (html || "").trim();
+  const defaultStyle = "html,body{margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1e293b;word-break:break-word;overflow-wrap:anywhere}img{max-width:100%;height:auto}a{color:#1d4ed8}blockquote{margin:0 0 0 .5rem;padding-left:.75rem;border-left:2px solid #e2e8f0;color:#64748b}table{max-width:100%}";
+  const srcDoc = original ? (readOnlyPreview
+    ? previewEmailDocument(original, defaultStyle)
+    : `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${defaultStyle}</style></head><body>${original}</body></html>`) : "";
 
-  const onLoad = useCallback(() => {
-    const doc = ref.current?.contentDocument;
-    if (doc?.body) setHeight(Math.min(doc.body.scrollHeight + 8, 1400));
-  }, []);
+  useEffect(() => {
+    const frame = ref.current;
+    if (!frame || !srcDoc) return;
+    let observer: ResizeObserver | undefined;
+    const measure = () => {
+      const doc = frame.contentDocument;
+      if (!doc?.body) return;
+      setHeight(Math.min(doc.body.scrollHeight + 8, 1400));
+    };
+    const loaded = () => {
+      observer?.disconnect();
+      measure();
+      if (frame.contentDocument?.body) {
+        observer = new ResizeObserver(measure);
+        observer.observe(frame.contentDocument.body);
+      }
+    };
+    frame.addEventListener("load", loaded);
+    loaded();
+    return () => { frame.removeEventListener("load", loaded); observer?.disconnect(); };
+  }, [srcDoc]);
 
-  if (!clean) {
-    return (
-      <div className="overflow-hidden whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
-        {body?.trim() || "(no text)"}
-      </div>
-    );
+  if (!original) {
+    return <div className="overflow-hidden whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">{body?.trim() || "(no text)"}</div>;
   }
-  return (
-    <iframe
-      ref={ref}
-      title="email"
-      sandbox="allow-same-origin allow-popups"
-      srcDoc={srcDoc}
-      onLoad={onLoad}
-      className="w-full border-0"
-      style={{ height: height ? `${height}px` : "120px" }}
-    />
-  );
+  return <iframe ref={ref} title={title} sandbox={readOnlyPreview ? "allow-same-origin" : "allow-same-origin allow-popups"} srcDoc={srcDoc} className="w-full border-0" style={{ height: height ? `${height}px` : "120px" }} />;
 }
 
 function InboxView({
@@ -3659,6 +3440,15 @@ function InboxView({
           )}
         </button>
         <div className="ml-auto flex flex-wrap gap-2">
+          {view === "mailbox" && mailbox && connected.some(account => account.email === mailbox) && (
+            <button
+              onClick={() => connect(mailbox)}
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-brand-300 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-100"
+              title="Reconnect this Gmail account to grant the current inbox permissions"
+            >
+              <Mail className="h-4 w-4" /> Reconnect {mailbox}
+            </button>
+          )}
           {unconnected.map((a) => (
             <button
               key={a.email}
@@ -3682,7 +3472,7 @@ function InboxView({
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
-          <div className="min-w-0 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+          <div className="max-h-[420px] min-w-0 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200 lg:max-h-[calc(100vh-260px)]">
             {loading ? (
               <div className="p-6 text-sm text-slate-400">Loading…</div>
             ) : !displayThreads.length ? (
@@ -3785,17 +3575,22 @@ function InboxView({
                         mine ? "ml-6 border-brand-200 bg-brand-50/60" : "mr-6 border-slate-100 bg-white",
                       )}
                     >
-                      <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                        <div className="flex min-w-0 items-center gap-1.5">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                           <span className="shrink-0 font-medium text-slate-700">{mine ? "You" : nameFromHeader(m.from)}</span>
                           {emailFromHeader(m.from) && emailFromHeader(m.from) !== nameFromHeader(m.from) && (
-                            <span className="truncate text-slate-400">&lt;{emailFromHeader(m.from)}&gt;</span>
+                            <span className="break-all text-slate-500">&lt;{emailFromHeader(m.from)}&gt;</span>
                           )}
                           <CopyEmailButton email={m.from} pushToast={pushToast} className="shrink-0" />
                         </div>
                         <span className="shrink-0 text-slate-400">{m.date ? new Date(m.date).toLocaleString() : ""}</span>
                       </div>
-                      <MessageBody html={m.html} body={m.body} />
+                      <dl className="mb-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 border-b border-slate-100 pb-2 text-xs">
+                        <dt className="text-slate-500">To</dt><dd className="break-all text-slate-700">{m.to || "(recipient unavailable)"}</dd>
+                        {m.cc && <><dt className="text-slate-500">Cc</dt><dd className="break-all text-slate-700">{m.cc}</dd></>}
+                        <dt className="text-slate-500">Subject</dt><dd className="break-words font-medium text-slate-800">{m.subject || "(no subject)"}</dd>
+                      </dl>
+                      <MessageBody html={m.html} body={m.body} title={m.subject || "Email message"} />
                     </div>
                   );
                 })}
@@ -3987,10 +3782,9 @@ function MailboxSignature({ mailbox, isAdmin }: { mailbox: SdrMailbox; isAdmin: 
           </div>
         </div>
       ) : current ? (
-        <div
-          className="rounded-lg border border-slate-100 bg-white px-2 py-1.5 text-xs text-slate-700"
-          dangerouslySetInnerHTML={{ __html: current }}
-        />
+        <div className="rounded-lg border border-slate-100 bg-white px-2 py-1.5">
+          <MessageBody html={current} title="Sender signature" />
+        </div>
       ) : (
         <div className="text-[11px] text-slate-400">No signature set{isAdmin ? " — click Edit to add one." : "."}</div>
       )}
@@ -4070,6 +3864,7 @@ function MailboxesView({ user }: { user: SdrUser }) {
 
   return (
     <div>
+      {user.role === "admin" && <SenderVerification />}
       {user.role === "admin" && settings && (
         <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
           <div className="flex items-start justify-between gap-4">
@@ -4270,9 +4065,10 @@ function MailboxesView({ user }: { user: SdrUser }) {
                     {m.bounce_rate == null ? "—" : `${(m.bounce_rate * 100).toFixed(1)}%`}
                   </dd>
                 </div>
-                <div className="flex justify-between"><dt>Deliverability</dt><dd className="font-mono text-slate-700">{m.deliverability_score ?? "—"}</dd></div>
+                <div className="flex justify-between"><dt>Last synced Apollo health score</dt><dd className="font-mono text-slate-700">{m.deliverability_score ?? "—"}</dd></div>
                 <div className="flex justify-between"><dt>Apollo ID</dt><dd className="font-mono text-slate-700 truncate ml-2">{m.apollo_mailbox_id?.slice(0, 12) || "(unlinked)"}</dd></div>
               </dl>
+              <p className="mt-2 text-xs text-slate-500">The health score does not measure inbox or spam-folder placement.</p>
               <MailboxSignature mailbox={m} isAdmin={user.role === "admin"} />
             </div>
           ))}
@@ -4308,26 +4104,32 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
   const [sampleSig, setSampleSig] = useState<string>("");
   const isAdmin = user.role === "admin";
 
+  const [allSequencesOpen, setAllSequencesOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [sequenceError, setSequenceError] = useState<string | null>(null);
+  const [signatureError, setSignatureError] = useState<string | null>(null);
   useEffect(() => {
-    Promise.all([
-      sdrApi.getFirstTouchTemplates(),
-      sdrApi.listSequences().catch(() => ({ sequences: [] as SdrSequence[] })),
-      sdrApi.listMailboxes().catch(() => ({ mailboxes: [] as SdrMailbox[] })),
-    ])
-      .then(([ft, sq, mb]) => {
-        setTemplates(ft.templates);
-        const init: Record<string, string> = {};
-        (Object.keys(ft.templates) as SdrTriggerType[]).forEach((t) => {
-          init[t] = ft.templates[t].body;
-        });
-        setDrafts(init);
-        setSequences(sq.sequences || []);
-        const boxes = mb.mailboxes || [];
-        const withSig = boxes.find((b) => b.email.startsWith("dc@") && b.signature_html) || boxes.find((b) => b.signature_html);
+    let active = true;
+    Promise.allSettled([
+      sdrApi.getFirstTouchTemplates(), sdrApi.listSequences(), sdrApi.listMailboxes(),
+    ]).then(([ft, sq, mb]) => {
+      if (!active) return;
+      setError(ft.status === "rejected" ? "Opening templates could not be loaded. Retry the connection." : null);
+      if (ft.status === "fulfilled") {
+        setTemplates(ft.value.templates);
+        setDrafts(previous => Object.keys(previous).length ? previous : Object.fromEntries(Object.entries(ft.value.templates).map(([t, value]) => [t, value.body])));
+      }
+      setSequences(sq.status === "fulfilled" ? sq.value.sequences : []);
+      setSequenceError(sq.status === "rejected" || sq.value.coverage === "partial" ? "Some sequence details could not be verified. Retry the connection before editing follow-ups." : null);
+      if (mb.status === "fulfilled") {
+        const boxes = mb.value.mailboxes;
+        const withSig = boxes.find(b => b.email.startsWith("dc@") && b.signature_html) || boxes.find(b => b.signature_html);
         setSampleSig(withSig?.signature_html || "");
-      })
-      .catch((e) => setError(e.message));
-  }, []);
+      }
+      setSignatureError(mb.status === "rejected" ? "Sender signatures could not be loaded. Samples currently show the message body only." : null);
+    });
+    return () => { active = false; };
+  }, [reloadKey]);
 
   const seqByTrigger = useMemo(() => {
     const m: Record<string, SdrSequence> = {};
@@ -4354,14 +4156,16 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
   return (
     <div className="space-y-4">
       <p className="text-xs text-slate-500">
-        One template per trigger. Step 1 is the first-touch email built per lead (merge fields{" "}
-        <span className="font-mono text-slate-600">{"{First} {ENV} {SWPPP}"}</span>); the later steps are the live
-        Apollo follow-ups. The signature is added by Apollo per sender, so it isn't edited here — it shows in the
-        preview only. {isAdmin ? "Edits save immediately." : "Admins edit these."}
+        Each lead type has an opening email and follow-ups. The opening email fills in the contact and project details.
+        The preview uses sample details and a sample sender signature. Apollo adds each assigned sender's signature when sending.
+        {isAdmin ? " Save your edits to update the template." : " Admins can edit these templates."}
       </p>
-      {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+      {(error || sequenceError || signatureError) && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        {[error, sequenceError, signatureError].filter(Boolean).join(" ")}
+        <button type="button" onClick={() => setReloadKey(key => key + 1)} className="ml-3 min-h-11 underline">Retry connection</button>
+      </div>}
       {!templates || !sequences ? (
-        <div className="py-8 text-center text-slate-400">Loading…</div>
+        <div className="py-8 text-center text-slate-400">{error ? "Opening templates are unavailable. Sequence records can still be reviewed below." : "Loading…"}</div>
       ) : (
         TRIGGER_ORDER.filter((t) => templates[t]).map((t) => {
           const dirty = drafts[t] !== templates[t].body;
@@ -4369,7 +4173,7 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
           const followups = seq
             ? [...seq.steps]
                 .sort((a, b) => (a.position ?? 1e9) - (b.position ?? 1e9))
-                .slice(1) // step 1 is the wrapper that injects the first-touch draft below
+                .filter(step => step.position === null || step.position > 1) // First-step wrapper is previewed below.
             : [];
           return (
             <div key={t} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -4383,19 +4187,21 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
                       seq.active ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-slate-100 text-slate-500 ring-slate-200",
                     )}
                   >
-                    {seq.active ? "Active" : "Inactive"}
+                    {seq.active===null ? "Unverified" : seq.active ? "Active" : "Paused"}
                   </span>
                 )}
                 <span className="text-xs text-slate-500">
-                  — {1 + followups.length} step{1 + followups.length === 1 ? "" : "s"}
+                  {seq?.num_steps != null ? `· ${seq.num_steps} configured ${seq.num_steps === 1 ? "step" : "steps"}` : "· Step count unavailable"}
                 </span>
               </div>
+              {(!seq || seq.coverage === "partial") && <p className="px-4 py-3 text-sm text-amber-800">Follow-up configuration is unavailable. The opening draft below remains editable.</p>}
+              {!!seq?.omitted_steps?.length && <p className="px-4 py-3 text-sm text-slate-600">{seq.omitted_steps.length} configured step(s) have no email preview, including tasks or missing templates. Check the sequence in Apollo.</p>}
               <ul className="divide-y divide-slate-100">
                 {/* Step 1 — the editable first-touch (day 0) */}
                 <li className="px-4 py-3">
                   <div className="mb-1.5 flex items-center gap-2">
                     <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">Step 1</span>
-                    <span className="text-[11px] text-slate-400">Day 0 · first touch · built per lead, gets the brand styling on send</span>
+                    <span className="text-[11px] text-slate-400">Opening email · personalized for each lead</span>
                     {isAdmin && (
                       <button
                         onClick={() => save(t)}
@@ -4411,7 +4217,7 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
                   </div>
                   <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                     <div>
-                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Editable text + merge fields</div>
+                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Message text · keep the placeholders</div>
                       <textarea
                         value={drafts[t] ?? ""}
                         onChange={(e) => setDrafts((d) => ({ ...d, [t]: e.target.value }))}
@@ -4421,12 +4227,10 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
                       />
                     </div>
                     <div>
-                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Preview · full email sample (placeholders filled, signature from Apollo)</div>
-                      <div
-                        className="min-h-[180px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-800"
-                        style={{ fontFamily: 'Georgia, "Times New Roman", serif', color: "#1a5276" }}
-                        dangerouslySetInnerHTML={{ __html: firstTouchPreview(drafts[t] ?? "", sampleSig) }}
-                      />
+                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Email sample · example contact and sender</div>
+                      <div className="min-h-[180px] rounded-lg border border-slate-200 bg-white px-3 py-2">
+                        <MessageBody html={firstTouchPreview(drafts[t] ?? "", sampleSig)} title="Template email sample" />
+                      </div>
                     </div>
                   </div>
                 </li>
@@ -4436,7 +4240,7 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
                     key={step.template_id || i}
                     seqName={seq.name}
                     step={step}
-                    stepNumber={i + 2}
+                    stepNumber={step.position ?? i + 2}
                     isAdmin={isAdmin}
                     pushToast={pushToast}
                   />
@@ -4446,8 +4250,31 @@ function MessagingView({ user, pushToast }: { user: SdrUser; pushToast: (k: "suc
           );
         })
       )}
+      {sequences && <details onToggle={event => setAllSequencesOpen(event.currentTarget.open)} className="rounded-2xl border border-slate-200 bg-white p-4">
+        <summary className="min-h-11 cursor-pointer text-sm font-semibold text-slate-900">All Apollo sequences ({sequences.length})</summary>
+        <p className="mb-3 text-sm text-slate-600">Includes sequences outside the four lead types above. Active means Apollo permits activity; it does not prove emails were sent.</p>
+        {!sequences.length && <p className="text-sm text-slate-600">No verified sequence records are available.</p>}
+        {allSequencesOpen && sequences.map(seq => <SequenceCatalogPreview key={seq.id} sequence={seq} />)}
+      </details>}
+
     </div>
   );
+}
+
+function SequenceCatalogPreview({sequence:seq}:{sequence:SdrSequence}) {
+  const [open,setOpen]=useState(false);
+  return <details onToggle={event=>setOpen(event.currentTarget.open)} className="border-t border-slate-100 py-3">
+    <summary className="min-h-11 cursor-pointer text-sm font-medium text-slate-900">{seq.name.replaceAll("\u2014", ":")} · {seq.active===null ? "Unverified" : seq.active ? "Active" : "Paused"} · {seq.num_steps ?? "Unknown"} configured {seq.num_steps===1?"step":"steps"}</summary>
+    {open && <>
+      {seq.active && /test|do not activate/i.test(seq.name) && <p className="my-2 text-sm text-amber-800">This test sequence is active. Review its intended recipients and sending settings in Apollo.</p>}
+      {seq.coverage === "partial" && <p className="my-2 text-sm text-amber-800">Some sequence details are unavailable.</p>}
+      {seq.steps.map((step,index) => <div key={`${step.template_id}-${index}`} className="my-3 rounded-xl border border-slate-100 p-3">
+        <p className="mb-2 text-sm font-medium">Step {step.position ?? index+1} · {step.subject || "Same conversation subject"}</p>
+        <MessageBody html={step.body_html} title={`${seq.name}: step ${step.position ?? index+1}`} />
+      </div>)}
+      {!!seq.omitted_steps?.length && <p className="text-sm text-slate-600">{seq.omitted_steps.length} additional configured step(s) have no email preview.</p>}
+    </>}
+  </details>;
 }
 
 
@@ -4462,24 +4289,6 @@ function preservePixel(originalHtml: string, editedHtml: string): string {
   // Re-append the original pixel (and the styled marker comment if it was present).
   const marker = /<!--\s*swppp-styled\s*-->/i.test(originalHtml) ? "<!--swppp-styled-->" : "";
   return editedHtml + marker + origMatch[0];
-}
-
-// First-touch bodies are plain text + merge fields; on send they get the brand wrapper
-// (Georgia, blue). Render that look as a preview so step 1 reads like steps 2+.
-// Render a realistic email sample: merge fields replaced with sample values, the
-// body HTML-escaped (it sends as plain text wrapped in the brand style), and the
-// sender's Apollo signature appended raw at the end. {Sig} is dropped — Apollo
-// appends the real signature per sender, so it only shows in this preview.
-function firstTouchPreview(body: string, signatureHtml?: string): string {
-  const filled = (body || "")
-    .replace(/\{First\}/g, "Matt")
-    .replace(/\{ENV\}/g, "EPA")
-    .replace(/\{SWPPP\}/g, "SWPPP")
-    .replace(/\s*\{Sig\}/g, "");
-  const esc = filled.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const bodyHtml = esc.replace(/\n/g, "<br>");
-  const sig = (signatureHtml || "").trim();
-  return sig ? `${bodyHtml}<br><br>${sig}` : bodyHtml;
 }
 
 const RTE_COLORS: { label: string; value: string }[] = [
@@ -4532,6 +4341,9 @@ function RichTextEditor({
   const btn =
     "px-2 py-1 rounded text-xs font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed";
 
+  if (document.documentElement.dataset.sdrPreview === "read-only") {
+    return <div className="mt-1 rounded-lg border border-slate-200 bg-white p-3"><MessageBody html={value} title="Sequence email preview" /></div>;
+  }
   return (
     <div className="mt-1">
       {!disabled && !showSource && (
@@ -4717,7 +4529,7 @@ function SequenceStepEditor({
           Step {stepNumber}
         </span>
         {step.step_type && (
-          <span className="text-[10px] text-slate-400 font-mono">{step.step_type}</span>
+          <span className="text-[10px] text-slate-400 font-mono">{step.step_type === "auto_email" ? "Automatic email" : step.step_type.replaceAll("_", " ")}</span>
         )}
         {dirty && !readOnly && (
           <span className="text-[10px] font-semibold text-amber-600">unsaved changes</span>
@@ -4744,12 +4556,8 @@ function SequenceStepEditor({
         <RichTextEditor value={bodyHtml} onChange={setBodyHtml} disabled={!isAdmin || saving} />
       </label>
 
-      <p className="text-[11px] text-slate-400">
-        Keep the{" "}
-        <span className="font-mono text-slate-500">{"{{...}}"}</span> merge fields and the tracking pixel — they
-        power personalization &amp; open tracking. Merge fields:{" "}
-        <span className="font-mono text-slate-500">{"{{contact.swppp_draft_body}}"}</span> and{" "}
-        <span className="font-mono text-slate-500">{"{{contact.swppp_track}}"}</span>.
+      <p className="text-xs text-slate-500">
+        Keep the personalization placeholders. They are filled for each lead; the assigned sender's signature is added when sending.
       </p>
 
       {!readOnly && (

@@ -1,0 +1,160 @@
+{
+  "protectedAppFiles": [
+    {
+      "path": "src/App.tsx",
+      "sha256": "10c43b71dfbce6320310e23cfe3102eb168905d1a6688e1769d42f631fa9d583"
+    },
+    {
+      "path": "src/data.ts",
+      "sha256": "eceb6cbe48b6e3a5008afa90bb29c9f46698306c19201ed5d63092740af5994d"
+    },
+    {
+      "path": "src/index.css",
+      "sha256": "e0cd3e7c7566215cfc468ae15a2b7395d7103a834666b1fe670ba98308b9e009"
+    },
+    {
+      "path": "src/components/Dashboard.tsx",
+      "sha256": "687e00318653d5482e3caa6489334839ec2b3049926661fc7fc6a23d6bd3e892"
+    },
+    {
+      "path": "src/components/ProjectList.tsx",
+      "sha256": "074b48156999d41f119da457779fd82d1fb7aac69ea5dfa203aaef8a9c64d7e9"
+    },
+    {
+      "path": "src/components/ProjectDetail.tsx",
+      "sha256": "05880804e8439334fb152c0081565b6b2365fd5652ed2a1b6244454afebaf492"
+    },
+    {
+      "path": "src/components/ArchiveList.tsx",
+      "sha256": "4133306292ada1783516bcc61cc9dbb8f9858e83a04c7c1ef8a7b879a453f932"
+    },
+    {
+      "path": "src/components/Settings.tsx",
+      "sha256": "06b77e6e73eb7803dcf1a0ba009fc5380917a09e4a841bbb500dc85becb88eeb"
+    },
+    {
+      "path": "src/components/AIContent.tsx",
+      "sha256": "1bb27d055a5bd83d2b73db8b8eba1b05fe4521c59c897a17ab49eb7a0a3a8a9d"
+    },
+    {
+      "path": "src/components/AIContentDetail.tsx",
+      "sha256": "5b704aeae8c91639b0cd6124fe821a027bdb3ed26d0e065322be6590e325879b"
+    },
+    {
+      "path": "src/components/LeadUpload.tsx",
+      "sha256": "47b4ff5b4007d2ecef21c6da27a6627f4b20b43ec0d50f98c8142f246ece387a"
+    },
+    {
+      "path": "src/components/LeadImportPreview.tsx",
+      "sha256": "04ba346afd7ab3a425f29306303879b910ce694d67b115877b047419978fa645"
+    },
+    {
+      "path": "src/components/SystemDocs.tsx",
+      "sha256": "eac7014765404ae22dda7dcf5724917e87bc39599108d204ae0c3f84b6a32e70"
+    },
+    {
+      "path": "src/components/Methodology.tsx",
+      "sha256": "c033f09483075c0882fce88158874261b044b6dc662027712f8b90245ff4053f"
+    },
+    {
+      "path": "src/components/AutomationRoadmap.tsx",
+      "sha256": "6cae5ad6d57658a6eb0c49bc4f70df5cff05663ce7f3b5ad163a235cf57d2ae2"
+    },
+    {
+      "path": "src/templates.ts",
+      "sha256": "6ad2f7dc4ad1a9afa77100a515cd18f14a7bb519083c3902098bf5f14ee8a396"
+    },
+    {
+      "path": "src/utils.ts",
+      "sha256": "1c62f0e642a689c8901216fda36cd6bb87699dccbd9482cd292f0ad2a48a4be8"
+    },
+    {
+      "path": "src/components/Toast.tsx",
+      "sha256": "a4108dbf2d5c396609c8d394f9b7f2194ea1d92c427dc98a9d77aea36cef28d7"
+    },
+    {
+      "path": "src/components/Skeleton.tsx",
+      "sha256": "b9d043d63cdc80623ed668d68ec2255678ffb9bb3096511137bd6087534a4241"
+    },
+    {
+      "path": "src/components/AIContentList.tsx",
+      "sha256": "0b359438822d03e48d6d36f71d3ff9f84b4635b6eb59d85dd426f63738aa855a"
+    },
+    {
+      "path": "src/components/SeoIdeas.tsx",
+      "sha256": "403a7d7e40d4cc9e3fa0f82846e86437999874a16eadc3ddeb6ffcb07329477c"
+    }
+  ],
+  "protectedServerRoutes": [
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "sha256": "b0d9a18a73b430f14ba8650df1db4c1bb5d1fbd379618f2d63a55ff9cf6e8b23"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects",
+      "sha256": "f48c1ffa5df4c2036d4a0d96772a62e12134af180f630196ea58948973fc1789"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/:id",
+      "sha256": "458323ff19647bb016feb8bb2298f0e6990c1edbfd0ff6cd0435921eefa575f6"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/:id",
+      "sha256": "b5805360f1b8a1d1bb012a8af3c9013c0d5ca890e990d7e7ca8d129aedf58bfa"
+    },
+    {
+      "method": "GET",
+      "path": "/api/archive",
+      "sha256": "04ed259a7bbad0f3e7e0c4f0a66cd4805ba530f182183efd7094fc5815fa21e5"
+    },
+    {
+      "method": "POST",
+      "path": "/api/archive/:id/restore",
+      "sha256": "75f16ca26e36b9549b30e3b3e403b4d7467efdc8b7fe3b4d6be4d50d1884a6a1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/delete",
+      "sha256": "2fa5df85302f940eddd1acb7a93e19080d18f828e4a72712257ab1bce2a7cc77"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:id/analyze-plans",
+      "sha256": "3d4a67e29e5f5407fab4ace09e76a2b601ca64931213928d8483c1d6802282dd"
+    }
+  ],
+  "protectedServerDeclarations": [
+    {
+      "name": "upload",
+      "sha256": "32453382aa99fa709c2b8569786e10da3b7db9c159da53681f360d96709360ee"
+    },
+    {
+      "name": "N8N_WEBHOOK_URL",
+      "sha256": "f1ac6344ce4ecff92386e28cda70523a118c99f0a4a5cf24af597ba9d1574c50"
+    },
+    {
+      "name": "GEMINI_PROMPT",
+      "sha256": "6c6c692340cc6d6c100752b50cd107661675fc96abcaf09a3b0e0b794e0ba0a2"
+    },
+    {
+      "name": "callGemini",
+      "sha256": "dba7e4dba0d2bf774841c7d097459d6d739d3de106d376a8c60148531ee7ddf3"
+    },
+    {
+      "name": "callGeminiWithFile",
+      "sha256": "f9e88c1817dd1dd3f5f94b64aba28c556f51a128ac77223f11c866af6491a3a5"
+    },
+    {
+      "name": "memoryProjects",
+      "sha256": "ac08899108edb6de16c773a4491a82a9e8592a43c2ea1ae4c66f3b48246e9c1b"
+    },
+    {
+      "name": "memoryArchive",
+      "sha256": "498b99506ba45a6b008fe8c57f774777903ffc4a514aa0a1f6857af033ca3b92"
+    }
+  ]
+}

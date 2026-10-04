@@ -497,7 +497,7 @@ Pipedrive's native `Value` (`deal_value`) already holds Pro SWPPP quote amounts 
 // Putting a $464M construction budget in the same column would make revenue unreadable.
 //
 // Idempotent: if a field with this name already exists it prints the existing key.
-const TOKEN = process.env.PIPEDRIVE_API_TOKEN || "3089d0ffb03a7f996c5f10156fd4ebfaad9fca28";
+const TOKEN = process.env.PIPEDRIVE_API_TOKEN;
 const NAME = "Project Value";
 
 const list = await (await fetch(`https://api.pipedrive.com/v1/leadFields?api_token=${TOKEN}`)).json();
@@ -534,10 +534,10 @@ Expected: `CREATED  key=<40 hex chars>  type=double` then `deal_value still pres
 
 ```bash
 cd swppp-system && node -e '
-const T="3089d0ffb03a7f996c5f10156fd4ebfaad9fca28";
+const T=process.env.PIPEDRIVE_API_TOKEN;
 const r=await (await fetch(`https://api.pipedrive.com/v1/leads?api_token=${T}&limit=500`)).json();
 ' 2>/dev/null; node --input-type=module -e '
-const T="3089d0ffb03a7f996c5f10156fd4ebfaad9fca28";
+const T=process.env.PIPEDRIVE_API_TOKEN;
 let s=0,all=[],p=0;
 while(p<25){const j=await (await fetch(`https://api.pipedrive.com/v1/leads?api_token=${T}&start=${s}&limit=500`)).json();
  if(!j.data?.length)break; all.push(...j.data); if(!j.additional_data?.pagination?.more_items_in_collection)break;
@@ -634,7 +634,7 @@ Take the first 10 data rows of `MBT JUL 2026.xlsx` including one row whose colum
 
 ```bash
 cd swppp-system && node --input-type=module -e '
-const T="3089d0ffb03a7f996c5f10156fd4ebfaad9fca28", K="PROJECT_VALUE_KEY";
+const T=process.env.PIPEDRIVE_API_TOKEN, K="PROJECT_VALUE_KEY";
 const j=await (await fetch(`https://api.pipedrive.com/v1/leads?api_token=${T}&limit=100&sort=add_time%20DESC`)).json();
 for (const l of j.data.slice(0,10)) console.log(String(l[K]).padStart(12), "|", String(l.title).slice(0,44));'
 ```
@@ -774,7 +774,7 @@ Rescoring reorders the live send queue. Pipedrive keeps no history on the score 
 // Snapshot every lead's current score before the scoring rebalance.
 // Pipedrive keeps no field history, so without this a bad rebalance cannot be undone.
 import fs from "fs";
-const T = process.env.PIPEDRIVE_API_TOKEN || "3089d0ffb03a7f996c5f10156fd4ebfaad9fca28";
+const T = process.env.PIPEDRIVE_API_TOKEN;
 const SCORE = "e2b854536230112bff77d6b0ce33bdb49f2916eb";
 const STAGE = "7c1852c27664d1118f75660223a6af9e99d10f2c";
 
@@ -891,7 +891,7 @@ Expected: push succeeds.
 ```bash
 cd "/Users/ivanmanfredi/Desktop/SWPPP Doc System" && node --input-type=module -e '
 import fs from "fs";
-const T="3089d0ffb03a7f996c5f10156fd4ebfaad9fca28";
+const T=process.env.PIPEDRIVE_API_TOKEN;
 const SCORE="e2b854536230112bff77d6b0ce33bdb49f2916eb", STAGE="7c1852c27664d1118f75660223a6af9e99d10f2c";
 const base=new Map(JSON.parse(fs.readFileSync("goal-runs/2026-08-03-lead-value-scoring/baseline-scores.json")).map(r=>[r.id,r]));
 let s=0,all=[],p=0;
