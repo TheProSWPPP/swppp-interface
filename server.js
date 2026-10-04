@@ -19,7 +19,7 @@ import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
 import { sdrDraftVerifyEnabled, checkDraftEmail } from "./lib/sdrDraftVerify.js";
 import { runAutoSwitch, autoSwitchEnabled } from "./lib/sdrAutoSwitch.js";
-import { isCampaignCollision, campaignsToRelease, lastSendDaysAgo } from "./lib/apolloCollision.js";
+import { isCampaignCollision, campaignsToRelease, readContactSendDaysAgo } from "./lib/apolloCollision.js";
 import { ownerScope, withLeadLock, leadVisibilityScope, leadVisibleTo } from "./lib/sdrAccess.js";
 import { staleDraftBlock } from "./lib/draftFreshness.js";
 import { normalizeLeadCsv } from "./lib/leadCsvNormalize.js";
@@ -4926,12 +4926,10 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           const { release, blockedBy } = campaignsToRelease(match?.contact);
           // Space the second pitch. The cooldown gate earlier in this handler cannot see a
           // cross-project send — it reads the Pipedrive person field, which our .co sends
-          // mostly never stamp — so enforce Derek's own cooldown here against our send ledger.
-          const { rows: priorSends } = await client.query(
-            `SELECT sent_at FROM sdr_sends WHERE apollo_contact_id = $1`,
-            [String(apolloContactId)],
-          );
-          const daysAgo = lastSendDaysAgo(priorSends);
+          // mostly never stamp. Include completed follow-ups, not just the enrollment date.
+          const daysAgo = await readContactSendDaysAgo(client, {
+            apolloContactId: String(apolloContactId), recipientEmail: draft.contact_email_snapshot,
+          });
           const cooldown = await contactCooldownDays();
           const tooRecent = daysAgo !== null && daysAgo <= cooldown;
 
