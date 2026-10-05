@@ -526,7 +526,7 @@
   .sdr-health-column { display: flex; gap: 18px; }
   .sdr-sales-link { align-items: flex-start; flex-direction: column; gap: 12px; }
   .sdr-results-heading { padding: 17px; gap: 15px; }
-  .sdr-mode { width: 100%; }
+  .sdr-mode { width: 100%; flex-wrap: wrap; }
   .sdr-mode-button { flex: 1; }
   .sdr-detail-metrics { padding: 16px; row-gap: 22px; }
   .sdr-detail-metrics .sdr-metric { padding: 0 10px; }
@@ -621,3 +621,22 @@
   .sdr-dashboard .sdr-timeline-day .sdr-enrollment-tooltip,
   .sdr-dashboard .sdr-enrollment-day .sdr-enrollment-tooltip { position: fixed; top: auto; bottom: 24px; left: 24px; right: 24px; width: auto; max-width: none; transform: none; z-index: 80; white-space: normal; }
 }
+
+.sdr-monthly-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.sdr-monthly-controls .sdr-mode-button[aria-pressed="true"] { background: var(--sdr-blue); color: white; }
+.sdr-monthly-bars { display: flex; gap: 16px; overflow-x: auto; padding: 12px 20px 18px; }
+.sdr-monthly-column { min-width: 76px; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 13px; color: var(--sdr-muted); }
+.sdr-monthly-value { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--sdr-ink); }
+.sdr-monthly-track { height: 130px; width: 44px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--sdr-border); }
+.sdr-monthly-bar { width: 100%; background: var(--sdr-blue); border-radius: 3px 3px 0 0; }
+.sdr-monthly-bar.is-unavailable { background: repeating-linear-gradient(135deg,var(--sdr-border),var(--sdr-border) 4px,transparent 4px,transparent 8px); }
+.sdr-monthly-line { padding: 0 20px 20px; overflow-x: auto; }
+.sdr-monthly-line svg { display: block; width: 100%; height: auto; }
+.sdr-monthly-baseline { stroke: var(--sdr-border); }
+.sdr-monthly-path { stroke: var(--sdr-blue); stroke-width: 3; fill: none; }
+.sdr-monthly-dot { fill: var(--sdr-blue); }
+.sdr-monthly-axis-label { font-size: 12px; fill: var(--sdr-muted); }
+.sdr-month-link { min-height: 44px; min-width: 76px; padding: 8px 0; color: var(--sdr-blue); font-weight: 600; cursor: pointer; }
+.sdr-month-link:focus-visible { outline: 2px solid var(--sdr-sky); outline-offset: 2px; }
+.sdr-test-data-note { padding: 12px 20px; font-size: 13px; color: var(--sdr-muted); border: 1px solid var(--sdr-border); border-radius: 8px; }
+@media (max-width: 700px) { .sdr-monthly-sales .sdr-results-heading { flex-wrap: wrap; gap: 12px; } }

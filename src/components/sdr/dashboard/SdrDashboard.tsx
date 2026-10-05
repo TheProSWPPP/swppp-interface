@@ -8,6 +8,8 @@ import MetricCard from './MetricCard';
 import SenderTable from './SenderTable';
 import SequenceTable from './SequenceTable';
 import ActivityTimeline from './ActivityTimeline';
+import MonthlySales from './MonthlySales';
+import {monthWindow} from './salesMonths';
 import AttentionList from './AttentionList';
 import OutreachActivity from './OutreachActivity';
 import OutreachHealth from './OutreachHealth';
@@ -65,8 +67,8 @@ function Section({title,children,detailRef}:{title:string;children:ReactNode;det
 export default function SdrDashboard({user,onNavigate,onOpenReplies,mailboxes=[]}:{user:SdrUser;onNavigate:(target:string)=>void;onOpenReplies?:(context:ReplyContext)=>void;mailboxes?:Array<{email:string;display_name:string|null}>}) {
   const reduced=useReducedMotion();
   const tabsId=useId();
-  const [query,setQuery]=useState<MetricsQuery>(()=>defaultWindow());
-  const [period,setPeriod]=useState('30');
+  const [query,setQuery]=useState<MetricsQuery>(()=>monthWindow(defaultWindow().to,3));
+  const [period,setPeriod]=useState('3months');
   const [custom,setCustom]=useState(()=>({from:query.from,through:shiftDate(query.to,-1)}));
   const [compare,setCompare]=useState(false);
   const monthUnavailable=defaultWindow().to.endsWith('-01');
@@ -120,13 +122,14 @@ export default function SdrDashboard({user,onNavigate,onOpenReplies,mailboxes=[]
     </header>
     <div ref={filtersRef} className="sdr-filters">
       <div className="sdr-filter-fields">
-        <label className="text-xs font-medium text-slate-600">Period<select className={field} value={period} onChange={event=>{
+        <label className="text-xs font-medium text-slate-600">Period<select aria-label="Period" className={field} value={period} onChange={event=>{
           const value=event.target.value;setPeriod(value);
           if(value==='custom') return;
           const current=defaultWindow();
+          if(value.endsWith('months')){update({...query,...monthWindow(current.to,Number(value.replace('months','')))});return;}
           if(value==='lastmonth'){const to=current.to.slice(0,8)+'01';const from=shiftDate(to,-1).slice(0,8)+'01';update({...query,from,to});return;}
           update({...query,from:value==='month'?current.to.slice(0,8)+'01':shiftDate(current.to,-Number(value)),to:current.to});
-        }}><option value="30">Last 30 complete days</option><option value="7">Last 7 complete days</option><option value="month" disabled={monthUnavailable}>{monthUnavailable?'This month: no complete days yet':'This month, complete days'}</option><option value="lastmonth">Last month</option><option value="custom">Custom dates</option></select></label>
+        }}><option value="30">Last 30 complete days</option><option value="7">Last 7 complete days</option><option value="month" disabled={monthUnavailable}>{monthUnavailable?'This month: no complete days yet':'This month, complete days'}</option><option value="lastmonth">Last month</option><option value="3months">Last 3 complete months</option><option value="6months">Last 6 complete months</option><option value="12months">Last 12 complete months</option><option value="custom">Custom dates</option></select></label>
         <label className="text-xs font-medium text-slate-600">Sender<select className={field} value={query.mailbox||''} onChange={event=>update({...query,mailbox:event.target.value||undefined})}>
           <option value="">{user.role==='admin'?'All senders':'My senders'}</option>{senderOptions.map(mailbox=><option key={mailbox} value={mailbox}>{names[mailbox]||mailbox} ({mailbox})</option>)}
         </select></label>
@@ -158,6 +161,8 @@ export default function SdrDashboard({user,onNavigate,onOpenReplies,mailboxes=[]
       <div className="sdr-company-metrics">{tiles(company)}</div>
       <div className="sdr-group-subheading"><h3>Linked to outreach</h3><span>Verified email-to-sale links are required.</span></div><div className="sdr-linked-metrics">{tiles(pipeline)}</div>
     </section>
+    {user.role==='admin' && data && <MonthlySales data={data} stale={hasStaleValues} onSelectMonth={(from,to)=>{setPeriod('custom');setCustom({from,through:shiftDate(to,-1)});update({...query,from,to});filtersRef.current?.scrollIntoView({block:'start',behavior:'auto'});}}/>}
+    {data?.test_data && <p className="sdr-test-data-note">Excluded marked tests: {data.test_data.excluded_messages.toLocaleString('en-US')} email records{data.test_data.excluded_deals===null?'':`, ${data.test_data.excluded_deals.toLocaleString('en-US')} sales`}.{data.test_data.unreviewed_messages+(data.test_data.unreviewed_deals||0)>0?` Test audit incomplete: ${(data.test_data.unreviewed_messages+(data.test_data.unreviewed_deals||0)).toLocaleString('en-US')} records still need source review.`:' Source metadata has been reviewed for this period; unmarked test records may still require a manual correction.'}</p>}
     <section className="sdr-kpi-group" aria-labelledby="sdr-email-title"><div className="sdr-group-heading"><div><h2 id="sdr-email-title">Email performance</h2><p>Recorded sends and human replies across selected Apollo sequences, including construction and permits. Partial history can undercount activity.</p></div></div><div className="sdr-kpi-strip">{tiles(primary)}</div>
       {data?.metrics.messages_completed.state==='available' && data.metrics.messages_completed.value===0 && <p className="sdr-timeline-note">No emails were sent in this period. Email history for this view is complete.</p>}
       <div className="sdr-email-detail-heading"><LayoutGroup id={tabsId}><div className="sdr-mode" role="tablist" aria-label="Email performance details">

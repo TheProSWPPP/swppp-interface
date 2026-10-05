@@ -44,6 +44,7 @@ export function previousWindow(query:{from:string;to:string}):{from:string;to:st
   return {from:shiftDate(query.from,-days),to:query.from};
 }
 export function comparisonWindow(query:{from:string;to:string},period:string):{from:string;to:string} {
+  if(period.endsWith('months')) {const months=Number(period.replace('months',''));const date=new Date(`${query.from}T12:00:00Z`);date.setUTCMonth(date.getUTCMonth()-months);return {from:date.toISOString().slice(0,10),to:query.from};}
   if(period==='lastmonth') return {from:shiftDate(query.from,-1).slice(0,8)+'01',to:query.from};
   if(period==='month') {
     const from=shiftDate(query.from,-1).slice(0,8)+'01';
