@@ -150,3 +150,16 @@
  .sales-quality-note a{min-height:24px}
  .sales-custom-dates label{width:100%}
 }
+
+.sales-date-range{padding:0 0 20px;max-width:760px}
+.sales-date-fields{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+.sales-date-fields label{display:grid;gap:5px;font-size:12px;color:var(--workspace-muted,#526473)}
+.sales-date-fields input{min-height:44px;border:1px solid #cbd5df;border-radius:6px;background:white;padding:8px 12px;color:#143549;font:inherit;font-size:14px}
+.sales-range-track{position:relative;height:44px;margin:8px 12px 0;background:linear-gradient(#dbe4eb,#dbe4eb) center/100% 4px no-repeat}
+.sales-range-selection{position:absolute;top:20px;height:4px;background:#2873a5}
+.sales-range-track input{position:absolute;inset:0;width:100%;height:44px;margin:0;appearance:none;background:transparent;pointer-events:none}
+.sales-range-track input::-webkit-slider-thumb{appearance:none;width:22px;height:22px;border:3px solid white;border-radius:50%;background:#2873a5;box-shadow:0 0 0 1px #2873a5;pointer-events:auto;cursor:ew-resize}
+.sales-range-track input::-moz-range-thumb{width:18px;height:18px;border:3px solid white;border-radius:50%;background:#2873a5;box-shadow:0 0 0 1px #2873a5;pointer-events:auto;cursor:ew-resize}
+.sales-range-track input:focus-visible{outline:2px solid #143549;outline-offset:3px}
+.sales-range-labels{display:flex;justify-content:space-between;font-size:12px;color:#526473}
+@media(max-width:480px){.sales-date-fields{gap:8px}.sales-date-fields label{flex:1;min-width:0}.sales-date-fields input{width:100%;min-width:0}.sales-date-fields button{flex-basis:100%}}

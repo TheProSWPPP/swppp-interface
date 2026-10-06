@@ -640,3 +640,5 @@
 .sdr-month-link:focus-visible { outline: 2px solid var(--sdr-sky); outline-offset: 2px; }
 .sdr-test-data-note { padding: 12px 20px; font-size: 13px; color: var(--sdr-muted); border: 1px solid var(--sdr-border); border-radius: 8px; }
 @media (max-width: 700px) { .sdr-monthly-sales .sdr-results-heading { flex-wrap: wrap; gap: 12px; } }
+
+.sdr-reporting-caption{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:12px;color:#526473;margin-top:14px}.sdr-reporting-coverage{display:flex;justify-content:space-between;align-items:center;gap:16px;border-left:3px solid #a66316;padding:8px 16px;font-size:13px;background:#fff9ef}.sdr-reporting-coverage button{flex-shrink:0}@media(max-width:500px){.sdr-reporting-coverage{align-items:start;flex-direction:column;gap:8px}}

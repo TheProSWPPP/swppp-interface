@@ -2,7 +2,7 @@ import { useEffect,useId,useState } from 'react';
 import { Info,type LucideIcon } from 'lucide-react';
 import type { Metric } from '../../../lib/sdrMetricsApi';
 import { metricText,metricExplanation,type MetricFormat } from './metricDisplay';
-export default function MetricCard({label,metric,format='count',detail,previous,icon:Icon,maturity,compact=false}:{label:string;metric:Metric;format?:MetricFormat;detail:string;previous?:Metric;icon?:LucideIcon;maturity?:string;compact?:boolean}) {
+export default function MetricCard({label,metric,format='count',detail,previous,icon:Icon,maturity,compact=false,showStatus=true}:{label:string;metric:Metric;format?:MetricFormat;detail:string;previous?:Metric;icon?:LucideIcon;maturity?:string;compact?:boolean;showStatus?:boolean}) {
   const explanation=format==='rate'&&metric.reason==='incomplete_coverage'?`${metricExplanation({...metric,reason:undefined})}Complete history is needed to calculate this rate.`:metricExplanation(metric);
   const helpId=useId();
   const [showHelp,setShowHelp]=useState(false);
@@ -24,7 +24,7 @@ export default function MetricCard({label,metric,format='count',detail,previous,
     {maturity&&metric.state!=='unavailable'&&<p className="sdr-cohort-maturity">{maturity}</p>}
     {!compact&&<p className="sdr-metric-description">{detail}</p>}
     <div className="sdr-metric-footnote">
-      {metric.state!=='available' && !(compact&&metric.state==='unavailable') && <span className={`sdr-state sdr-state-${metric.state}`}>{metric.state==='partial'?'Partial data':'Not available yet'}</span>}
+      {showStatus && metric.state!=='available' && !(compact&&metric.state==='unavailable') && <span className={`sdr-state sdr-state-${metric.state}`}>{metric.state==='partial'?'Partial data':'Not available yet'}</span>}
       {explanation && (!compact || metric.state==='unavailable') && <p>{explanation}</p>}
     </div>
     {previous && <p className="sdr-previous">Previous period: {metricText(previous,format)}{previous.state==='partial'?' (partial data)':''}</p>}
