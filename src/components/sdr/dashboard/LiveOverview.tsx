@@ -4,6 +4,7 @@ import { getLiveOverview, type LiveOverviewAction, type SdrLiveOverview } from '
 import { runLatestRead } from '../../../lib/sdrReadRequest';
 import type { MetricsQuery, MetricsResponse } from '../../../lib/sdrMetricsApi';
 import LivePerformance from './LivePerformance';
+import ActivityFeed from './ActivityFeed';
 
 const number = (value: number) => value.toLocaleString('en-US');
 const needsAttention = (action: LiveOverviewAction) => ['warning', 'urgent', 'error', 'critical'].includes(action.severity);
@@ -41,6 +42,7 @@ export default function LiveOverview({ refreshKey, onRefresh, onNavigate, metric
         <button type="button" className="sdr-live-refresh" onClick={onRefresh} disabled={loading} aria-label="Refresh workspace"><RefreshCw size={18} aria-hidden="true" className={loading ? 'sdr-refreshing' : undefined} /><span>Refresh</span></button>
       </div>
     </header>
+    <ActivityFeed refreshKey={refreshKey}/>
     {error && <div role="alert" className="sdr-live-error"><AlertCircle size={18} aria-hidden="true" /><span>{data ? 'The workspace could not refresh. These counts are from the last check.' : 'Current workload could not be loaded.'}</span><button onClick={onRefresh} type="button">Try again</button></div>}
     {!data ? <>
       <div className="sdr-live-work sdr-live-pending" aria-busy={loading}>
