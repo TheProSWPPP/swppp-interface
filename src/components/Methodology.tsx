@@ -5,11 +5,10 @@ export default function Methodology() {
     <div className="max-w-4xl mx-auto space-y-12 pb-20">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 lg:p-12">
         <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight mb-4">
-          SWPPP Data Collection Methodology
+          Methodology
         </h1>
         <p className="text-slate-500 mb-10 leading-relaxed">
-          The following outlines our automated approach to gathering regulatory
-          and environmental data for Stormwater Pollution Prevention Plans.
+          Data sources and checks used to prepare SWPPP documents.
         </p>
 
         <div className="space-y-12">

@@ -15,7 +15,7 @@ export default function OutreachToday({onOpenReplies}:{onOpenReplies?:(context:R
  useEffect(()=>runLatestRead(signal=>getRecentReplies({limit:3},signal),{success:value=>{setData(value);setError(false);},error:()=>setError(true),settled:()=>setLoading(false)}),[reload]);
  const refresh=()=>{setLoading(true);setReload(value=>value+1);};
  return <section className="sdr-today" aria-labelledby="outreach-today-title">
-  <header className="sdr-today-heading"><div><h2 id="outreach-today-title">Recent buyer work</h2><p>Observed human replies in your visible inboxes</p></div><button className="sdr-reply-button" onClick={refresh} disabled={loading} aria-label="Refresh recent replies"><RefreshCw size={17} aria-hidden="true"/>{loading?'Checking…':'Refresh replies'}</button></header>
+  <header className="sdr-today-heading"><div><h2 id="outreach-today-title">Recent replies</h2></div><button className="sdr-reply-button" onClick={refresh} disabled={loading} aria-label="Refresh recent replies"><RefreshCw size={17} aria-hidden="true"/>{loading?'Checking…':'Refresh replies'}</button></header>
   {error&&<div role="alert" className="sdr-reply-notice">Recent replies could not be refreshed. {data?'The snapshot below is stale. ':''}<button onClick={refresh}>Retry replies</button></div>}
   {!data&&loading&&<p className="sdr-reply-notice" role="status">Loading recent replies…</p>}
   {data&&<div aria-busy={loading}><OutreachTodaySnapshot data={data} onOpenReplies={onOpenReplies}/>{loading&&<p className="sdr-today-updating" role="status">Updating this snapshot…</p>}</div>}

@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import type { AIContentItem, ContentType } from "../data";
 import { CONTENT_SCOPES, NATIONWIDE, defaultPillarKeyword } from "../data";
 import { cn } from "../utils";
+import { displayTitle } from "../lib/displayText";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -262,7 +263,7 @@ export default function AIContentList({
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..."
             className="w-full pl-8 pr-7 py-1.5 rounded-lg border border-slate-200 text-sm" />
-          {search && <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400"><X className="h-3.5 w-3.5" /></button>}
+          {search && <button aria-label="Clear article search" onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400"><X className="h-3.5 w-3.5" /></button>}
         </div>
         <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white">
           <option value="">All Types</option>
@@ -294,7 +295,7 @@ export default function AIContentList({
           <thead>
             <tr className="border-b border-slate-100">
               <th className="w-10 p-3">
-                <input type="checkbox" checked={allFilteredSelected && filtered.length > 0} onChange={toggleAll}
+                <input type="checkbox" aria-label="Select all articles" checked={allFilteredSelected && filtered.length > 0} onChange={toggleAll}
                   className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600" />
               </th>
               <th className="text-left p-3"><SortHeader label="Title / Keyword" field="keyword" /></th>
@@ -322,11 +323,11 @@ export default function AIContentList({
                   )}
                 >
                   <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleSelect(item.id)}
+                    <input type="checkbox" aria-label={`Select ${displayTitle(item.title || item.keyword)}`} checked={selectedIds.includes(item.id)} onChange={() => toggleSelect(item.id)}
                       className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600" />
                   </td>
                   <td className="p-3">
-                    <p className="font-medium text-slate-900 truncate max-w-md">{item.title || item.keyword}</p>
+                    <p className="font-medium text-slate-900 truncate max-w-md">{displayTitle(item.title || item.keyword)}</p>
                     {item.title && <p className="text-xs text-slate-400 truncate max-w-md">{item.keyword}</p>}
                   </td>
                   <td className="p-3">

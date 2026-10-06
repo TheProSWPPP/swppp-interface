@@ -99,8 +99,7 @@ export default function Dashboard({
           Couldn't load projects
         </h3>
         <p className="mt-1 max-w-sm text-sm text-slate-500">
-          The project queue didn't come back from the server. This is a
-          connection issue, not lost data — your projects are safe.
+          The project queue could not be loaded. Retry to check the connection.
         </p>
         {onRetry && (
           <button
@@ -118,7 +117,7 @@ export default function Dashboard({
   return (
     <div className="space-y-8">
       {!selectedProject && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="workspace-status-strip grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="bg-white overflow-hidden rounded-xl border border-gray-200 shadow-sm p-5 flex items-center gap-4">
             <div className="h-12 w-12 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
               <Inbox className="h-6 w-6" />

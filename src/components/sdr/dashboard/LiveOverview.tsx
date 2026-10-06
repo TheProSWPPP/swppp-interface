@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
 import { AlertCircle, ArrowRight, CheckCircle2, Inbox, ListChecks, RefreshCw, Target, Users } from 'lucide-react';
 import { getLiveOverview, type LiveOverviewAction, type SdrLiveOverview } from '../../../lib/sdrLiveOverviewApi';
 import { runLatestRead } from '../../../lib/sdrReadRequest';
@@ -11,15 +10,14 @@ const needsAttention = (action: LiveOverviewAction) => ['warning', 'urgent', 'er
 const time = (value: string) => new Date(value).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' }) + ' CT';
 
 function ActionRow({ action, onNavigate }: { action: LiveOverviewAction; onNavigate: (target: string) => void }) {
-  const reduced = useReducedMotion();
   const Icon = action.target === 'leads' ? Target : action.target === 'mailboxes' ? Users : ListChecks;
   const clearRows = action.id === 'fresh-leads';
-  return <motion.button type="button" className="sdr-live-action" onClick={() => onNavigate(action.target)} whileHover={reduced ? undefined : { x: 3 }} whileTap={reduced ? undefined : { scale: .99 }} transition={{ duration: .15 }}>
+  return <button type="button" className="sdr-live-action" onClick={() => onNavigate(action.target)}>
     <span className="sdr-live-action-icon"><Icon size={19} aria-hidden="true" /></span>
     <span className="sdr-live-action-copy"><strong>{clearRows?'Review clear lead rows':action.title}</strong><span>{clearRows?'CRM status only. Verify each project and contact before outreach.':action.description}</span></span>
     {action.count !== null && <span className="sdr-live-action-count">{number(action.count)}</span>}
     <ArrowRight size={18} className="sdr-live-action-arrow" aria-hidden="true" />
-  </motion.button>;
+  </button>;
 }
 
 export default function LiveOverview({ refreshKey, onRefresh, onNavigate, metrics, metricWindow, metricsStale, metricsError, onViewPerformance, showPerformance = true, onWorkspaceLoaded }: { refreshKey: number; onRefresh: () => void; onNavigate: (target: string) => void; metrics: MetricsResponse | null; metricWindow: MetricsQuery; metricsStale: boolean; metricsError: string | null; onViewPerformance: () => void; showPerformance?: boolean; onWorkspaceLoaded?: (data:SdrLiveOverview)=>void }) {
@@ -37,7 +35,7 @@ export default function LiveOverview({ refreshKey, onRefresh, onNavigate, metric
 
   return <div className="sdr-live-overview">
     <header className="sdr-live-heading">
-      <div><h1>Your outreach workspace</h1><p>A clear view of the work ahead.</p></div>
+      <div><h1>Outreach</h1></div>
       <div className="sdr-live-tools">
         <span className={`sdr-live-freshness ${error ? 'is-stale' : ''}`}><span aria-hidden="true" />{loading ? data ? `Updating · prior check ${time(data.collectedAt)}` : 'Updating…' : error ? `Refresh needed · prior check ${data ? time(data.collectedAt) : 'unknown'}` : data ? `Checked ${time(data.collectedAt)}` : 'Not checked'}</span>
         <button type="button" className="sdr-live-refresh" onClick={onRefresh} disabled={loading} aria-label="Refresh workspace"><RefreshCw size={18} aria-hidden="true" className={loading ? 'sdr-refreshing' : undefined} /><span>Refresh</span></button>

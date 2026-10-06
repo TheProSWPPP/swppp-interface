@@ -226,7 +226,8 @@ export interface SdrLeadDetail {
     sender_signature: string | null;
   }[];
   sends: { id: string; apollo_sequence_id: string | null; status: string; sent_at: string | null }[];
-  events: { event_type: string; occurred_at: string; mailbox_email: string | null }[];
+  events: { event_type: string; occurred_at: string; mailbox_email: string | null; review_reason?: string|null; review_send_id?: string|null }[];
+  contact_review?: {original_person_id:string|null;original_email:string;candidate:{email:string;source:string;personId?:string|null;name?:string|null;title?:string|null};status:string;observed_at:string}|null;
   pd_lead: Record<string, unknown> | null;
   pd_person: Record<string, unknown> | null;
   pd_activities?: SdrPdActivity[];
@@ -359,17 +360,26 @@ export function getToken(): string | null {
 
 export function getUser(): SdrUser | null {
   const raw = localStorage.getItem(USER_KEY);
-  return raw ? (JSON.parse(raw) as SdrUser) : null;
+  if (!raw) return null;
+  try {
+    const user = JSON.parse(raw);
+    if (!user || typeof user !== "object" ||
+      !["id", "username", "email", "display_name"].every(key => typeof user[key] === "string") ||
+      !["admin", "sdr"].includes(user.role)) return null;
+    return user as SdrUser;
+  } catch { return null; }
 }
 
 export function setSession(token: string, user: SdrUser): void {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+  window.dispatchEvent(new Event("sdr-session-changed"));
 }
 
 export function clearSession(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  window.dispatchEvent(new Event("sdr-session-changed"));
 }
 
 export async function sdrFetch<T>(path: string, opts: RequestInit & { auth?: boolean } = {}): Promise<T> {

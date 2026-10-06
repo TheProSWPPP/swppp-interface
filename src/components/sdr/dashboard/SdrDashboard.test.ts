@@ -6,7 +6,7 @@ import MetricCard from './MetricCard';
 it('offers accessible date/sender/source filters and a loading state before data arrives',()=>{
   const html=renderToStaticMarkup(createElement(SdrDashboard,{user:{id:'u',username:'admin',display_name:'Admin User',email:'rep-a@example.test',role:'admin'},onNavigate:()=>{}}));
   expect(html).toContain('Sales and email performance'); expect(html).toContain('Sender'); expect(html).toContain('Lead source'); expect(html).toContain('Loading your outreach numbers');
-  expect(html.indexOf('Recent buyer work')).toBeLessThan(html.indexOf('Sales and email performance'));
+  expect(html.indexOf('Recent replies')).toBeLessThan(html.indexOf('Sales and email performance'));
 });
 it('keeps unknown currency metrics distinct from zero and exposes denominator evidence',()=>{
   const unknown=renderToStaticMarkup(createElement(MetricCard,{label:'Linked won value',metric:{value:null,state:'unavailable',reason:'deal_links_missing'},detail:'Verified project links',format:'currency'}));

@@ -94,9 +94,7 @@ export default function ProjectList({
           <h3 className="text-2xl font-bold text-slate-900 tracking-tight">
             Project Queue
           </h3>
-          <p className="mt-1 text-sm text-slate-500 font-medium">
-            Manage document generation workflows and job orders.
-          </p>
+
         </div>
 
         <AnimatePresence>
@@ -142,6 +140,7 @@ export default function ProjectList({
           />
           {searchQuery && (
             <button
+              aria-label="Clear project search"
               onClick={() => setSearchQuery("")}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
             >

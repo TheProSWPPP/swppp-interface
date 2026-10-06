@@ -23,6 +23,7 @@ const explanations:Record<string,string>={
   company_sales_admin_only:'Company sales are available to administrators.',
   no_valued_wins:'No won deals with a known USD value in this period.',
   deal_sync_missing:'Sales history collection is incomplete.',
+  crm_sales_dates_need_review:'Some deals were marked won in a bulk update. Their original sale dates need review before period comparisons are reliable.',
   inbox_coverage_incomplete:'Received-message history has not been completely collected for this period.',
 };
 export function metricText(metric:Metric,format:MetricFormat):string {

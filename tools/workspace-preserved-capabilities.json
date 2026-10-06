@@ -1,0 +1,18 @@
+{
+  "scope": "Observation-only release October 6: preserve staff document and outbound actions; additions are admin read-only CRM follow-ups/history and presentation changes. No contact recovery, sequence switching or send enforcement changes.",
+  "handlers": {
+    "handleUpdateProject": "a91bb23a386d359b0f4f61bf3133bf9807fd71f83a4c06f474f949e4b645aaab",
+    "handleDeleteProject": "c15e427af3b275459793eb6935e6b8becc4365e02788833cadc1e60f524872cb",
+    "handleBulkDeleteProjects": "00de78db25707ee72fd2be848d6cb02d50dd35c11e51fb13bd5900b7d0c4f817"
+  },
+  "sdrFiles": [
+    {
+      "path": "src/components/SdrInterface.tsx",
+      "sha256": "ff336cb62c605f3a2be7026a42149949fd36144fe7fa874a6d03e3d61419bb5a"
+    },
+    {
+      "path": "src/components/sdr/dashboard/SdrWorkspace.tsx",
+      "sha256": "1bf03fa45fce598dded267d4b96c6d1757086f516fb7d2d94093371c23083992"
+    }
+  ]
+}

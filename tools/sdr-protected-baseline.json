@@ -2,7 +2,7 @@
   "protectedAppFiles": [
     {
       "path": "src/App.tsx",
-      "sha256": "10c43b71dfbce6320310e23cfe3102eb168905d1a6688e1769d42f631fa9d583"
+      "sha256": "833424023b88d64dda856166ec21f318ae88a4d592acaa1c645195b9c8c55e1a"
     },
     {
       "path": "src/data.ts",
@@ -14,11 +14,11 @@
     },
     {
       "path": "src/components/Dashboard.tsx",
-      "sha256": "687e00318653d5482e3caa6489334839ec2b3049926661fc7fc6a23d6bd3e892"
+      "sha256": "fdadc5ed9498544cabe8fd5ad553d439cd311459b974f6d4ec7ae60bfbc9b707"
     },
     {
       "path": "src/components/ProjectList.tsx",
-      "sha256": "074b48156999d41f119da457779fd82d1fb7aac69ea5dfa203aaef8a9c64d7e9"
+      "sha256": "e6ba83cc9bc9d3f2f1d3a39c393b6291cafa8ea1a21534177087a22650b00a00"
     },
     {
       "path": "src/components/ProjectDetail.tsx",
@@ -30,19 +30,19 @@
     },
     {
       "path": "src/components/Settings.tsx",
-      "sha256": "06b77e6e73eb7803dcf1a0ba009fc5380917a09e4a841bbb500dc85becb88eeb"
+      "sha256": "5e272c420d8a595b502600ccadae132ccbaa33a42a820fed82ae80eaa8be7758"
     },
     {
       "path": "src/components/AIContent.tsx",
-      "sha256": "1bb27d055a5bd83d2b73db8b8eba1b05fe4521c59c897a17ab49eb7a0a3a8a9d"
+      "sha256": "9f3d4462c22b9f23586ebc75e35b166387e7bb11425e3ddb15cd05c05f45f1ff"
     },
     {
       "path": "src/components/AIContentDetail.tsx",
-      "sha256": "5b704aeae8c91639b0cd6124fe821a027bdb3ed26d0e065322be6590e325879b"
+      "sha256": "8f3a554bd667aa1ce2fdc8691e784b9a2feac4131d087833ae866b1b041aff79"
     },
     {
       "path": "src/components/LeadUpload.tsx",
-      "sha256": "47b4ff5b4007d2ecef21c6da27a6627f4b20b43ec0d50f98c8142f246ece387a"
+      "sha256": "183a5c305df461027c1bea04f17a24632572d8fc6839ac63e0b655ea468910d7"
     },
     {
       "path": "src/components/LeadImportPreview.tsx",
@@ -50,15 +50,15 @@
     },
     {
       "path": "src/components/SystemDocs.tsx",
-      "sha256": "eac7014765404ae22dda7dcf5724917e87bc39599108d204ae0c3f84b6a32e70"
+      "sha256": "fa6b4efefb6f68a234b6d416d33be372ac9f65bbcae1cceb8586b40deae0dcd1"
     },
     {
       "path": "src/components/Methodology.tsx",
-      "sha256": "c033f09483075c0882fce88158874261b044b6dc662027712f8b90245ff4053f"
+      "sha256": "b42b32cf41bdb48971f4aed895c6ae251b3f9340060dfff45a1f92b7620969ce"
     },
     {
       "path": "src/components/AutomationRoadmap.tsx",
-      "sha256": "6cae5ad6d57658a6eb0c49bc4f70df5cff05663ce7f3b5ad163a235cf57d2ae2"
+      "sha256": "4c0a1e543a1134c526cbd22bf6264c2dddea2f96006edb05bd108fa01b3a7598"
     },
     {
       "path": "src/templates.ts",
@@ -78,7 +78,7 @@
     },
     {
       "path": "src/components/AIContentList.tsx",
-      "sha256": "0b359438822d03e48d6d36f71d3ff9f84b4635b6eb59d85dd426f63738aa855a"
+      "sha256": "e265ed623598a9f7b0916a7c17b0ee3a430b20a0afa394db22fd9ac208efad86"
     },
     {
       "path": "src/components/SeoIdeas.tsx",

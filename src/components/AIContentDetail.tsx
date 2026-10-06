@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import type { AIContentItem, PillarVersion } from "../data";
 import { CONTENT_SCOPES, NATIONWIDE } from "../data";
 import { cn } from "../utils";
+import { displayTitle } from "../lib/displayText";
 import {
   ArrowLeft,
   PlayCircle,
@@ -179,7 +180,7 @@ export default function AIContentDetail({
               </span>
             </div>
 
-            <h2 className="text-lg font-bold text-slate-900">{item.title || item.keyword}</h2>
+            <h2 className="text-lg font-bold text-slate-900">{displayTitle(item.title || item.keyword)}</h2>
             {item.title && <p className="text-sm text-slate-500">{item.keyword}</p>}
 
             {/* Editable fields */}
@@ -420,4 +421,3 @@ export default function AIContentDetail({
     </div>
   );
 }
-

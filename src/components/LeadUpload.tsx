@@ -208,7 +208,7 @@ export default function LeadUpload() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Lead Import</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Drop a CSV here. AI cleans the project names, then leads land in Pipedrive automatically.
+          Upload a CSV to prepare construction leads for Pipedrive.
         </p>
       </div>
 
@@ -234,9 +234,7 @@ export default function LeadUpload() {
         <div className="text-base font-medium text-slate-700">
           {isUploading ? "Uploading..." : "Drop CSV here or click to browse"}
         </div>
-        <div className="text-sm text-slate-500 mt-1">
-          Replaces the Dropbox folder rotation flow
-        </div>
+
       </div>
 
       {error && (
