@@ -177,7 +177,7 @@ export interface OutreachControl {
 export interface OutreachControlsResponse {
   controls:OutreachControl[];applicationActionsBlocked:boolean;providerStopStatus:string;
   context:{contextHash:string;complete:boolean;personId?:string|null;recipientEmail?:string|null;organizationId?:string|null;projectRole?:string|null;cadence?:string|null;reviewEvidence?:unknown};
-  provider?:{recipientEmail?:string|null;membershipState?:string|null;verifiedAt?:string|null}|null;
+  provider?:{recipientEmail?:string|null;membershipState?:string|null;verifiedAt?:string|null;source?:string|null;localStatus?:string|null;sequenceId?:string|null}|null;
   proposedContractor?:string|null;
 }
 
