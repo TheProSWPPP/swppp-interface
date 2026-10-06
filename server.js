@@ -41,6 +41,7 @@ import { staleDraftBlock } from "./lib/draftFreshness.js";
 import { normalizeLeadCsv } from "./lib/leadCsvNormalize.js";
 import { isCustomerLead, refreshCustomerIndex, customerIndexStats } from "./lib/customerSuppression.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
+import {registerSdrDraftReplacementRoutes} from './lib/sdrDraftReplacement.js';
 import {prepareDraftCreation,commitDraftCreation,draftCreationOrigin} from "./lib/sdrDraftCreation.js";
 import { serializeDraft, checkViewedDraft, draftContextHash, draftConflict, mutateViewedDraft, refreshViewedDraft, recordDraftApproval, checkApprovedDraft, checkDraftSchedule } from "./lib/sdrDraftRevision.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
@@ -1262,7 +1263,7 @@ async function initDB() {
     }
     console.log("Table 'automation_tasks' verified/created.");
     // Install additive protection before any route/worker can mutate outreach.
-    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql']) {
+    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql']) {
       await pool.query(fs.readFileSync(new URL('./migrations/'+migration,import.meta.url),'utf8'));
     }
   } catch (err) {
@@ -4755,7 +4756,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     let enrollResponse = null;
 
     // A fresh coherent review is required even for machine callers and admin overrides.
-    await assertSendSafety(pool,draft,{companyId:process.env.SDR_CRM_COMPANY_ID});
+    await assertSendSafety(pool,draft,{companyId:process.env.SDR_CRM_COMPANY_ID,actionKey:`draft:${draft.id}:${draft.revision}`,phase:'pre_match'});
     const match = await apolloClient.matchContactByEmail(draft.contact_email_snapshot);
     apolloContactId = match?.id || match?.contact?.id;
     if(!apolloContactId)throw draftConflict('provider_contact_unverified');
@@ -4780,7 +4781,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         };
         await assertCurrentEnrollment();
         if(req.sdrUser?.machine)await recordDraftApproval(client,current,req.sdrUser);
-        const safetyContext=await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID});
+        const safetyContext=await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID,actionKey:`draft:${draft.id}:${draft.revision}`,phase:'locked_preflight'});
         const contactDays=await readContactSendDaysAgo(client,{apolloContactId:String(apolloContactId),recipientEmail:draft.contact_email_snapshot});
         if(contactDays!==null&&contactDays<=await contactCooldownDays())throw draftConflict('contact_cooldown');
         const reservation=await reserveEnrollment({pool:client,apollo:apolloClient,context:{...safetyContext,apolloContactId},draftRevision:current.revision,actionId:crypto.randomUUID()});
@@ -4804,7 +4805,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         // Set the contact's name so the follow-up templates' native {{contact.first_name}} merge
         // can't fail "required dynamic variable missing" (a real cause of failed sends).
         await assertCurrentEnrollment();
-        await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID});
+        await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID,actionKey:`draft:${draft.id}:${draft.revision}`,phase:'pre_fields'});
         await apolloClient.updateContactCustomFields(apolloContactId, customFields, {
           first_name: draftMeta.first_name || "there",
           last_name: draftMeta.last_name,
@@ -4825,7 +4826,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
             });
           }
           await assertCurrentEnrollment();
-          await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID});
+          await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID,actionKey:`draft:${draft.id}:${draft.revision}`,phase:'pre_enroll'});
           return apolloClient.addContactsToSequence(
             draft.apollo_sequence_id,
             [apolloContactId],
@@ -7178,6 +7179,7 @@ registerSdrLiveOverviewRoutes(app,{pool});
 registerWorkspaceOverviewRoutes(app,{pool});
 // END OBSERVATION ADDITION
 registerSdrWorkDraftsRoutes(app,{pool});
+registerSdrDraftReplacementRoutes(app,{pool,companyId:process.env.SDR_CRM_COMPANY_ID,buildDraftFromLead});
 registerSdrMetricsRoutes(app, {
   pool,
   resolveVisibleMailboxes: async (user) => (await visibleMailboxes(user)).map((mailbox) => mailbox.email.toLowerCase()),

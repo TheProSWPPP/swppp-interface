@@ -17,11 +17,27 @@ This branch is a release candidate, not evidence that live outreach is protected
 
 1. Configure and verify `SDR_CRM_COMPANY_ID` for the intended Pipedrive account. Missing company scope blocks protected actions.
 2. Apply the additive migrations before routes and workers start. Startup now waits for migrations; a migration failure prevents serving partially protected routes.
-3. Populate current accessible lead/person/organization observations with source timestamps. Existing role/cadence history is not silently declared reviewed. Staff must review eligible outreach before the new send gate permits it.
+3. Populate current accessible lead/person/organization observations with source timestamps and capture sender identity in newly generated/refreshed drafts. Existing unknown sender snapshots require review; do not fill them silently during approval.
 4. Update frontend and machine callers together. An old browser tab receives a version conflict and must reload; no implicit approval is inferred.
 5. Cover every reachable n8n writer of the protected case's identity, stage, owner, dates, labels, tasks and sequence marker. The locally edited CMD processor alone is insufficient. Weekly tagging, scheduled-task completion, queue dispatch, scoring and import workflows require explicit barriers or proposals.
 6. Re-read each correction case and show the exact current values, intended action and provider generation. Never infer a replacement from an organization-ID mismatch alone.
 7. Complete the approved observation gate: 48 hours, a full CMD refresh, and representative staff work periods. Record actual checks and timestamps; local tests do not satisfy this gate.
+
+## Staged policy
+
+An explicit versioned company configuration selects observation or enforcement. Missing configuration blocks rollout; it never declares history reviewed. Keep an explicit reviewed lead cohort with an owner, reason and expected context. A changed cohort context remains enforced and blocked for review.
+
+Only the new role/affiliation/cadence-review requirement may run in observation outside that cohort. Technical completeness remains separate from business review. Draft versions, schedules, existing cadence restrictions, scoped holds, current identity/sender checks, contact coordination and uncertain provider-operation protection always apply. Protected existing CRM writes remain proposals in either mode.
+
+Shadow records capture proposed decisions and the actual invariant result, with policy/config versions, action identity and context/source hashes. Writing a shadow record cannot itself create a hold, draft, note or enrollment. The production action path independently enforces the global protections.
+
+Before starting the production observation period, verify both ordinary first-enrollment/manual-draft flows and blocked-path recovery, and quantify the proposed CRM changes that staff will need to review. Do not use an observation flag to bypass a protected pause or resume an unsafe enrollment.
+
+## Recovery and customer communications
+
+An owner/admin can create a replacement review draft from a failed, rejected or cancelled draft after reviewing current context and recording a reason. The old draft and its history remain. Replacement does not clear holds, resume a provider membership or send mail; the new draft requires its own approval. Refresh and replacement preserve existing service and award-only restrictions and invalidate previous review evidence.
+
+Eleven companion n8n workflow candidates have been validated locally; they are not deployed. The Brevo customer audience serves both sales campaigns and customer alerts. Withholding new list entries can therefore affect future alert coverage. Inspect authenticated automation definitions and the required alert audience before releasing those provider changes. Existing memberships are not removed by the candidate.
 
 ## Provider limits
 
