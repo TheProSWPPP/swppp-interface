@@ -10,7 +10,8 @@ Three production modules change: email verification/recovery, Pipedrive primary-
 - Leave another employee's or an unconfirmed Apollo person's address as a review suggestion. Clear any previously resolved address and retain the bad-email hold.
 - After requesting sequence removal, read the exact Apollo contact and verify an explicit membership list without the target sequence. Missing, malformed, wrong-contact, still-present or failed reads remain unresolved.
 - Both auto-switch branches must retain local enrollment and avoid replacement enrollment until the removal is confirmed. Email cancellation must not clear the CRM marker while any removal remains unresolved.
-- Persist unresolved and subsequently resolved stop evidence in the existing engagement-event schema.
+- Persist unresolved and subsequently resolved stop evidence in the existing engagement-event schema. Commit local send status and resolved evidence atomically so an evidence-write failure keeps the send retryable.
+- A wrong, missing or unreadable fresh CRM identity becomes a review outcome and still applies the known-invalid hold.
 
 Verification: focused behavior tests, full suite with an isolated local Postgres database, production build and changed-file lint. Expected: all pass. Private test evidence is retained outside this public repository.
 
