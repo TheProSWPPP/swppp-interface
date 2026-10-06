@@ -11,7 +11,6 @@ import AutomationRoadmap from "./components/AutomationRoadmap";
 import SdrInterface from "./components/SdrInterface";
 import { useToasts, ToastStack } from "./components/Toast";
 import WorkspaceChrome from "./components/workspace/WorkspaceChrome";
-import WorkspaceOverview from "./components/workspace/WorkspaceOverview";
 import SalesPage from "./components/workspace/SalesPage";
 import InterfaceReview from "./components/workspace/InterfaceReview";
 import { readWorkspaceView, type WorkspaceView } from "./components/workspace/navigation";
@@ -38,6 +37,7 @@ function App() {
   const go = (v: WorkspaceView) => {
     setView(v);
     setUser(getToken() ? getUser() : null);
+    window.scrollTo({ top: 0, behavior: 'instant' });
   };
 
   useEffect(() => {
@@ -162,7 +162,6 @@ function App() {
 
   return (
     <WorkspaceChrome view={view} user={user} onNavigate={go}>
-        {view === "overview" && <WorkspaceOverview key={user?.id || "signed-out"} user={user} onNavigate={go} />}
         {view === "sales" && <SalesPage key={user?.id || "signed-out"} user={user} onOpenSdr={() => go("sdr")} />}
         {view === "interface-review" && import.meta.env.DEV && <InterfaceReview onNavigate={go} />}
         {view === "dashboard" && (
