@@ -233,6 +233,8 @@ export interface SdrLeadDetail {
   lead: SdrLead;
   drafts: {
     id: string;
+    revision: string;
+    contextHash: string;
     trigger_type: SdrTriggerType;
     status: string;
     subject: string | null;

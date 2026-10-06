@@ -2492,21 +2492,20 @@ export function DraftRow({
 }) {
   // Keep the displayed revision stable while the rep reads or edits. Background
   // polling must never silently replace their copy or grant approval to new copy.
-  const [draft,setDraft]=useState(latestDraft);
-  const [mailbox,setMailbox]=useState(latestMailbox);
-  useEffect(()=>{if(!expanded){setDraft(latestDraft);setMailbox(latestMailbox);}},[latestDraft,latestMailbox,expanded]);
-  const stale=latestDraft.revision!==draft.revision || latestDraft.contextHash!==draft.contextHash;
+  const [reviewed,setReviewed]=useState({draft:latestDraft,mailbox:latestMailbox});
+  const draft=expanded?reviewed.draft:latestDraft;
+  const mailbox=expanded?reviewed.mailbox:latestMailbox;
+  const stale=expanded&&(latestDraft.revision!==draft.revision || latestDraft.contextHash!==draft.contextHash);
   const [subject, setSubject] = useState(draft.subject);
   const [body, setBody] = useState(draft.body);
   const [confirming, setConfirming] = useState<"approve" | "reject" | "refresh" | null>(null);
   const [rejectReason, setRejectReason] = useState("Not a good fit");
   const [seqInput, setSeqInput] = useState("");
 
-  // Re-sync local edit state when the draft itself changes server-side
-  useEffect(() => {
-    setSubject(draft.subject);
-    setBody(draft.body);
-  }, [draft.subject, draft.body, draft.updated_at]);
+  function loadCurrentDraft() {
+    setReviewed({draft:latestDraft,mailbox:latestMailbox});
+    setSubject(latestDraft.subject);setBody(latestDraft.body);setConfirming(null);
+  }
 
   const dirty = subject !== draft.subject || body !== draft.body;
   const canSend = !stale && ["pending", "approved", "edited"].includes(draft.status);
@@ -2514,7 +2513,7 @@ export function DraftRow({
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-      <button onClick={onToggle} className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-50 text-left">
+      <button onClick={()=>{if(!expanded)loadCurrentDraft();onToggle();}} className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-50 text-left">
         {expanded ? (
           <ChevronDown className="h-4 w-4 text-slate-400 flex-shrink-0" />
         ) : (
@@ -2560,7 +2559,7 @@ export function DraftRow({
             <MessageBody html={firstTouchPreview(body, mailbox?.signature_html || undefined, false)} title="Draft email" />
             <p className="mt-3 text-xs text-slate-500">{mailbox?.signature_html ? "Signature from the assigned mailbox. Apollo adds it when sending." : "Sender signature is unavailable in this preview."}</p>
           </section>
-          {stale && <div role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">This draft changed while you were reviewing it. Your text is preserved below. Copy any unsaved edits before loading the current version. <button className="underline font-semibold" onClick={()=>{setDraft(latestDraft);setMailbox(latestMailbox);setConfirming(null);}}>Load current draft</button></div>}
+          {stale && <div role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">This draft changed while you were reviewing it. Your text is preserved below. Copy any unsaved edits before loading the current version. <button className="underline font-semibold" onClick={loadCurrentDraft}>Load current draft</button></div>}
           <div>
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Subject</label>
             <input
@@ -2634,7 +2633,7 @@ export function DraftRow({
               </div>
               <button
                 onClick={() => setConfirming(null)}
-                disabled={busy || stale}
+                disabled={busy}
                 className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-white"
               >
                 Cancel
@@ -2661,7 +2660,7 @@ export function DraftRow({
               />
               <button
                 onClick={() => setConfirming(null)}
-                disabled={busy || stale}
+                disabled={busy}
                 className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-white"
               >
                 Cancel
@@ -2684,7 +2683,7 @@ export function DraftRow({
               </div>
               <button
                 onClick={() => setConfirming(null)}
-                disabled={busy || stale}
+                disabled={busy}
                 className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-white"
               >
                 Cancel
