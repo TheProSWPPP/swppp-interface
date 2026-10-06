@@ -73,6 +73,7 @@ import PermitsTab from "./permits/PermitsTab";
 import TeamView from "./sdr/TeamView";
 import CrmFollowUps from "./sdr/CrmFollowUps";
 import CrmLeadHistory from "./sdr/CrmLeadHistory";
+import OutreachConflict from "./sdr/OutreachConflict";
 import SdrWorkspace from "./sdr/dashboard/SdrWorkspace";
 import SenderVerification from "./sdr/dashboard/SenderVerification";
 
@@ -1639,6 +1640,7 @@ function LeadDetailDrawer({
               </div>
             </div>
           )}
+          <OutreachConflict key={`outreach-${leadId}`} leadId={leadId} userId={getUser()?.id||''} isAdmin={getUser()?.role==='admin'} onChanged={reload} />
           {getUser()?.role === "admin" && <CrmLeadHistory key={leadId} leadId={leadId} />}
         </div>
 
@@ -2463,10 +2465,10 @@ function QueueView({
   );
 }
 
-function DraftRow({
+export function DraftRow({
   draft: latestDraft,
   isAdmin,
-  mailbox,
+  mailbox: latestMailbox,
   expanded,
   onToggle,
   busy,
@@ -2491,7 +2493,8 @@ function DraftRow({
   // Keep the displayed revision stable while the rep reads or edits. Background
   // polling must never silently replace their copy or grant approval to new copy.
   const [draft,setDraft]=useState(latestDraft);
-  useEffect(()=>{if(!expanded)setDraft(latestDraft);},[latestDraft,expanded]);
+  const [mailbox,setMailbox]=useState(latestMailbox);
+  useEffect(()=>{if(!expanded){setDraft(latestDraft);setMailbox(latestMailbox);}},[latestDraft,latestMailbox,expanded]);
   const stale=latestDraft.revision!==draft.revision || latestDraft.contextHash!==draft.contextHash;
   const [subject, setSubject] = useState(draft.subject);
   const [body, setBody] = useState(draft.body);
@@ -2557,7 +2560,7 @@ function DraftRow({
             <MessageBody html={firstTouchPreview(body, mailbox?.signature_html || undefined, false)} title="Draft email" />
             <p className="mt-3 text-xs text-slate-500">{mailbox?.signature_html ? "Signature from the assigned mailbox. Apollo adds it when sending." : "Sender signature is unavailable in this preview."}</p>
           </section>
-          {stale && <div role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">This draft changed while you were reviewing it. Your text is preserved below. Copy any unsaved edits before loading the current version. <button className="underline font-semibold" onClick={()=>{setDraft(latestDraft);setConfirming(null);}}>Load current draft</button></div>}
+          {stale && <div role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">This draft changed while you were reviewing it. Your text is preserved below. Copy any unsaved edits before loading the current version. <button className="underline font-semibold" onClick={()=>{setDraft(latestDraft);setMailbox(latestMailbox);setConfirming(null);}}>Load current draft</button></div>}
           <div>
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Subject</label>
             <input

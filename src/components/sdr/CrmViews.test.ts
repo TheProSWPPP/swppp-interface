@@ -22,3 +22,9 @@ it('renders notes as plain text and distinguishes unavailable data from empty hi
  expect(crmFollowupUnavailableMessage('permission_denied')).toContain('Pipedrive access is restricted');
  expect(crmFollowupUnavailableMessage(null)).toBeNull();
 });
+import * as viewState from './crmViewState';
+it('groups repeated note text for display while retaining every original identity',()=>{
+ const notes=[{id:1,content:'Classification unchanged',add_time:'first'},{id:2,content:'Classification unchanged',add_time:'second'},{id:3,content:'Call only'}];
+ const groups=viewState.groupCrmNotes(notes);
+ expect(groups).toHaveLength(2);expect(groups[0].originals.map(note=>note.id)).toEqual([1,2]);expect(groups[1].originals[0].content).toBe('Call only');
+});

@@ -169,6 +169,18 @@ export interface SdrDraft {
   days_since_outgoing?: number | null;
 }
 
+export type OutreachDecision = 'keep_held' | 'release' | 'keep_contact_with_verified_role' | 'review_replacement';
+export interface OutreachControl {
+  id:string;version:number;scope_kind:string;scope_id:string;reason:string;owner_id:string;
+  context_hash:string;provider_stop_status:string;channel?:string|null;
+}
+export interface OutreachControlsResponse {
+  controls:OutreachControl[];applicationActionsBlocked:boolean;providerStopStatus:string;
+  context:{contextHash:string;complete:boolean;personId?:string|null;recipientEmail?:string|null;organizationId?:string|null;projectRole?:string|null;cadence?:string|null;reviewEvidence?:unknown};
+  provider?:{recipientEmail?:string|null;membershipState?:string|null;verifiedAt?:string|null}|null;
+  proposedContractor?:string|null;
+}
+
 export type ViewedDraft = Pick<SdrDraft, 'revision' | 'contextHash'>;
 function draftVersion(viewed: ViewedDraft) {return {expectedRevision:viewed.revision,expectedContextHash:viewed.contextHash};}
 
@@ -647,6 +659,11 @@ export const sdrApi = {
     const q = status ? `?status=${status}` : "";
     return sdrFetch<{ drafts: SdrDraft[] }>(`/api/sdr/drafts${q}`);
   },
+
+  outreachControls: (leadId:string) => sdrFetch<OutreachControlsResponse>(`/api/sdr/leads/${encodeURIComponent(leadId)}/controls`),
+  holdOutreach: (leadId:string,reason:string,contextHash:string) => sdrFetch<OutreachControl>(`/api/sdr/leads/${encodeURIComponent(leadId)}/controls`,{method:'POST',body:JSON.stringify({scope:{kind:'lead',id:leadId},reason,contextHash})}),
+  resolveOutreachControl: (leadId:string,controlId:string,fields:{expectedVersion:number;decision:OutreachDecision;evidence:string;contextHash:string}) => sdrFetch<{resolved:boolean;control:OutreachControl}>(`/api/sdr/leads/${encodeURIComponent(leadId)}/controls/${encodeURIComponent(controlId)}/resolve`,{method:'POST',body:JSON.stringify(fields)}),
+  reviewOutreach: (leadId:string,fields:{contextHash:string;projectRole:string;cadence:'standard'|'award_only';evidence:string}) => sdrFetch<{ok:boolean}>(`/api/sdr/leads/${encodeURIComponent(leadId)}/outreach-review`,{method:'POST',body:JSON.stringify(fields)}),
 
   getDraft: (id: string) => sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}`),
 
