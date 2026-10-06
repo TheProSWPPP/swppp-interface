@@ -34,6 +34,7 @@ import { staleDraftBlock } from "./lib/draftFreshness.js";
 import { normalizeLeadCsv } from "./lib/leadCsvNormalize.js";
 import { isCustomerLead, refreshCustomerIndex, customerIndexStats } from "./lib/customerSuppression.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
+import { serializeDraft, checkViewedDraft, draftContextHash, draftConflict, mutateViewedDraft, refreshViewedDraft, recordDraftApproval, checkApprovedDraft, checkDraftSchedule } from "./lib/sdrDraftRevision.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
 import { registerPermitRoutes } from "./lib/permitRoutes.js";
@@ -1355,13 +1356,15 @@ async function enrollAutoDrafts(createdDrafts, { override = false } = {}) {
         JWT_SECRET,
         { expiresIn: 300 },
       );
+      const viewedDraft=(await pool.query('SELECT * FROM sdr_drafts WHERE id=$1',[draftId])).rows[0];
+      if(!viewedDraft){out.skipped++;continue;}
       const resp = await fetch(`http://127.0.0.1:${port}/api/sdr/drafts/${draftId}/approve-and-send`, {
         method: "POST",
         signal: AbortSignal.timeout(180000),
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         // override bypasses the recent-contact dedup guard — used by the auto-switch engine,
         // where re-contacting a just-emailed lead in a NEW sequence is the intended behavior.
-        body: JSON.stringify({ ...(override ? {override:true}:{}), ...(lease ? {enrollment_lease:lease.lease_token}:{}) }),
+        body: JSON.stringify({ expectedRevision:String(viewedDraft.revision),expectedContextHash:draftContextHash(viewedDraft), ...(override ? {override:true}:{}), ...(lease ? {enrollment_lease:lease.lease_token}:{}) }),
       });
       const payload = await resp.json().catch(() => ({}));
       const accepted=resp.ok && payload.draft?.status === "sent";
@@ -4112,7 +4115,7 @@ app.get("/api/sdr/drafts", async (req, res) => {
     if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
     sql += ` ORDER BY d.created_at DESC LIMIT 200`;
     const { rows } = await pool.query(sql, params);
-    res.json({ drafts: rows });
+    res.json({ drafts: rows.map(serializeDraft) });
   } catch (err) {
     console.error("GET /api/sdr/drafts error:", err);
     res.status(500).json({ error: "Failed to list drafts" });
@@ -4132,7 +4135,7 @@ app.get("/api/sdr/drafts/:id", async (req, res) => {
     }
     const { rows } = await pool.query(sql, params);
     if (!rows[0]) return res.status(404).json({ error: "Draft not found" });
-    res.json({ draft: rows[0] });
+    res.json({ draft: serializeDraft(rows[0]) });
   } catch (err) {
     console.error("GET /api/sdr/drafts/:id error:", err);
     res.status(500).json({ error: "Failed to fetch draft" });
@@ -4359,7 +4362,7 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
         payload.metadata,
       ],
     );
-    res.status(201).json({ draft: rows[0] });
+    res.status(201).json({ draft: serializeDraft(rows[0]) });
   } catch (err) {
     // Lost the race to a concurrent generate (uq_sdr_drafts_open) — surface as a clean
     // conflict instead of a 500, same shape as the read-then-insert dedup above.
@@ -4442,137 +4445,63 @@ app.post("/api/sdr/drafts", async (req, res) => {
         scheduled_for || null, metadata || {},
       ],
     );
-    res.status(201).json({ draft: rows[0] });
+    res.status(201).json({ draft: serializeDraft(rows[0]) });
   } catch (err) {
     console.error("POST /api/sdr/drafts error:", err);
     res.status(500).json({ error: "Failed to create draft" });
   }
 });
 
-// SDR drafts — edit subject/body while pending or approved (not after sent)
-app.patch("/api/sdr/drafts/:id", async (req, res) => {
-  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
-  const { subject, body, scheduled_for, assigned_mailbox_id, apollo_sequence_id } = req.body || {};
-  if (!subject && !body && !scheduled_for && !assigned_mailbox_id && !apollo_sequence_id) {
-    return res.status(400).json({ error: "Provide at least one field to update" });
-  }
-  // Sequence reassignment changes WHERE the contact gets enrolled — admin only.
-  if (apollo_sequence_id && req.sdrUser?.role !== "admin") {
-    return res.status(403).json({ error: "Only admin can change apollo_sequence_id" });
-  }
+// Every mutation binds the user to the revision and context they actually viewed.
+async function viewedDraftForRequest(req) {
+  const scope = ownerScope(req.sdrUser, "assigned_user_id");
+  const params = [req.params.id];
+  let sql = 'SELECT * FROM sdr_drafts WHERE id=$1';
+  if (scope.requires) {params.push(scope.value);sql += ` AND ${scope.column}=$2`;}
+  const draft = (await pool.query(sql,params)).rows[0];
+  if (!draft) throw Object.assign(new Error('Draft not found'),{status:404});
+  const checked = checkViewedDraft({draft,expectedRevision:req.body?.expectedRevision,expectedContextHash:req.body?.expectedContextHash});
+  if (!checked.allowed) throw draftConflict(checked.code);
+  return draft;
+}
+function draftMutationFailure(res,err) {return res.status(err.status||500).json({error:err.message,code:err.code});}
+app.patch("/api/sdr/drafts/:id", async (req,res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({error:'Database not configured'});
   try {
-    const mbErr = await mailboxAssignmentError(pool, req.sdrUser, assigned_mailbox_id);
-    if (mbErr) return res.status(403).json({ error: mbErr });
-    const scope = ownerScope(req.sdrUser, "assigned_user_id");
-    const params = [req.params.id];
-    let where = `id = $1 AND status IN ('pending','approved','edited')`;
-    if (scope.requires) {
-      params.push(scope.value);
-      where += ` AND ${scope.column} = $${params.length}`;
+    const draft = await viewedDraftForRequest(req);
+    const fields = {};
+    for(const key of ['subject','body','scheduled_for','assigned_mailbox_id','apollo_sequence_id']) {
+      if(Object.hasOwn(req.body||{},key)) fields[key]=req.body[key];
     }
-    const sets = [];
-    if (subject) { params.push(subject); sets.push(`subject = $${params.length}`); }
-    if (body) { params.push(body); sets.push(`body = $${params.length}`); }
-    if (scheduled_for) { params.push(scheduled_for); sets.push(`scheduled_for = $${params.length}`); }
-    if (assigned_mailbox_id) { params.push(assigned_mailbox_id); sets.push(`assigned_mailbox_id = $${params.length}`); }
-    if (apollo_sequence_id) { params.push(apollo_sequence_id); sets.push(`apollo_sequence_id = $${params.length}`); }
-    sets.push(`status = 'edited'`);
-    sets.push(`updated_at = NOW()`);
-    const { rows } = await pool.query(
-      `UPDATE sdr_drafts SET ${sets.join(", ")} WHERE ${where} RETURNING *`,
-      params,
-    );
-    if (!rows[0]) return res.status(404).json({ error: "Draft not found or not editable" });
-    res.json({ draft: rows[0] });
-  } catch (err) {
-    console.error("PATCH /api/sdr/drafts/:id error:", err);
-    res.status(500).json({ error: "Failed to update draft" });
-  }
+    if(!Object.keys(fields).length)return res.status(400).json({error:'Provide at least one field to update'});
+    if(Object.hasOwn(fields,'apollo_sequence_id') && req.sdrUser?.role!=='admin')return res.status(403).json({error:'Only admin can change apollo_sequence_id'});
+    if(fields.scheduled_for && !Number.isFinite(new Date(fields.scheduled_for).getTime()))return res.status(400).json({error:'Invalid schedule'});
+    const mbErr=await mailboxAssignmentError(pool,req.sdrUser,fields.assigned_mailbox_id);
+    if(mbErr)return res.status(403).json({error:mbErr});
+    const updated=await mutateViewedDraft(pool,{draft,expectedRevision:req.body.expectedRevision,expectedContextHash:req.body.expectedContextHash,fields:{...fields,status:'edited',content_origin:'interactive'}});
+    res.json({draft:serializeDraft(updated)});
+  }catch(err){draftMutationFailure(res,err);}
 });
-
-// SDR drafts — reject
-app.post("/api/sdr/drafts/:id/reject", async (req, res) => {
-  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
-  const reason = req.body?.reason || "(no reason given)";
+app.post("/api/sdr/drafts/:id/reject",async(req,res)=>{
+  if (!process.env.DATABASE_URL) return res.status(503).json({error:'Database not configured'});
   try {
-    const scope = ownerScope(req.sdrUser, "assigned_user_id");
-    const params = [req.params.id, reason];
-    let where = `id = $1 AND status IN ('pending','approved','edited')`;
-    if (scope.requires) {
-      params.push(scope.value);
-      where += ` AND ${scope.column} = $${params.length}`;
+    const draft=await viewedDraftForRequest(req);
+    const updated=await mutateViewedDraft(pool,{draft,expectedRevision:req.body.expectedRevision,expectedContextHash:req.body.expectedContextHash,fields:{status:'rejected',reject_reason:req.body?.reason||'(no reason given)'}});
+    if(process.env.PIPEDRIVE_API_TOKEN && updated.pipedrive_lead_id) {
+      try {await pipedriveClient.addNote({leadId:updated.pipedrive_lead_id,content:`[Auto] Apollo draft rejected by ${req.sdrUser?.username||'system'}: ${updated.reject_reason}`});}
+      catch(error){console.error('Pipedrive note on reject failed:',error.message);}
     }
-    const { rows } = await pool.query(
-      `UPDATE sdr_drafts SET status = 'rejected', reject_reason = $2, updated_at = NOW()
-       WHERE ${where} RETURNING *`,
-      params,
-    );
-    if (!rows[0]) return res.status(404).json({ error: "Draft not found or not rejectable" });
-    // Leave a Pipedrive trail so Derek can see why a lead was skipped (non-fatal)
-    if (process.env.PIPEDRIVE_API_TOKEN && rows[0].pipedrive_lead_id) {
-      try {
-        await pipedriveClient.addNote({
-          leadId: rows[0].pipedrive_lead_id,
-          content: `[Auto] Apollo draft rejected by ${req.sdrUser?.username || "system"}: ${reason}`,
-        });
-      } catch (e) {
-        console.error("Pipedrive note on reject failed:", e.message);
-      }
-    }
-    res.json({ draft: rows[0] });
-  } catch (err) {
-    console.error("POST /api/sdr/drafts/:id/reject error:", err);
-    res.status(500).json({ error: "Failed to reject draft" });
-  }
+    res.json({draft:serializeDraft(updated)});
+  }catch(err){draftMutationFailure(res,err);}
 });
-
-// SDR drafts — refresh from Pipedrive. Re-runs the draft generator against the
-// live lead and overwrites the draft's content + snapshots. User-triggered, so
-// clobbering manual edits is intentional (the button warns about it).
-app.post("/api/sdr/drafts/:id/refresh", async (req, res) => {
-  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
-  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
+app.post("/api/sdr/drafts/:id/refresh",async(req,res)=>{
+  if (!process.env.DATABASE_URL) return res.status(503).json({error:'Database not configured'});
+  if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({error:'Pipedrive not configured'});
   try {
-    const scope = ownerScope(req.sdrUser, "assigned_user_id");
-    const params = [req.params.id];
-    let sql = `SELECT * FROM sdr_drafts WHERE id = $1 AND status IN ('pending','approved','edited')`;
-    if (scope.requires) {
-      params.push(scope.value);
-      sql += ` AND ${scope.column} = $${params.length}`;
-    }
-    const { rows } = await pool.query(sql, params);
-    const draft = rows[0];
-    if (!draft) return res.status(404).json({ error: "Draft not found or not refreshable" });
-
-    const payload = await buildDraftFromLead({
-      pipedriveLeadId: draft.pipedrive_lead_id,
-      triggerType: draft.trigger_type,
-      pool,
-      assignedUserId: draft.assigned_user_id,
-      apolloSequenceId: draft.apollo_sequence_id,
-    });
-
-    const { rows: updRows } = await pool.query(
-      `UPDATE sdr_drafts SET
-         subject = $2, body = $3,
-         contact_id_snapshot = $4, contact_email_snapshot = $5, org_id_snapshot = $6,
-         pipedrive_contact_id = $7, pipedrive_org_id = $8,
-         apollo_sequence_id = COALESCE(apollo_sequence_id, $9),
-         metadata = $10, status = 'pending', updated_at = NOW()
-       WHERE id = $1 RETURNING *`,
-      [
-        draft.id, payload.subject, payload.body,
-        payload.contact_id_snapshot, payload.contact_email_snapshot, payload.org_id_snapshot,
-        payload.pipedrive_contact_id, payload.pipedrive_org_id,
-        payload.apollo_sequence_id,
-        payload.metadata,
-      ],
-    );
-    res.json({ draft: updRows[0] });
-  } catch (err) {
-    console.error("POST /api/sdr/drafts/:id/refresh error:", err);
-    res.status(err.status || 500).json({ error: err.message || "Refresh failed" });
-  }
+    const draft=await viewedDraftForRequest(req);
+    const updated=await refreshViewedDraft(pool,{draft,expectedRevision:req.body.expectedRevision,expectedContextHash:req.body.expectedContextHash,build:buildDraftFromLead});
+    res.json({draft:serializeDraft(updated)});
+  }catch(err){draftMutationFailure(res,err);}
 });
 
 // SDR drafts — approve + atomically enroll in Apollo + record sdr_sends.
@@ -4591,8 +4520,30 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       preSql += ` AND ${scope.column} = $${preParams.length}`;
     }
     const pre = await pool.query(preSql, preParams);
-    const draft = pre.rows[0];
+    let draft = pre.rows[0];
     if (!draft) return res.status(404).json({ error: "Draft not found" });
+    const viewed = checkViewedDraft({draft,expectedRevision:req.body?.expectedRevision,expectedContextHash:req.body?.expectedContextHash});
+    if (!viewed.allowed) return res.status(409).json({code:viewed.code,error:'Draft changed. Reload and review before sending.'});
+    const schedule=checkDraftSchedule(draft);
+    if(!schedule.allowed)return res.status(409).json({code:schedule.code,error:'This draft is scheduled for a future time. Change its schedule and review the new revision before sending.'});
+    if(req.sdrUser?.machine) {
+      const approval=await checkApprovedDraft(pool,draft);
+      if(!approval.allowed && (draft.status!=='pending'||draft.content_origin!=='machine'))return res.status(409).json({code:approval.code,error:'Reviewed or unknown-origin draft requires current approval.'});
+    } else {
+      // Durable exact receipt precedes capacity checks and provider waits. A retry cannot
+      // regenerate copy merely because this first request encountered a daily cap.
+      draft=await withLeadLock(pool,draft.pipedrive_lead_id,async client=>{
+        const current=(await client.query('SELECT * FROM sdr_drafts WHERE id=$1 FOR UPDATE',[draft.id])).rows[0];
+        const checked=checkViewedDraft({draft:current,expectedRevision:req.body.expectedRevision,expectedContextHash:req.body.expectedContextHash});
+        if(!checked.allowed)throw draftConflict(checked.code);
+        const approved=(await client.query("UPDATE sdr_drafts SET status='approved',approved_at=NOW(),approved_by=$2,updated_at=NOW() WHERE id=$1 RETURNING *,updated_at::text AS enrollment_version",[current.id,req.sdrUser.sub])).rows[0];
+        await recordDraftApproval(client,approved,req.sdrUser);
+        return approved;
+      });
+      // The server has created the reviewed approval revision atomically above.
+      req.body.expectedRevision=String(draft.revision);
+      req.body.expectedContextHash=draftContextHash(draft);
+    }
     if (!["pending", "approved", "edited"].includes(draft.status) || (req.sdrUser?.machine && draft.status === "edited")) {
       return res.status(409).json({ error: `Draft is ${draft.status}, cannot send` });
     }
@@ -4848,7 +4799,9 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     let result;
     try {
       result = await withLeadLock(pool, draft.pipedrive_lead_id, async (client) => {
-        const current = (await client.query("SELECT status,sent_at,updated_at::text AS enrollment_version FROM sdr_drafts WHERE id=$1 FOR UPDATE",[draft.id])).rows[0];
+        const current = (await client.query("SELECT *,updated_at::text AS enrollment_version FROM sdr_drafts WHERE id=$1 FOR UPDATE",[draft.id])).rows[0];
+        const viewedNow=checkViewedDraft({draft:current,expectedRevision:req.body.expectedRevision,expectedContextHash:req.body.expectedContextHash});
+        if(!viewedNow.allowed)throw draftConflict(viewedNow.code);
         if (!current || !["pending","approved","edited"].includes(current.status) || current.sent_at || (req.sdrUser?.machine && current.status === "edited") || current.enrollment_version !== draft.enrollment_version) {
           throw Object.assign(new Error("Draft no longer eligible for enrollment"),{status:409,code:"already_sent",preserveDraft:true});
         }
@@ -4863,6 +4816,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           if (block) throw Object.assign(new Error("Enrollment outcome or ownership requires review"),{status:409,code:block,preserveDraft:true});
         };
         await assertCurrentEnrollment();
+        if(req.sdrUser?.machine)await recordDraftApproval(client,current,req.sdrUser);
         // Match snapshot email → Apollo ACCOUNT CONTACT id (find-or-create)
         const match = await apolloClient.matchContactByEmail(draft.contact_email_snapshot);
         apolloContactId = match?.id || match?.contact?.id;
@@ -5132,7 +5086,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       }
     }
 
-    res.json(result);
+    res.json({...result,draft:serializeDraft(result.draft)});
   } catch (err) {
     console.error("POST /api/sdr/drafts/:id/approve-and-send error:", err);
     // Mark draft as failed if we got past pre-checks
