@@ -117,7 +117,7 @@ export default function SdrDashboard({user,onNavigate,onOpenReplies,mailboxes=[]
     <SequenceChecks refreshKey={reload} onReview={()=>navigate('templates')}/>
     <section className="sdr-reporting-workspace" aria-label="Sales and email performance">
     <header className="sdr-overview-header">
-      <div><h2>Sales and email performance</h2><p>Choose a period to see the work and results.</p></div>
+      <div><h2>Sales and email performance</h2></div>
       <button type="button" className={`${button} flex items-center gap-2`} onClick={refresh} disabled={loading}><RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading?'motion-safe:animate-spin':''}`}/>{loading?'Updating…':'Refresh numbers'}</button>
     </header>
     <div ref={filtersRef} className="sdr-filters">

@@ -1,4 +1,3 @@
-import { motion, useReducedMotion } from 'framer-motion';
 import { AlertCircle, ChevronDown } from 'lucide-react';
 import type { SdrLiveOverview } from '../../../lib/sdrLiveOverviewApi';
 import type { MetricsQuery, MetricsResponse } from '../../../lib/sdrMetricsApi';
@@ -10,13 +9,12 @@ const date = (value: string) => new Date(`${value.slice(0, 10)}T12:00:00Z`).toLo
 const fullDate = (value: string) => new Date(`${value.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Chicago' });
 
 function EnrollmentTrend({ data }: { data: SdrLiveOverview }) {
-  const reduced = useReducedMotion();
   const maximum = Math.max(1, ...data.trend.map(point => point.count));
   return <div className="sdr-enrollment-chart">
     <p className="sdr-enrollment-range">{data.trend.length?`Daily chart · ${fullDate(data.trend[0].date)}–${fullDate(data.trend[data.trend.length-1].date)}`:'Daily chart dates unavailable'}</p>
     <div className="sdr-enrollment-bars" role="group" aria-label={`Daily sequence enrollments across ${data.trend.length} recorded dates. ${number(data.trend.reduce((sum, point) => sum + point.count, 0))} enrollments shown.`}>
       {data.trend.map(point => <div key={point.date} className="sdr-enrollment-day" tabIndex={0} role="img" aria-label={`${date(point.date)}: ${number(point.count)} enrollments`}>
-        <motion.span initial={false} style={{ height: `${point.count / maximum * 100}%`, transformOrigin: 'bottom' }} whileHover={reduced ? undefined : { scaleY: 1.06 }} transition={{ duration: reduced ? 0 : .15 }} className={`sdr-enrollment-bar ${point.count > 0 ? 'has-enrollments' : 'no-enrollments'}`} />
+        <span style={{ height: `${point.count / maximum * 100}%`, transformOrigin: 'bottom' }} className={`sdr-enrollment-bar ${point.count > 0 ? 'has-enrollments' : 'no-enrollments'}`} />
         <span className="sdr-enrollment-tooltip" aria-hidden="true">{date(point.date)}: {number(point.count)}</span>
       </div>)}
     </div>

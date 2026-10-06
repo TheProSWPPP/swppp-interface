@@ -71,6 +71,8 @@ import ContactsView from "./nurture/ContactsView";
 import AutomationsView from "./nurture/AutomationsView";
 import PermitsTab from "./permits/PermitsTab";
 import TeamView from "./sdr/TeamView";
+import CrmFollowUps from "./sdr/CrmFollowUps";
+import CrmLeadHistory from "./sdr/CrmLeadHistory";
 import SdrWorkspace from "./sdr/dashboard/SdrWorkspace";
 import SenderVerification from "./sdr/dashboard/SenderVerification";
 
@@ -78,7 +80,7 @@ import RecentRepliesInbox from "./sdr/dashboard/RecentRepliesInbox";
 import type { ReplyContext } from "../lib/sdrOperationsApi";
 const SdrDashboard = lazy(() => import("./sdr/dashboard/SdrDashboard"));
 
-type SdrTab = "leads" | "queue" | "engaged" | "inbox" | "dashboard" | "mailboxes" | "templates" | "sequences" | "permits" | "team";
+type SdrTab = "leads" | "queue" | "engaged" | "inbox" | "dashboard" | "mailboxes" | "templates" | "sequences" | "permits" | "team" | "followups";
 type OutreachLane = "cold" | "nurture";
 type NurtureTab = "campaigns" | "lists" | "contacts" | "automations";
 
@@ -746,6 +748,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {(tab === "templates" || tab === "sequences") && <MessagingView user={user} pushToast={push} />}
           {tab === "permits" && <PermitsTab pushToast={(m, k) => push(k ?? "success", m)} />}
           {tab === "team" && user.role === "admin" && <TeamView pushToast={push} />}
+          {tab === "followups" && user.role === "admin" && <CrmFollowUps onOpenLead={setDeepLeadId} />}
         </>
       ) : (
         <>
@@ -1636,6 +1639,7 @@ function LeadDetailDrawer({
               </div>
             </div>
           )}
+          {getUser()?.role === "admin" && <CrmLeadHistory key={leadId} leadId={leadId} />}
         </div>
 
         {/* Actions footer */}

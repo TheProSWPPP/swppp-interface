@@ -162,7 +162,7 @@ export default function AutomationRoadmap() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <ListChecks className="h-6 w-6 text-brand-600" />
-            Automation Roadmap
+            Roadmap
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             Shared list of automation work. Edit, reorder, and post updates.

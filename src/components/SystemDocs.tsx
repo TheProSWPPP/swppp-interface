@@ -13,13 +13,10 @@ export default function SystemDocs() {
     <div className="max-w-5xl mx-auto space-y-10 pb-20">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 lg:p-12">
         <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight mb-3">
-          How the System Works
+          System docs
         </h1>
         <p className="text-slate-500 leading-relaxed mb-8 max-w-3xl">
-          A plain-English guide to what's running in the background — how leads flow
-          in, how CMD data stays fresh, how SEO articles get generated, and which
-          Pipedrive flags change behavior. For SWPPP data-sourcing methodology see
-          the Methodology page.
+          Lead imports, CMD refresh schedules, content generation and Pipedrive flags.
         </p>
 
         {/* ============= 1. LEAD PIPELINE ============= */}

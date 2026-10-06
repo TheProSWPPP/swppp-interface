@@ -1,3 +1,12 @@
+// BEGIN OBSERVATION ADDITION
+import { registerWorkspaceOverviewRoutes } from './lib/workspaceOverviewRoutes.js';
+import { createPipedriveObservationClient } from './lib/pipedriveObservationClient.js';
+import { createSdrCrmObserverRuntime } from './lib/sdrCrmObserverRuntime.js';
+import { registerSdrCrmObservationRoutes } from './lib/sdrCrmObservationRoutes.js';
+// END OBSERVATION ADDITION
+// BEGIN OBSERVATION ADDITION
+import {createSalesHistoryRuntime} from './lib/salesHistoryRuntime.js';
+// END OBSERVATION ADDITION
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
@@ -458,6 +467,9 @@ app.use((req, res, next) => {
   // Skip auth for health check and external webhook endpoints
   if (
     req.path === "/health" ||
+// BEGIN OBSERVATION ADDITION
+    (process.env.SDR_CRM_OBSERVER_ENABLED === 'true' && req.path === '/api/sdr/crm/webhooks/pipedrive' && req.method === 'POST') ||
+// END OBSERVATION ADDITION
     (req.path === "/api/version" && req.method === "GET") ||
     (req.path === "/api/projects" && req.method === "POST") ||
     (req.path === "/api/ai-content/callback" && req.method === "POST") ||
@@ -7354,6 +7366,9 @@ registerPermitRoutes(app, pool);
 registerPermitExportRoutes(app, pool);
 registerSdrTeamRoutes(app, pool);
 registerSdrLiveOverviewRoutes(app,{pool});
+// BEGIN OBSERVATION ADDITION
+registerWorkspaceOverviewRoutes(app,{pool});
+// END OBSERVATION ADDITION
 registerSdrWorkDraftsRoutes(app,{pool});
 registerSdrMetricsRoutes(app, {
   pool,
@@ -7378,6 +7393,36 @@ if (process.env.SDR_CONVERSATION_HISTORY_ENABLED === "true") {
   });
 }
 
+// BEGIN OBSERVATION ADDITION
+// Observation work writes only its own tables and reads Pipedrive independently.
+let crmObserverRuntime = null;
+const crmObserverEnabled = process.env.SDR_CRM_OBSERVER_ENABLED === 'true';
+const crmCompanyId = process.env.SDR_CRM_COMPANY_ID;
+if (crmObserverEnabled && process.env.PIPEDRIVE_API_TOKEN && crmCompanyId && process.env.DATABASE_URL) {
+  const crmClient = createPipedriveObservationClient({token:process.env.PIPEDRIVE_API_TOKEN,sourceHost:process.env.SDR_CRM_SOURCE_HOST||'proswpppllc.pipedrive.com'});
+  const authorizeWebhook = req => {
+    const username=process.env.SDR_CRM_WEBHOOK_USERNAME;
+    const password=process.env.SDR_CRM_WEBHOOK_PASSWORD;
+    const header=String(req.headers.authorization||'');
+    if(!username||!password||!header.startsWith('Basic ')) return false;
+    const left=Buffer.from(Buffer.from(header.slice(6),'base64').toString('utf8'));
+    const right=Buffer.from(`${username}:${password}`);
+    return left.length===right.length && crypto.timingSafeEqual(left,right);
+  };
+  registerSdrCrmObservationRoutes(app,{
+    pool,companyId:crmCompanyId,authorizeWebhook,listUsers:()=>crmClient.listUsers(),
+    canViewLead:(req,leadId)=>leadVisibleTo(pool,req.sdrUser,leadId),
+  });
+  crmObserverRuntime=createSdrCrmObserverRuntime({pool,client:crmClient,companyId:crmCompanyId});
+  crmObserverRuntime.start({observerEnabled:true});
+} else if (crmObserverEnabled) {
+  console.error('[crm-observer] enabled but Pipedrive token, company ID or database is missing');
+}
+// END OBSERVATION ADDITION
+// BEGIN OBSERVATION ADDITION
+const salesHistoryRuntime=createSalesHistoryRuntime({pool,apiToken:process.env.PIPEDRIVE_API_TOKEN});
+salesHistoryRuntime.start({enabled:process.env.SDR_SALES_HISTORY_ENABLED==='true'});
+// END OBSERVATION ADDITION
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, "dist")));
 

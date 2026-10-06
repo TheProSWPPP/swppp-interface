@@ -6,6 +6,7 @@ export type MetricKey = 'messages_completed'|'contacts_reached'|'first_touches'|
   'collected_value'|'eligible_supply'|'bounce_rate'|'bounce_events'|'spam_blocked_events'|'open_rate'|'spam_rate'|'unresolved_quotes';
 export type MetricsQuery = { from:string; to:string; timezone?:'America/Chicago'; mailbox?:string; source?:string; sequence?:string };
 export type MetricsResponse = {
+  company_sales?:{date_warnings?:Array<{month:string;count:number;reason:string}>;reconstructed_dates?:number;history_from:string|null;history_to:string|null;freshness:{last_complete_at:string|null;state:'fresh'|'stale'|'unknown'}};
   test_data?:{excluded_messages:number;excluded_deals:number|null;unreviewed_messages:number;unreviewed_deals:number|null};
   observation_cutoff?:string|null;
   window:{from:string;to:string;timezone:'America/Chicago';provisional:boolean};

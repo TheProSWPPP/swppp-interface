@@ -229,8 +229,7 @@ export default function AIContent() {
             Couldn't load AI content
           </h3>
           <p className="mt-1 max-w-sm text-sm text-slate-500">
-            The content library didn't come back from the server. This is a
-            connection issue, not lost data.
+            The content library could not be loaded. Retry to check the connection.
           </p>
           <button
             onClick={() => {
@@ -293,10 +292,11 @@ export default function AIContent() {
   return (
     <div className="space-y-6">
       {/* Stat Cards — clickable */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="workspace-status-strip grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {statCards.map((card) => (
           <button
             key={card.key}
+            aria-pressed={statusFilter === card.key}
             onClick={() => {
               if (statusFilter === card.key) {
                 setStatusFilter("");
