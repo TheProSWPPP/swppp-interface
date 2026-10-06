@@ -20,3 +20,11 @@ it('escapes source evidence and keeps keeping a contact distinct from sending',(
  const html=renderToStaticMarkup(createElement(OutreachConflictPanel,{...props,data:{...data,controls:[{...data.controls[0],reason:'<script>alert(1)</script>'}]}}));
  expect(html).not.toContain('<script>');expect(html).toContain('does not approve copy, send, or restart');
 });
+it('requires explicit current-context acknowledgement before resolving a changed hold',()=>{
+ const html=renderToStaticMarkup(createElement(OutreachConflictPanel,{...props,evidence:'New context reviewed',data:{...data,context:{...data.context,contextHash:'new-context'}}}));
+ expect(html).toContain('I reviewed the current contact and context');expect(html).toMatch(/disabled=""[^>]*>Release this hold/);
+});
+it('keeps protected CRM proposals visible separately from selected data',()=>{
+ const html=renderToStaticMarkup(createElement(OutreachConflictPanel,{...props,data:{...data,proposals:[{id:'proposal',entity:'lead',entity_id:'lead',proposed_fields:{organization_id:'proposed-org'},reason:'Review contractor'}]}}));
+ expect(html).toContain('Proposed CRM changes');expect(html).toContain('proposed-org');expect(html).toContain('Selected company');
+});

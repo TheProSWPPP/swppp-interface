@@ -179,6 +179,7 @@ export interface OutreachControlsResponse {
   context:{contextHash:string;complete:boolean;personId?:string|null;recipientEmail?:string|null;organizationId?:string|null;projectRole?:string|null;cadence?:string|null;reviewEvidence?:unknown};
   provider?:{recipientEmail?:string|null;membershipState?:string|null;verifiedAt?:string|null;source?:string|null;localStatus?:string|null;sequenceId?:string|null}|null;
   proposedContractor?:string|null;
+  proposals?:Array<{id:string;entity:string;entity_id:string;proposed_fields:Record<string,unknown>;reason:string;last_seen_at?:string|null}>;
 }
 
 export type ViewedDraft = Pick<SdrDraft, 'revision' | 'contextHash'>;
