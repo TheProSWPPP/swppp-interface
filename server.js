@@ -41,6 +41,7 @@ import { staleDraftBlock } from "./lib/draftFreshness.js";
 import { normalizeLeadCsv } from "./lib/leadCsvNormalize.js";
 import { isCustomerLead, refreshCustomerIndex, customerIndexStats } from "./lib/customerSuppression.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
+import {prepareDraftCreation,commitDraftCreation,draftCreationOrigin} from "./lib/sdrDraftCreation.js";
 import { serializeDraft, checkViewedDraft, draftContextHash, draftConflict, mutateViewedDraft, refreshViewedDraft, recordDraftApproval, checkApprovedDraft, checkDraftSchedule } from "./lib/sdrDraftRevision.js";
 import { renderAllSteps, defaultSubject, SDR_TEMPLATES } from "./lib/sdrTemplates.js";
 import { registerNurtureRoutes } from "./lib/nurtureRoutes.js";
@@ -4224,6 +4225,8 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
   if (!pipedrive_lead_id) {
     return res.status(400).json({ error: "pipedrive_lead_id required (trigger_type optional — inferred from Pipedrive Trigger_* fields)" });
   }
+  const callbackAuthenticated=req.query?.callback_secret===N8N_CALLBACK_SECRET;
+  if(!req.sdrUser?.sub&&!callbackAuthenticated)return res.status(401).json({error:'Unauthorized'});
   // Permission check only applies to JWT-auth'd users; callback_secret callers (n8n) bypass.
   if (req.sdrUser && assigned_user_id && req.sdrUser.role !== "admin" && assigned_user_id !== req.sdrUser.sub) {
     return res.status(403).json({ error: "Cannot assign draft to another user" });
@@ -4232,10 +4235,12 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
   // POST /api/sdr/drafts and missed this route, which is the one the UI actually calls:
   // drafting against a colleague's private lead created a draft the caller could then read.
   // n8n (callback_secret, no req.sdrUser) is unscoped by design.
-  if (req.sdrUser && !(await leadVisibleTo(pool, pipedrive_lead_id, req.sdrUser))) {
+  if (req.sdrUser && !(await leadVisibleTo(pool, req.sdrUser, pipedrive_lead_id))) {
     return res.status(404).json({ error: "Lead not found" });
   }
   try {
+    const creation=await prepareDraftCreation(pool,{leadId:pipedrive_lead_id,companyId:process.env.SDR_CRM_COMPANY_ID});
+    const origin=draftCreationOrigin({user:req.sdrUser,callbackAuthenticated});
     const payload = await buildDraftFromLead({
       pipedriveLeadId: pipedrive_lead_id,
       triggerType: trigger_type,
@@ -4305,36 +4310,22 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
       }
     }
 
-    // Idempotency — same lead + trigger with an open draft
-    const dup = await pool.query(
-      `SELECT id, status FROM sdr_drafts
-       WHERE pipedrive_lead_id = $1 AND trigger_type = $2
-         AND status IN ('pending','approved','edited','sent') LIMIT 1`,
-      [payload.pipedrive_lead_id, payload.trigger_type],
-    );
-    if (dup.rows[0]) {
-      return res.status(409).json({
-        error: "Open draft already exists for this lead + trigger",
-        existing: dup.rows[0],
-      });
-    }
-
-    const { rows } = await pool.query(
+    const { rows } = await commitDraftCreation(pool,{ticket:creation,payload,origin,insert:(client,artifact)=>client.query(
       `INSERT INTO sdr_drafts (
          pipedrive_lead_id, pipedrive_contact_id, pipedrive_org_id,
          contact_id_snapshot, contact_email_snapshot, org_id_snapshot,
          trigger_type, apollo_sequence_id,
-         subject, body, assigned_mailbox_id, assigned_user_id, metadata
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         subject, body, assigned_mailbox_id, assigned_user_id, metadata, id, content_origin
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING *`,
       [
         payload.pipedrive_lead_id, payload.pipedrive_contact_id, payload.pipedrive_org_id,
         payload.contact_id_snapshot, payload.contact_email_snapshot, payload.org_id_snapshot,
         payload.trigger_type, payload.apollo_sequence_id,
         payload.subject, payload.body, payload.assigned_mailbox_id, payload.assigned_user_id,
-        payload.metadata,
+        payload.metadata,artifact.id,artifact.origin,
       ],
-    );
+    )});
     res.status(201).json({ draft: serializeDraft(rows[0]) });
   } catch (err) {
     // Lost the race to a concurrent generate (uq_sdr_drafts_open) — surface as a clean
@@ -4343,13 +4334,14 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
       return res.status(409).json({ error: "Open draft already exists for this lead + trigger" });
     }
     console.error("POST /api/sdr/drafts/generate error:", err);
-    res.status(err.status || 500).json({ error: err.message || "Draft generation failed" });
+    res.status(err.status || 500).json({ error: err.message || "Draft generation failed",code:err.code });
   }
 });
 
 // SDR drafts — create (typically called by n8n or internal job; sdrUser must be admin OR the assigned_user_id matches)
 app.post("/api/sdr/drafts", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if(!req.sdrUser?.sub)return res.status(401).json({error:'Unauthorized'});
   const {
     pipedrive_lead_id,
     pipedrive_contact_id,
@@ -4387,25 +4379,18 @@ app.post("/api/sdr/drafts", async (req, res) => {
     if (!(await leadVisibleTo(pool, req.sdrUser, pipedrive_lead_id))) {
       return res.status(404).json({ error: "Lead not found" });
     }
+    const creation=await prepareDraftCreation(pool,{leadId:pipedrive_lead_id,companyId:process.env.SDR_CRM_COMPANY_ID,recipientEmail:contact_email_snapshot});
+    const origin=draftCreationOrigin({user:req.sdrUser});
     const mbErr = await mailboxAssignmentError(pool, req.sdrUser, assigned_mailbox_id);
     if (mbErr) return res.status(403).json({ error: mbErr });
-    const dup = await pool.query(
-      `SELECT id FROM sdr_drafts
-       WHERE pipedrive_lead_id = $1 AND trigger_type = $2
-         AND status IN ('pending','approved','edited','sent') LIMIT 1`,
-      [pipedrive_lead_id, trigger_type],
-    );
-    if (dup.rows[0]) {
-      return res.status(409).json({ error: "Open draft already exists for this lead + trigger", existing_id: dup.rows[0].id });
-    }
-    const { rows } = await pool.query(
+    const { rows } = await commitDraftCreation(pool,{ticket:creation,payload:{pipedrive_lead_id,contact_id_snapshot,contact_email_snapshot,org_id_snapshot,metadata},origin,insert:(client,artifact)=>client.query(
       `INSERT INTO sdr_drafts (
          pipedrive_lead_id, pipedrive_contact_id, pipedrive_org_id,
          contact_id_snapshot, contact_email_snapshot, org_id_snapshot,
          trigger_type, apollo_sequence_id, apollo_template_id,
          subject, body, assigned_mailbox_id, assigned_user_id,
-         scheduled_for, metadata
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         scheduled_for, metadata, id, content_origin
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING *`,
       [
         pipedrive_lead_id, pipedrive_contact_id || null, pipedrive_org_id || null,
@@ -4415,13 +4400,13 @@ app.post("/api/sdr/drafts", async (req, res) => {
         // both a lost lead and (before the visibility predicate excluded them) a way to hide a
         // shared-pool lead from every SDR at once.
         subject, body, assigned_mailbox_id || null, assigned_user_id || req.sdrUser?.sub || null,
-        scheduled_for || null, metadata || {},
+        scheduled_for || null, metadata || {},artifact.id,artifact.origin,
       ],
-    );
+    )});
     res.status(201).json({ draft: serializeDraft(rows[0]) });
   } catch (err) {
     console.error("POST /api/sdr/drafts error:", err);
-    res.status(500).json({ error: "Failed to create draft" });
+    res.status(err.code==='23505'?409:err.status||500).json({ error:err.status?err.message:"Failed to create draft",code:err.code });
   }
 });
 

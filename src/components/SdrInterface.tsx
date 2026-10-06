@@ -1357,11 +1357,11 @@ function LeadDetailDrawer({
       const sent = d.status === "sent";
       items.push({
         kind: "draft",
-        label: sent ? `Email sent${d.assigned_to ? ` · ${d.assigned_to}` : ""}` : `Draft ${d.status}${d.assigned_to ? ` · ${d.assigned_to}` : ""}`,
+        label: sent ? `Queued in Apollo${d.assigned_to ? ` · ${d.assigned_to}` : ""}` : `Draft ${d.status}${d.assigned_to ? ` · ${d.assigned_to}` : ""}`,
         at: sent ? (d.sent_at || d.created_at) : d.created_at,
         tone: sent ? "brand" : "slate",
         subject: d.subject,
-        body: sent ? d.body : null, // show the exact email that went out
+        body: sent ? d.body : null, // show the exact copy accepted for enrollment
         from: d.sent_from, // which mailbox it was sent from
         signature: sent ? d.sender_signature : null, // append the real signature in the preview
       });
@@ -2337,7 +2337,7 @@ function QueueView({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <StatTile label="Open" value={counts.open} icon={<Inbox className="h-4 w-4" />} tone="indigo" />
           <StatTile label="Awaiting review" value={counts.pending} icon={<ListChecks className="h-4 w-4" />} tone="slate" />
-          <StatTile label="Sent" value={counts.sent} icon={<Send className="h-4 w-4" />} tone="emerald" />
+          <StatTile label="Enrolled drafts" value={counts.sent} icon={<Send className="h-4 w-4" />} tone="emerald" />
           <StatTile label="Failed" value={counts.failed} icon={<XCircle className="h-4 w-4" />} tone="rose" />
         </div>
       )}
@@ -2523,7 +2523,7 @@ export function DraftRow({
           {draft.trigger_type}
         </span>
         <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full", STATUS_COLORS[draft.status])}>
-          {draft.status}
+          {draft.status === 'sent' ? 'enrolled' : draft.status}
         </span>
         <OutreachBadge status={draft.outreach_status} days={draft.days_since_outgoing} />
         <div className="flex-1 min-w-0">
@@ -2921,7 +2921,7 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
   return (
     <div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <StatTile label="Sent leads" value={summary.leads.length} icon={<Send className="h-4 w-4" />} tone="indigo" />
+        <StatTile label="Enrolled leads" value={summary.leads.length} icon={<Send className="h-4 w-4" />} tone="indigo" />
         <StatTile label="Hot leads" value={hot.length} icon={<Flame className="h-4 w-4" />} tone="rose" />
         <StatTile
           label="Total clicks"
