@@ -7,7 +7,8 @@ it('retains all staff routes and existing project deep links',()=>{
   expect(readWorkspaceView('#/sdr?lead=crm-id')).toBe('sdr');
   expect(readWorkspaceView('#/sdr?tab=inbox&connected=user')).toBe('sdr');
 });
-it('opens the overview on a new or unknown route',()=>{
-  expect(readWorkspaceView('')).toBe('overview');
-  expect(readWorkspaceView('#/unknown')).toBe('overview');
+it('opens SDR on a new, legacy overview or unknown route',()=>{
+  expect(readWorkspaceView('')).toBe('sdr');
+  expect(readWorkspaceView('#/overview')).toBe('sdr');
+  expect(readWorkspaceView('#/unknown')).toBe('sdr');
 });

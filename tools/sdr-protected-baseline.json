@@ -2,7 +2,7 @@
   "protectedAppFiles": [
     {
       "path": "src/App.tsx",
-      "sha256": "833424023b88d64dda856166ec21f318ae88a4d592acaa1c645195b9c8c55e1a"
+      "sha256": "027ce273fc0669561aecf6c183477cfe1257ea5b523495a6cee4c2d5d6e27631"
     },
     {
       "path": "src/data.ts",

@@ -106,7 +106,7 @@
 @media(max-width:767px){.workspace-brand-row{min-height:68px;padding:10px 16px}.workspace-brand img{height:35px}.workspace-nav{display:none}.workspace-mobile-trigger{display:flex}.workspace-identity{display:none}.workspace-review-link{font-size:12px}.workspace-header-right{gap:12px}.workspace-main{padding:18px 16px 40px}.workspace-main-sdr{padding:14px 6px 24px}.workspace-location{margin-bottom:20px;padding:0 2px}.workspace-context-note{display:none}.workspace-page-heading{flex-direction:column;gap:18px;margin-bottom:24px}.workspace-page-heading h1{font-size:29px}.workspace-section-heading{align-items:flex-start}.workspace-section-heading h2{font-size:18px}.workspace-figures{grid-template-columns:minmax(0,1fr)}.workspace-figure+.workspace-figure{border-left:0;border-top:1px solid var(--workspace-line)}.workspace-figure{padding:20px}.workspace-figure>strong{font-size:32px}.workspace-work-grid,.workspace-quick-links,.workspace-sales-metrics,.workspace-review-columns{grid-template-columns:minmax(0,1fr);gap:16px}.workspace-work-panel{padding:20px}.workspace-work-grid{margin-top:24px}.workspace-document-counts{gap:8px}.workspace-document-counts dt{font-size:12px}.workspace-notice{flex-direction:column;align-items:flex-start;padding:20px;gap:18px}.workspace-sales-filters{padding:16px;flex-direction:column;align-items:stretch}.workspace-sales-filters p{margin:0}.workspace-sales-filters label{width:100%}.workspace-sales-filters input,.workspace-sales-filters select{width:100%;min-width:0}.workspace-review-sections summary{padding:14px 16px;font-size:15px}.workspace-review-body{padding:0 16px 16px}.workspace-review-summary{gap:12px}.workspace-review-columns{gap:12px}}
 @media(prefers-reduced-motion:reduce){.workspace-shell *{scroll-behavior:auto;transition:none!important}}
 /* Shared sales components retain SDR tokens; this page owns its spacing. */
-.workspace-shell .workspace-sales{display:block}
+.workspace-shell .workspace-sales{display:flex}
 .workspace-shell .workspace-sales-metrics .sdr-metric{padding:18px 20px;border:1px solid var(--workspace-line);border-radius:8px;background:white}
 .workspace-shell .workspace-sales-metrics .sdr-metric:first-child{padding-left:20px}
 .workspace-shell .workspace-sales-metrics .sdr-metric:last-child{padding-right:20px}
@@ -306,4 +306,39 @@
  .workspace-status-strip > *:nth-child(odd) { border-left: 0; }
  .workspace-status-strip > *:nth-child(n+3) { border-top: 1px solid var(--workspace-line); }
  .workspace-area-ai-content .workspace-status-strip > *:last-child { grid-column: 1/-1; }
+}
+
+/* The SDR is a continuous part of the shared workspace. */
+.workspace-shell .workspace-main-sdr{max-width:none;padding:0}
+.workspace-shell .workspace-area-sdr{min-width:0}
+.workspace-shell .sdr-workspace{border:0;border-radius:0;min-height:calc(100dvh - 68px);background:var(--workspace-page);grid-template-columns:216px minmax(0,1fr)}
+.workspace-shell .sdr-sidebar{background:#f1f5f8;color:#426078;border-right:1px solid var(--workspace-line);padding:20px 14px;min-height:calc(100dvh - 68px)}
+.workspace-shell .sdr-workspace-brand{padding:0 12px 18px;justify-content:space-between}
+.workspace-shell .sdr-workspace-brand strong{font-size:15px;letter-spacing:0;color:#355269}
+.workspace-shell .sdr-lane-switch{background:#e3ebf1;border:0;padding:3px;margin-bottom:20px;border-radius:6px}
+.workspace-shell .sdr-lane-switch button{color:#526579;font-size:12px}
+.workspace-shell .sdr-lane-switch button[aria-pressed=true]{background:white;color:#143549;box-shadow:0 1px 3px #14354912}
+.workspace-shell .sdr-nav-item{color:#426078;font-size:13px;margin-bottom:3px;min-height:44px}
+.workspace-shell .sdr-nav-item:hover{background:#e5edf3;color:#143549}
+.workspace-shell .sdr-nav-item[aria-current]{color:#1c5d8b}
+.workspace-shell .sdr-nav-item[aria-current]>svg{color:#1c5d8b}
+.workspace-shell .sdr-nav-highlight{background:#e0edf6;border-left:3px solid #2873a5;border-radius:4px}
+.workspace-shell .sdr-nav-badge{background:#dce8f1;color:#24577a;font-size:12px}
+.workspace-shell .sdr-nav-separated{border-top-color:#d5e0e8;margin-top:15px;padding-top:15px}
+.workspace-shell .sdr-sidebar-footer{color:#607486;font-size:11px;padding:24px 12px 0}
+.workspace-shell .sdr-workspace-body{background:var(--workspace-page)}
+.workspace-shell .sdr-workspace-topbar{background:#fff;padding:10px 30px;border-bottom:1px solid var(--workspace-line);min-height:62px}
+.workspace-shell .sdr-breadcrumb{font-size:13px}
+.workspace-shell .sdr-workspace-content{padding:26px 30px;max-width:1500px;width:100%;margin-inline:auto}
+.workspace-shell .sdr-live-work,.workspace-shell .sdr-recent-replies{border-radius:8px}
+.workspace-shell .sdr-menu-close{color:#143549}
+@media(max-width:767px){
+ .workspace-shell .workspace-main-sdr{padding:0}
+ .workspace-shell .sdr-workspace{padding:0}
+ .workspace-shell .sdr-workspace-content{padding:20px 16px}
+ .workspace-shell .sdr-workspace-topbar{padding:10px 16px}
+ .workspace-shell .sdr-sidebar{background:#f1f5f8}
+ .workspace-shell .sdr-sidebar:not(.is-open){display:none}
+ .workspace-shell .sdr-sidebar.is-open{display:flex;position:fixed;inset:0;z-index:60;overflow:auto;padding:24px}
+ .workspace-shell .sdr-menu-open,.workspace-shell .sdr-menu-close{display:grid;place-items:center;min-height:44px;min-width:44px}
 }

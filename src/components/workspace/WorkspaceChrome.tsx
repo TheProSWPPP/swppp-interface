@@ -1,9 +1,8 @@
 import {useEffect,useRef,useState,type ReactNode} from 'react';
-import {Archive,BookOpen,ChartNoAxesCombined,ChevronDown,FileCode,Files,LayoutDashboard,ListChecks,Menu,Newspaper,Send,Settings,Upload,X,type LucideIcon} from 'lucide-react';
+import {Archive,BookOpen,ChartNoAxesCombined,ChevronDown,FileCode,Files,ListChecks,Menu,Newspaper,Send,Settings,Upload,X,type LucideIcon} from 'lucide-react';
 import type {SdrUser} from '../../lib/sdrApi';
 import type {WorkspaceView} from './navigation';
 const items:{id:WorkspaceView;label:string;icon:LucideIcon;primary?:boolean}[]=[
-  {id:'overview',label:'Overview',icon:LayoutDashboard,primary:true},
   {id:'sales',label:'Sales',icon:ChartNoAxesCombined,primary:true},
   {id:'dashboard',label:'Documents',icon:Files,primary:true},
   {id:'sdr',label:'SDR',icon:Send,primary:true},
@@ -52,13 +51,13 @@ export default function WorkspaceChrome({view,user,onNavigate,children}:{view:Wo
     <a className="workspace-skip" href="#workspace-main" onClick={event=>{event.preventDefault();document.getElementById('workspace-main')?.focus();}}>Skip to content</a>
     <div inert={open?true:undefined}>
       <header className="workspace-header">
-        <div className="workspace-brand-row"><button className="workspace-brand" aria-label="Pro SWPPP overview" onClick={()=>navigate('overview')}><img src="/logo.webp" alt="Pro SWPPP"/><span>Pro SWPPP</span></button>
+        <div className="workspace-brand-row"><button className="workspace-brand" aria-label="Pro SWPPP SDR home" onClick={()=>navigate('sdr')}><img src="/logo.webp" alt="Pro SWPPP"/><span>Pro SWPPP</span></button>
           <div className="workspace-header-right">{import.meta.env.DEV&&<a className="workspace-review-link" href="#/interface-review" onClick={event=>{event.preventDefault();navigate('interface-review');}}>Local design review</a>}<span className="workspace-identity">{user?user.display_name:'Team workspace'}</span><button ref={trigger} className="workspace-mobile-trigger" aria-label="Open workspace navigation" aria-expanded={open} aria-controls="workspace-drawer" onClick={()=>setOpen(true)}><Menu size={21}/>{view==='sdr'&&<span>Workspace</span>}</button></div>
         </div>
         <nav className="workspace-nav" aria-label="Primary workspace navigation">{items.filter(item=>item.primary).map(navButton)}<div className="workspace-more" ref={moreRef}><button className="workspace-nav-item" aria-expanded={more} aria-controls="workspace-tools" onClick={()=>setMore(!more)}>Tools<ChevronDown size={16}/></button>{more&&<div id="workspace-tools" className="workspace-tools">{items.filter(item=>!item.primary).map(navButton)}</div>}</div></nav>
       </header>
       <main id="workspace-main" tabIndex={-1} className={`workspace-main ${view==='sdr'?'workspace-main-sdr':''}`}>
-        {view!=='sdr'&&<div className="workspace-location"><span>Workspace</span><span aria-hidden="true">/</span><strong>{items.find(item=>item.id===view)?.label||'Overview'}</strong></div>}<div className={`workspace-area workspace-area-${view} ${!['sdr','overview','sales','interface-review'].includes(view)?'workspace-legacy':''}`}>{children}</div>
+        {!['sdr','sales'].includes(view)&&<div className="workspace-location"><span>Workspace</span><span aria-hidden="true">/</span><strong>{items.find(item=>item.id===view)?.label||'SDR'}</strong></div>}<div className={`workspace-area workspace-area-${view} ${!['sdr','sales','interface-review'].includes(view)?'workspace-legacy':''}`}>{children}</div>
       </main>
     </div>
     {open&&<div className="workspace-drawer-layer"><button className="workspace-drawer-backdrop" aria-label="Close workspace navigation" tabIndex={-1} onClick={()=>setOpen(false)}/><div id="workspace-drawer" ref={drawer} className="workspace-drawer" role="dialog" aria-modal="true" aria-labelledby="workspace-drawer-title"><div className="workspace-drawer-heading"><strong id="workspace-drawer-title">Workspace navigation</strong><button aria-label="Close workspace navigation" onClick={()=>setOpen(false)}><X size={21}/></button></div><nav aria-label="Mobile workspace navigation">{items.map(navButton)}</nav></div></div>}
