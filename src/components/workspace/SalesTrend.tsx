@@ -51,7 +51,7 @@ export default function SalesTrend({data,previous,monthBaseline,comparisonLabel,
 
   return <>
     <section className="sales-trend" aria-labelledby={`${id}-title`} data-measure={measure}>
-      <div className="sales-trend-heading"><div><h2 id={`${id}-title`}>Monthly performance</h2><p>All company sales</p></div>
+      <div className="sales-trend-heading"><div><h2 id={`${id}-title`}>Monthly performance</h2><p>Dated Pipedrive wins</p></div>
         <div className="sales-segments" role="group" aria-label="Chart metric">{measures.map(item=><button key={item.id} aria-pressed={measure===item.id} onClick={()=>setMeasure(item.id)}>{item.label}</button>)}</div>
       </div>
       <div className="sales-chart-toolbar"><div className="sales-chart-legend"><span><i/>{measures.find(item=>item.id===measure)?.label}</span>{compare&&<span><i className="is-previous"/>{comparisonLabel}</span>}{warnings.length>0&&<span className="sales-review-key"><i/>Date review</span>}</div>
