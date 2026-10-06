@@ -23,6 +23,7 @@ export function OutreachConflictPanel({data,userId,isAdmin,evidence,onEvidence,o
 
 export default function OutreachConflict({leadId,userId,isAdmin,onChanged}:{leadId:string;userId:string;isAdmin:boolean;onChanged?:()=>void}) {
  const generation=useRef(0);
+ const invalidate=useCallback(()=>{generation.current++;},[]);
  const [data,setData]=useState<OutreachControlsResponse|null>(null);
  const [error,setError]=useState<string|null>(null);
  const [busy,setBusy]=useState(false);
@@ -35,7 +36,7 @@ export default function OutreachConflict({leadId,userId,isAdmin,onChanged}:{lead
   catch(cause){if(request===generation.current){setData(null);setError((cause as Error).message);}}
   finally{if(request===generation.current)setLoading(false);}
  },[leadId]);
- useEffect(()=>{setData(null);setEvidence('');setReason('');setReviewEvidence('');void load();return()=>{generation.current++;};},[load]);
+ useEffect(()=>{setData(null);setEvidence('');setReason('');setReviewEvidence('');void load();return invalidate;},[load,invalidate]);
  async function perform(action:()=>Promise<unknown>) {
   setBusy(true);setError(null);
   try{await action();setEvidence('');setReason('');setReviewEvidence('');await load();onChanged?.();}
