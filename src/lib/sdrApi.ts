@@ -182,6 +182,11 @@ export interface OutreachControlsResponse {
   proposals?:Array<{id:string;entity:string;entity_id:string;proposed_fields:Record<string,unknown>;reason:string;last_seen_at?:string|null}>;
 }
 
+export interface DraftReplacementContext {
+  draft:SdrDraft;
+  context:{contextHash:string;recipientEmail:string;personId:string;organizationId:string;stage:string;trigger:string;mailboxId:string|null;sequenceId:string|null;cadence:string;scheduledFor:string|null};
+}
+
 export type ViewedDraft = Pick<SdrDraft, 'revision' | 'contextHash'>;
 function draftVersion(viewed: ViewedDraft) {return {expectedRevision:viewed.revision,expectedContextHash:viewed.contextHash};}
 
@@ -669,6 +674,9 @@ export const sdrApi = {
   reviewOutreach: (leadId:string,fields:{contextHash:string;projectRole:string;cadence:'standard'|'award_only';evidence:string}) => sdrFetch<{ok:boolean}>(`/api/sdr/leads/${encodeURIComponent(leadId)}/outreach-review`,{method:'POST',body:JSON.stringify(fields)}),
 
   getDraft: (id: string) => sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}`),
+
+  replacementContext: (id:string) => sdrFetch<DraftReplacementContext>(`/api/sdr/drafts/${id}/replacement-context`),
+  createReplacementDraft: (draft:SdrDraft,currentContextHash:string,reason:string) => sdrFetch<{draft:SdrDraft}>(`/api/sdr/drafts/${draft.id}/replacement`,{method:'POST',body:JSON.stringify({expectedDraftId:draft.id,...draftVersion(draft),currentContextHash,reason})}),
 
   engagementSummary: () => sdrFetch<SdrEngagementSummary>("/api/sdr/engagement/summary"),
 

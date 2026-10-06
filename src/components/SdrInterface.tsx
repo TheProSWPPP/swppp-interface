@@ -1,3 +1,4 @@
+import {DraftReplacementReview} from './sdr/DraftReplacementReview';
 import {previewEmailDocument, firstTouchPreview} from '../lib/sdrPreviewEmail';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -2440,6 +2441,8 @@ function QueueView({
             key={d.id}
             draft={d}
             isAdmin={user.role === "admin"}
+            canReplace={user.role === "admin" || d.assigned_user_id === user.id}
+            onReplacementCreated={async () => {await load(); pushToast("success", "Replacement created in Open drafts for review. Nothing was sent.");}}
             mailbox={d.assigned_mailbox_id ? mailboxById[d.assigned_mailbox_id] : undefined}
             expanded={expandedId === d.id}
             onToggle={() => setExpandedId(expandedId === d.id ? null : d.id)}
@@ -2477,9 +2480,13 @@ export function DraftRow({
   onSaveEdit,
   onRefresh,
   onSetSequenceId,
+  canReplace = false,
+  onReplacementCreated,
 }: {
   draft: SdrDraft;
   isAdmin: boolean;
+  canReplace?: boolean;
+  onReplacementCreated?: () => void | Promise<void>;
   mailbox?: SdrMailbox;
   expanded: boolean;
   onToggle: () => void;
@@ -2603,6 +2610,10 @@ export function DraftRow({
               <div className="text-rose-600">Error: <span className="italic">{draft.error_message}</span></div>
             )}
           </div>
+
+          {canReplace && ["failed", "rejected", "cancelled"].includes(draft.status) && (
+            <DraftReplacementReview key={`${draft.id}:${draft.revision}`} draft={draft} disabled={busy || stale} onCreated={onReplacementCreated} />
+          )}
 
           {/* Admin: set a missing sequence id inline instead of via SQL */}
           {canSend && !draft.apollo_sequence_id && isAdmin && (
