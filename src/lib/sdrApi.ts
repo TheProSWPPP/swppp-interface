@@ -359,6 +359,8 @@ export interface SdrEngagementLead {
   last_event_at: string | null;
   last_intent_at: string | null; // most recent OPEN/CLICK only (drives the 96h priority window)
   score: number;
+  priority_eligible: boolean;
+  priority_exclusion: string | null;
 }
 
 export interface SdrEngagementRate {
@@ -528,7 +530,7 @@ export const sdrApi = {
     if (mailbox) p.set("mailbox", mailbox);
     if (q) p.set("q", q);
     const qs = p.toString();
-    return sdrFetch<{ mailbox: string | null; threads: SdrInboxThread[]; note?: string }>(
+    return sdrFetch<{ mailbox: string | null; threads: SdrInboxThread[]; note?: string; coverage?: {complete: boolean; mailboxes: {mailbox: string; status: string}[]} }>(
       `/api/sdr/inbox/threads${qs ? `?${qs}` : ""}`,
     );
   },
@@ -545,6 +547,7 @@ export const sdrApi = {
         permit?: { operator_key: string; contact_name: string | null };
       })[];
       mailboxes: string[];
+      coverage: {complete: boolean; mailboxes: {mailbox: string; status: string}[]};
     }>("/api/sdr/inbox/overview"),
   getInboxThread: (id: string, mailbox?: string) =>
     sdrFetch<{ mailbox: string; id: string; messages: SdrInboxMessage[] }>(
