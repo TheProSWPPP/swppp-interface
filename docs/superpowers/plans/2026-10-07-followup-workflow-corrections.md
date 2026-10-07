@@ -42,3 +42,9 @@ No database migration, n8n workflow change, CRM/provider mutation, production de
 ## Final local receipt
 
 Verified 2026-10-07T22:00:49.556257+00:00 (UTC): **1,334 tests passed across 121 files, no skipped tests** with isolated localhost PostgreSQL. Final TypeScript/Vite production build, `node --check server.js` and `git diff --check` passed. New attribution cases failed before correction and pass afterward. Independent final review confirmed rejected-draft handling, current campaign/mailbox/timing attribution, true source-check timestamps and ambiguous task-link rejection. No live release was performed.
+
+## Deployment preflight follow-up
+
+User authorized this release after reviewing its interface/read-query scope. Live-data preflight found the recent-context query exceeded 20 seconds despite passing small-fixture tests. EXPLAIN ANALYZE identified repeated open-task scanning and detail expansion for thousands of projects before pagination. Materializing open-task IDs once and applying the existing page limit before detail expansion preserved semantics and reduced live read-only checks to about 3.5 seconds for both administrator and staff views. Independent review confirmed cursor, visibility and evidence behavior is unchanged. The full 1,334-test suite and production build passed again.
+
+The live hold baseline contains 40 active restrictions, including the four explicitly tracked restrictions. No restriction is released by this change. Startup-job source review confirmed send holds and durable provider-operation barriers remain in force. Existing partial collection and provider-review backlogs are not cleared or replayed as part of deployment.
