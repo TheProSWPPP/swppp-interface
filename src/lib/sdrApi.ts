@@ -172,7 +172,7 @@ export interface SdrDraft {
 export type OutreachDecision = 'keep_held' | 'release' | 'keep_contact_with_verified_role' | 'review_replacement';
 export interface OutreachControl {
   id:string;version:number;scope_kind:string;scope_id:string;reason:string;owner_id:string;
-  context_hash:string;provider_stop_status:string;channel?:string|null;
+  context_hash:string;provider_stop_status:string;channel?:string|null;canResolveOnProject:boolean;
 }
 export interface OutreachControlsResponse {
   controls:OutreachControl[];applicationActionsBlocked:boolean;providerStopStatus:string;
