@@ -66,3 +66,13 @@ This addition is staged in the same candidate. It does not correct historical re
 Runtime requirements: keep `SDR_REPLY_ACTIONS_ENABLED=true`; the legacy reply path does not gain these checks. Apply `2026-10-07-sdr-open-alerts.sql` before enabling `SDR_OPEN_ALERTS_ENABLED=true`. The new open-alert worker is disabled by default, and the existing legacy alert path remains until that explicit switch. Job health reports unresolved durable alerts when enabled. This flag is not a production deployment receipt.
 
 Remaining rollout work: populate and continuously synchronize independently linked conversation history, validate real manually authored message provenance, review ambiguous cases and explicit unsubscribe scope, and complete the coordinated app/workflow observation gate above. Successful email delivery does not prove that manual CRM context is synchronized. No automatic rewrite of old notes, activities or staff choices is included.
+
+## Coordinated non-Brevo release boundary
+
+The initial coordinated scope is this app plus the nine non-Brevo workflow barriers. Gravity Order Form Received and Brevo Project Completion remain unchanged; their inputs and reachable behavior are independent of those nine barriers. LinkedIn remains excluded. The inactive legacy dispatcher must remain inactive.
+
+Start with an explicit company observation policy and no inferred reviewed cohort. Workflow barriers are global within their definitions: queued dispatch and existing-field changes become proposals. During observation, Ivan/Codex release review owns a central read-only report covering every proposal entity type and missing-company-scope execution results. The current per-lead panel does not expose every organization, activity or dispatch proposal. A proposal is not permission to apply it; use fresh exact-context review and retain the outcome receipt.
+
+Production-data rehearsal found older drafts missing explicit sender snapshots. Staff can record the current role/cadence review, which captures sender identity while preserving subject/body and invalidating prior approval. No bulk sender backfill or historical authorship inference is allowed. Pipedrive v2 person `emails` and v1 `email` are normalized consistently in context checks and SQL projections, including authoritative empty arrays.
+
+The observation clock begins only after the app, nine barriers and zero-row SQL credential probe are verified live. Readiness tests or elapsed deployment time alone do not start or pass that gate.
