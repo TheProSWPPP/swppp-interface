@@ -676,24 +676,32 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   // drawer when the lead has no inbox thread yet (e.g. a high-intent lead who opened but hasn't
   // replied — nothing is in the inbox to open).
   useEffect(() => {
-    const hash = window.location.hash;
-    const qi = hash.indexOf("?");
-    if (qi === -1) return;
-    const inboxLead = new URLSearchParams(hash.slice(qi + 1)).get("inboxLead");
-    if (!inboxLead) return;
-    window.history.replaceState(null, "", hash.slice(0, qi)); // strip so refresh doesn't reopen
-    (async () => {
-      try {
-        const r = await sdrApi.findLeadThread(inboxLead);
-        if (r?.threadId && r?.mailbox) {
-          goInbox({ threadId: r.threadId, mailbox: r.mailbox });
-          return;
+    let generation = 0;
+    const openInboxLink = () => {
+      const hash = window.location.hash;
+      const qi = hash.indexOf("?");
+      if (qi === -1) return;
+      const inboxLead = new URLSearchParams(hash.slice(qi + 1)).get("inboxLead");
+      if (!inboxLead) return;
+      const request = ++generation;
+      window.history.replaceState(null, "", hash.slice(0, qi));
+      (async () => {
+        try {
+          const r = await sdrApi.findLeadThread(inboxLead);
+          if (request !== generation) return;
+          if (r?.threadId && r?.mailbox) {
+            goInbox({ threadId: r.threadId, mailbox: r.mailbox });
+            return;
+          }
+        } catch {
+          /* fall through to the drawer */
         }
-      } catch {
-        /* fall through to the drawer */
-      }
-      setDeepLeadId(inboxLead);
-    })();
+        if (request === generation) setDeepLeadId(inboxLead);
+      })();
+    };
+    openInboxLink();
+    window.addEventListener("hashchange", openInboxLink);
+    return () => { generation++; window.removeEventListener("hashchange", openInboxLink); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
@@ -750,7 +758,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {(tab === "templates" || tab === "sequences") && <MessagingView user={user} pushToast={push} />}
           {tab === "permits" && <PermitsTab pushToast={(m, k) => push(k ?? "success", m)} />}
           {tab === "team" && user.role === "admin" && <TeamView pushToast={push} />}
-          {tab === "followups" && user.role === "admin" && <CrmFollowUps onOpenLead={setDeepLeadId} />}
+          {tab === "followups" && <CrmFollowUps onOpenLead={setDeepLeadId} isAdmin={user.role === "admin"} />}
         </>
       ) : (
         <>
@@ -2773,9 +2781,9 @@ export function DraftRow({
 // interest ages off on its own so the list stays a short, actionable set.
 const HIGH_INTENT_WINDOW_MS = 96 * 60 * 60 * 1000;
 function isHot(l: SdrEngagementLead): boolean {
-  if (l.replies > 0 || l.send_status === "replied") return false; // replied → handled in inbox
+  if (l.priority_eligible !== true || l.replies > 0 || !["enrolled", "sent"].includes(l.send_status || "")) return false; // replied → handled in inbox
   const ts = l.last_intent_at ? new Date(l.last_intent_at).getTime() : NaN;
-  if (!Number.isFinite(ts) || Date.now() - ts > HIGH_INTENT_WINDOW_MS) return false; // not recent
+  if (!Number.isFinite(ts) || ts > Date.now() || Date.now() - ts > HIGH_INTENT_WINDOW_MS) return false; // not recent
   return l.opens >= 3 || l.clicks > 0;
 }
 
@@ -2932,35 +2940,39 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
   return (
     <div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <StatTile label="Enrolled leads" value={summary.leads.length} icon={<Send className="h-4 w-4" />} tone="indigo" />
-        <StatTile label="Hot leads" value={hot.length} icon={<Flame className="h-4 w-4" />} tone="rose" />
+        <StatTile label="Current sent projects" value={summary.leads.length} icon={<Send className="h-4 w-4" />} tone="indigo" />
+        <StatTile label="Priority projects" value={hot.length} icon={<Flame className="h-4 w-4" />} tone="rose" />
         <StatTile
-          label="Total clicks"
+          label="Clicks · 96h"
           value={summary.leads.reduce((a, l) => a + l.clicks, 0)}
           icon={<MousePointerClick className="h-4 w-4" />}
           tone="emerald"
         />
         <StatTile
-          label="Replies"
+          label="Replies · 96h"
           value={summary.leads.reduce((a, l) => a + l.replies, 0)}
           icon={<Reply className="h-4 w-4" />}
           tone="emerald"
         />
       </div>
 
+      <p className="mb-4 text-xs text-slate-500">
+        One current recipient per project. Counts use attributed messages in the last 96 hours; unknown and historical-recipient activity is excluded.
+        Opens and clicks are engagement signals, not confirmed interest. Dismiss hides this draft for you; it does not complete a task or stop outreach.
+        {summary.leads.some(l => l.priority_exclusion) && ` ${summary.leads.filter(l => l.priority_exclusion).length} projects are excluded from Priority because outreach is held, provider state is unverified, a reply is recorded, or the send is inactive.`}
+      </p>
       {summary.leads.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-12 text-center">
           <Flame className="h-8 w-8 text-slate-300 mx-auto mb-3" />
-          <div className="text-sm font-semibold text-slate-700">No sent leads yet</div>
+          <div className="text-sm font-semibold text-slate-700">No verified current sent projects</div>
           <p className="text-xs text-slate-500 mt-1">
-            Once drafts are approved and Apollo engagement events start flowing, leads will rank here by opens, clicks
-            and replies — most engaged first.
+            Current CRM projects appear here once their sent messages and recipients can be verified.
           </p>
         </div>
       ) : (
         <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-900">Recent high intent</div>
+            <div className="text-sm font-semibold text-slate-900">Recent engagement</div>
             <div className="flex items-center gap-3">
               {hiddenCount > 0 && (
                 <button
@@ -2971,12 +2983,12 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
                   {hiddenCount} dismissed · restore
                 </button>
               )}
-              <div className="text-xs text-slate-400">Opened 3+ times or clicked in the last 96h · no reply yet</div>
+              <div className="text-xs text-slate-400">3+ attributed opens or a click in 96h · no recorded reply</div>
             </div>
           </div>
           {hot.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-slate-500">
-              All caught up — no recent high-intent leads waiting on a call.
+              No current projects meet the engagement criteria. Check Follow-ups for other work.
             </div>
           ) : (
           <ul className="divide-y divide-slate-100">
@@ -3100,7 +3112,7 @@ function emailFromHeader(s: string | null | undefined): string {
   return (m ? m[1] : s).trim();
 }
 
-type OverviewThread = SdrInboxThread & { mailbox: string; to?: string | null; openable?: boolean; outreached?: boolean; direction?: "in" | "out"; lastOutbound?: boolean; kind?: "sdr" | "permit"; permit?: { operator_key: string; contact_name: string | null }; handled?: boolean };
+type OverviewThread = SdrInboxThread & { mailbox: string; to?: string | null; openable?: boolean; outreached?: boolean; direction?: "in" | "out"; lastOutbound?: boolean; kind?: "sdr" | "permit"; permit?: { operator_key: string; contact_name: string | null }; handled?: boolean; attribution?: "unresolved" };
 
 // A thread is "waiting on us" when the lead replied and our latest message isn't the last
 // one in the thread — unless a rep manually marked it handled. Used for the Inbox badge +
@@ -3220,6 +3232,7 @@ function InboxView({
   const [mailbox, setMailbox] = useState<string | null>(null);
   const [needsOnly, setNeedsOnly] = useState(false);
   const [threads, setThreads] = useState<OverviewThread[] | null>(null);
+  const [coverage, setCoverage] = useState<{complete: boolean; mailboxes: {mailbox: string; status: string}[]} | null>(null);
   const [loading, setLoading] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [openMailbox, setOpenMailbox] = useState<string | null>(null);
@@ -3251,9 +3264,9 @@ function InboxView({
     setThread(null);
     const p =
       view === "outreach"
-        ? sdrApi.getInboxOverview().then((d) => d.threads as OverviewThread[])
+        ? sdrApi.getInboxOverview().then((d) => { setCoverage(d.coverage); return d.threads as OverviewThread[]; })
         : mailbox
-          ? sdrApi.getInboxThreads(mailbox).then((d) => (d.threads as OverviewThread[]).map((t) => ({ ...t, mailbox: mailbox })))
+          ? sdrApi.getInboxThreads(mailbox).then((d) => { setCoverage(d.coverage || null); return (d.threads as OverviewThread[]).map((t) => ({ ...t, mailbox: mailbox })); })
           : Promise.resolve([] as OverviewThread[]);
     p.then(setThreads)
       .catch((e) => pushToast("error", e.message))
@@ -3494,6 +3507,12 @@ function InboxView({
           : "Everything in this mailbox's inbox."}
       </p>
 
+      {coverage && !coverage.complete && (
+        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Inbox coverage is incomplete. Needs reply counts cover loaded threads only.
+          {coverage.mailboxes.filter(box => box.status !== "complete").map(box => ` ${box.mailbox}: ${box.status === "limited" ? "more inbox pages available" : box.status === "disconnected" ? "not connected" : "mailbox read failed"}.`).join("")}
+        </p>
+      )}
       {connected.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
           No mailbox connected yet. Connect {user.role === "admin" ? "a mailbox" : "your mailbox"} above to read and reply here.
@@ -3505,7 +3524,7 @@ function InboxView({
               <div className="p-6 text-sm text-slate-400">Loading…</div>
             ) : !displayThreads.length ? (
               <div className="p-6 text-sm text-slate-400">
-                {needsOnly ? "Nothing waiting on a reply." : view === "outreach" ? "No outreach sends or replies yet." : "No messages."}
+                {needsOnly ? "No loaded threads waiting on a reply." : view === "outreach" ? "No outreach sends or replies in loaded threads." : "No loaded messages."}
               </div>
             ) : (
               displayThreads.map((t) => (
@@ -3570,6 +3589,7 @@ function InboxView({
                         Permit{t.permit?.contact_name ? ` · ${t.permit.contact_name}` : ""}
                       </span>
                     )}
+                    {t.attribution === "unresolved" && <span className="text-xs text-amber-700">Project attribution needs review</span>}
                     {t.lead && (
                       <span className="inline-block rounded bg-brand-100 px-1.5 py-0.5 text-[11px] text-brand-700">
                         {t.lead.lead_title || "Linked lead"}

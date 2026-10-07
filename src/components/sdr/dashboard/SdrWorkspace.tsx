@@ -10,7 +10,7 @@ export default function SdrWorkspace({user,lane,active,onLaneChange,onNavigate,o
   const closeButton=useRef<HTMLButtonElement>(null);
   useEffect(()=>{if(menuOpen) closeButton.current?.focus();},[menuOpen]);
   const closeMenu=()=>{setMenuOpen(false);requestAnimationFrame(()=>openButton.current?.focus());};
-  const items=(lane==='cold'?coldItems:nurtureItems).filter(item=>!['team','followups'].includes(item.id)||user.role==='admin');
+  const items=(lane==='cold'?coldItems:nurtureItems).filter(item=>item.id!=='team'||user.role==='admin');
   const activeLabel=items.find(item=>item.id===active)?.label||'Templates';
   return <div className="sdr-workspace">
     <aside className={`sdr-sidebar ${menuOpen?'is-open':''}`} aria-label="Outreach workspace" onKeyDown={event=>{if(menuOpen&&event.key==='Escape'){event.preventDefault();closeMenu();}if(menuOpen&&event.key==='Tab'){const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button'));const first=buttons[0];const last=buttons[buttons.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}}}>

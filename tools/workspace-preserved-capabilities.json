@@ -1,5 +1,5 @@
 {
-  "scope": "Observation-only release October 6: preserve staff document and outbound actions; additions are admin read-only CRM follow-ups/history and presentation changes. No contact recovery, sequence switching or send enforcement changes.",
+  "scope": "October 7 Follow-ups local revision: staff document mutation handlers preserved. Follow-ups navigation now available to SDR staff with existing lead visibility enforced server-side. No outbound action changes.",
   "handlers": {
     "handleUpdateProject": "a91bb23a386d359b0f4f61bf3133bf9807fd71f83a4c06f474f949e4b645aaab",
     "handleDeleteProject": "c15e427af3b275459793eb6935e6b8becc4365e02788833cadc1e60f524872cb",
@@ -12,7 +12,7 @@
     },
     {
       "path": "src/components/sdr/dashboard/SdrWorkspace.tsx",
-      "sha256": "981ecdd751c42510a99533ae98b0ca69ad2e1756cbf86762045e9e427412f8d8"
+      "sha256": "c32c4d4be31c2644fd7860c741cada0761142c9480ed8a4cc4be80559c59089f"
     }
   ]
 }

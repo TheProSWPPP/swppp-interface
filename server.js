@@ -1,3 +1,5 @@
+import { readInboxPages, inboxLeadEvidence, applyInboxHandled } from './lib/sdrInboxOverview.js';
+import { buildEngagementSummary } from './lib/sdrEngagementSummary.js';
 // BEGIN OBSERVATION ADDITION
 import { registerWorkspaceOverviewRoutes } from './lib/workspaceOverviewRoutes.js';
 import { createPipedriveObservationClient } from './lib/pipedriveObservationClient.js';
@@ -2789,28 +2791,22 @@ app.get("/api/sdr/inbox/messages/:id/headers", async (req, res) => {
   }
 });
 
-// Thread list for a mailbox (scoped). Each thread linked to its lead by sender email.
+// Thread list for a mailbox (scoped). Project links require verified thread evidence.
 app.get("/api/sdr/inbox/threads", async (req, res) => {
   try {
     const mailbox = await resolveMailbox(req.sdrUser, req.query.mailbox);
     if (!mailbox) return res.json({ mailbox: null, threads: [], note: "No connected mailbox" });
     const token = await accessTokenForMailbox(mailbox);
     const q = req.query.q ? String(req.query.q) : "in:inbox";
-    const threads = await gmailInbox.listThreads(token, { q, maxResults: 25 });
-    const froms = [...new Set(threads.map((t) => parseEmailAddr(t.from)).filter(Boolean))];
-    const leadMap = {};
-    if (froms.length) {
-      const { rows } = await pool.query(
-        `SELECT lower(person_email) e, pipedrive_lead_id, lead_title FROM sdr_lead_state WHERE lower(person_email) = ANY($1)`,
-        [froms],
-      );
-      for (const r of rows) leadMap[r.e] = { lead_id: r.pipedrive_lead_id, lead_title: r.lead_title };
-    }
+    const page = await gmailInbox.listThreadPage(token, { query: q, maxResults: 25 });
+    const threads = page.threads.map(t => ({...t,mailbox}));
+    const evidence = await inboxLeadEvidence(pool, threads, req.sdrUser, process.env.SDR_CRM_COMPANY_ID);
     for (const t of threads) {
-      const e = parseEmailAddr(t.from);
-      t.lead = e ? leadMap[e] || null : null;
+      const lead = evidence.get(`${mailbox.toLowerCase()}:${t.id}`);
+      t.lead = lead ? {lead_id:lead.pipedrive_lead_id,lead_title:lead.lead_title} : null;
+      if (!lead) t.attribution = "unresolved";
     }
-    res.json({ mailbox, threads });
+    res.json({ mailbox, threads, coverage: {complete:!page.nextPageToken,mailboxes:[{mailbox,status:page.nextPageToken?"limited":"complete"}]} });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
@@ -3026,27 +3022,21 @@ app.get("/api/sdr/leads/:leadId/thread", async (req, res) => {
 // across every mailbox the user can see, keeps only conversations whose counterpart
 // is a lead in our book (i.e. tied to outreach), and tags each with its mailbox + lead.
 app.get("/api/sdr/inbox/overview", async (req, res) => {
+  if (!req.sdrUser?.sub) return res.status(401).json({ error: "Unauthorized" });
   try {
     const vis = await visibleMailboxes(req.sdrUser);
     const boxes = vis.filter((v) => v.connected).map((v) => v.email);
-    if (!boxes.length) return res.json({ threads: [], mailboxes: [] });
+    if (!boxes.length) return res.json({ threads: [], mailboxes: [], coverage: { complete: false, mailboxes: vis.map(v => ({mailbox:v.email,status:"disconnected"})) } });
     // 1) Inbound REPLIES from the connected Gmail inboxes, matched to a known SDR lead or
     //    permit operator by the From address. These are openable threads. (We do NOT read
     //    in:sent — the mailboxes run Apollo warmup, which floods Sent with fake emails;
     //    real sends come from our own records below.)
     // Read all mailboxes in PARALLEL (was sequential — the main source of the slow load).
-    const perBox = await Promise.all(
-      boxes.map(async (mb) => {
-        try {
-          const token = await accessTokenForMailbox(mb);
-          const threads = await gmailInbox.listThreads(token, { q: "in:inbox", maxResults: 12 });
-          return threads.map((t) => ({ ...t, mailbox: mb }));
-        } catch {
-          return []; // skip a mailbox that errors, keep the rest
-        }
-      }),
-    );
-    const all = perBox.flat();
+    const pageResult = await readInboxPages(boxes, { accessTokenForMailbox, gmailInbox });
+    const all = pageResult.threads;
+    for (const box of vis.filter(v => !v.connected)) pageResult.coverage.mailboxes.push({mailbox:box.email,status:"disconnected"});
+    if (vis.some(v => !v.connected)) pageResult.coverage.complete=false;
+    const exactLeads = await inboxLeadEvidence(pool, all, req.sdrUser, process.env.SDR_CRM_COMPANY_ID);
     // Match on EVERY participant of each thread, not just the last message's From. A B2B
     // reply often comes from a different person than the one we emailed (we email Todd,
     // his colleague Kyle replies on the same thread) — that thread still belongs to the
@@ -3056,12 +3046,13 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
     const candidateEmails = [...new Set(all.flatMap((t) => partsOf(t)))];
     const leadMap = {};
     const permitMap = {};
+    const visibility = leadVisibilityScope(req.sdrUser, "s");
     if (candidateEmails.length) {
       const [sdrRes, permitRes] = await Promise.all([
         pool.query(
           `SELECT lower(s.person_email) e, s.pipedrive_lead_id, s.lead_title
-             FROM sdr_lead_state s WHERE lower(s.person_email) = ANY($1)`,
-          [candidateEmails],
+             FROM sdr_lead_state s WHERE lower(s.person_email) = ANY($1) AND s.crm_company_id=$2 AND ${visibility.requires ? visibility.sql("$3") : "$3::text IS NULL"}`,
+          [candidateEmails, process.env.SDR_CRM_COMPANY_ID, visibility.value],
         ),
         pool.query(
           `SELECT lower(email) e, contact_name, operator_key FROM permit_operator_email WHERE lower(email) = ANY($1)`,
@@ -3074,39 +3065,24 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
     const repliedLeads = new Set();
     const repliedOps = new Set();
     const replyThreads = [];
-    // When one contact email belongs to several leads (the same GC contact across multiple
-    // projects), pick the lead whose title best overlaps the thread subject — otherwise the
-    // reply surfaces under an arbitrary sibling lead and reads as "missing".
-    const scoreTitle = (title, subject) => {
-      const toks = (s) => new Set(String(s || "").toLowerCase().match(/[a-z0-9]{4,}/g) || []);
-      const subjToks = toks(subject);
-      let n = 0;
-      for (const w of toks(title)) if (subjToks.has(w)) n++;
-      return n;
-    };
     for (const t of all) {
       // Skip bounces / NDRs ("address not found") and auto-replies — they land in the inbox and
       // match a lead by the quoted recipient, but they are NOT real replies and must never show
       // as "needs reply". The bounce itself is recorded + stops the sequence in the reply-watch.
       if (classifyInbound(t.from, t.subject, t.snippet)) continue;
-      // Gather every lead any participant maps to, then disambiguate by subject. SDR lead
-      // takes priority over permit.
+      // Participants establish outreach relevance only. Project identity requires exact thread evidence.
       const leadCands = [];
       let permit = null;
       for (const p of partsOf(t)) {
         if (leadMap[p]) leadCands.push(...leadMap[p]);
         if (!permit && permitMap[p]) permit = permitMap[p];
       }
-      let sdr = null;
-      if (leadCands.length) {
-        sdr = leadCands.reduce(
-          (best, c) => (scoreTitle(c.lead_title, t.subject) > scoreTitle(best.lead_title, t.subject) ? c : best),
-          leadCands[0],
-        );
-      }
+      const sdr = exactLeads.get(`${t.mailbox.toLowerCase()}:${t.id}`);
       if (sdr) {
         repliedLeads.add(sdr.pipedrive_lead_id);
         replyThreads.push({ ...t, openable: true, kind: "sdr", direction: "in", lead: { lead_id: sdr.pipedrive_lead_id, lead_title: sdr.lead_title } });
+      } else if (leadCands.length || exactLeads.has(`${t.mailbox.toLowerCase()}:${t.id}`)) {
+        replyThreads.push({ ...t, openable: true, kind: "sdr", direction: "in", lead: null, attribution: "unresolved" });
       } else if (permit) {
         repliedOps.add(permit.operator_key);
         replyThreads.push({ ...t, openable: true, kind: "permit", direction: "in", lead: null, permit: { operator_key: permit.operator_key, contact_name: permit.contact_name } });
@@ -3128,9 +3104,9 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
       pool.query(
         `SELECT o.pipedrive_lead_id, o.sender_name, o.sender_email, o.subject, o.sent_at, s.lead_title, s.person_email
            FROM sdr_outreach_log o JOIN sdr_lead_state s ON s.pipedrive_lead_id = o.pipedrive_lead_id
-          WHERE o.source = 'interface' AND ($1::boolean OR lower(o.sender_email) = ANY($2))
+          WHERE o.source = 'interface' AND s.crm_company_id=$3 AND ($1::boolean OR lower(o.sender_email) = ANY($2))
           ORDER BY o.sent_at DESC LIMIT 40`,
-        [isAdmin, ownEmails],
+        [isAdmin, ownEmails, process.env.SDR_CRM_COMPANY_ID],
       ),
       pool.query(
         `SELECT ps.operator_key, ps.sent_at, po.operator_name, m.email AS mailbox_email,
@@ -3170,16 +3146,15 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
     const replyIds = replyThreads.map((t) => t.id).filter(Boolean);
     if (replyIds.length) {
       const { rows: handledRows } = await pool.query(
-        `SELECT thread_id FROM sdr_inbox_handled WHERE thread_id = ANY($1)`,
+        `SELECT thread_id, mailbox_email, handled_at FROM sdr_inbox_handled WHERE thread_id = ANY($1)`,
         [replyIds],
       );
-      const handledSet = new Set(handledRows.map((r) => r.thread_id));
-      for (const t of replyThreads) if (handledSet.has(t.id)) t.handled = true;
+      applyInboxHandled(replyThreads, handledRows, classifyInbound);
     }
 
     const threads = [...replyThreads, ...sendItems]
-      .sort((a, b) => (Date.parse(b.date || "") || 0) - (Date.parse(a.date || "") || 0));
-    res.json({ threads, mailboxes: boxes });
+      .sort((a, b) => (Date.parse(b.receivedAt || b.date || "") || 0) - (Date.parse(a.receivedAt || a.date || "") || 0));
+    res.json({ threads, mailboxes: boxes, coverage: pageResult.coverage });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
@@ -4161,84 +4136,10 @@ app.get("/api/sdr/templates", (req, res) => {
 app.get("/api/sdr/engagement/summary", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   try {
-    const scope = ownerScope(req.sdrUser, "d.assigned_user_id");
-    const params = [];
-    let ownerWhere = "";
-    if (scope.requires) {
-      params.push(scope.value);
-      ownerWhere = ` AND d.assigned_user_id = $${params.length}`;
-    }
-
-    const leads = await pool.query(
-      `SELECT
-         d.id AS draft_id,
-         d.pipedrive_lead_id,
-         d.trigger_type,
-         d.assigned_user_id,
-         d.contact_email_snapshot,
-         d.metadata->>'pipedrive_lead_title' AS lead_title,
-         d.sent_at,
-         s.status AS send_status,
-         COUNT(e.id) FILTER (WHERE e.event_type = 'email_opened')::int AS opens,
-         COUNT(e.id) FILTER (WHERE e.event_type IN ('email_clicked','link_clicked'))::int AS clicks,
-         COUNT(e.id) FILTER (WHERE e.event_type IN ('email_replied','reply_received'))::int AS replies,
-         MAX(e.occurred_at) AS last_event_at,
-         MAX(e.occurred_at) FILTER (WHERE e.event_type IN ('email_opened','email_clicked','link_clicked')) AS last_intent_at,
-         ROUND(COALESCE(SUM(
-           (CASE WHEN e.event_type IN ('email_replied','reply_received') THEN 10
-                 WHEN e.event_type IN ('email_clicked','link_clicked') THEN 5
-                 WHEN e.event_type = 'email_opened' THEN 1
-                 ELSE 0 END)
-           * EXP(-LN(2) * GREATEST(EXTRACT(EPOCH FROM (NOW() - e.occurred_at)), 0) / (7 * 86400))
-         ), 0)::numeric, 2)::float AS score
-       FROM sdr_drafts d
-       LEFT JOIN LATERAL (
-         SELECT status FROM sdr_sends WHERE draft_id = d.id ORDER BY sent_at DESC LIMIT 1
-       ) s ON TRUE
-       LEFT JOIN sdr_engagement_events e ON e.pipedrive_lead_id = d.pipedrive_lead_id
-       WHERE d.status = 'sent'${ownerWhere}
-       GROUP BY d.id, s.status
-       ORDER BY score DESC, last_event_at DESC NULLS LAST, d.sent_at DESC
-       LIMIT 200`,
-      params,
-    );
-
-    const byTrigger = await pool.query(
-      `SELECT
-         d.trigger_type,
-         COUNT(DISTINCT d.id)::int AS sent,
-         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type = 'email_opened')::int AS opened,
-         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type IN ('email_clicked','link_clicked'))::int AS clicked,
-         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type IN ('email_replied','reply_received'))::int AS replied
-       FROM sdr_drafts d
-       LEFT JOIN sdr_engagement_events e ON e.pipedrive_lead_id = d.pipedrive_lead_id
-       WHERE d.status = 'sent'${ownerWhere}
-       GROUP BY d.trigger_type
-       ORDER BY d.trigger_type`,
-      params,
-    );
-
-    const bySender = await pool.query(
-      `SELECT
-         u.username,
-         u.display_name,
-         COUNT(DISTINCT d.id)::int AS sent,
-         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type = 'email_opened')::int AS opened,
-         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type IN ('email_clicked','link_clicked'))::int AS clicked,
-         COUNT(DISTINCT d.id) FILTER (WHERE e.event_type IN ('email_replied','reply_received'))::int AS replied
-       FROM sdr_drafts d
-       JOIN sdr_users u ON u.id = d.assigned_user_id
-       LEFT JOIN sdr_engagement_events e ON e.pipedrive_lead_id = d.pipedrive_lead_id
-       WHERE d.status = 'sent'${ownerWhere}
-       GROUP BY u.username, u.display_name
-       ORDER BY u.username`,
-      params,
-    );
-
-    res.json({ leads: leads.rows, by_trigger: byTrigger.rows, by_sender: bySender.rows });
+    res.json(await buildEngagementSummary(pool, { user: req.sdrUser, companyId: process.env.SDR_CRM_COMPANY_ID }));
   } catch (err) {
-    console.error("GET /api/sdr/engagement/summary error:", err);
-    res.status(500).json({ error: "Failed to build engagement summary" });
+    if (!err.status || err.status >= 500) console.error("GET /api/sdr/engagement/summary error:", err);
+    res.status(err.status || 500).json({ error: err.status ? err.message : "Failed to build engagement summary" });
   }
 });
 
