@@ -132,6 +132,8 @@ export type SdrDraftStatus =
 
 export interface SdrDraft {
   id: string;
+  revision: string;
+  contextHash: string;
   pipedrive_lead_id: string;
   pipedrive_contact_id: string | null;
   pipedrive_org_id: string | null;
@@ -166,6 +168,27 @@ export interface SdrDraft {
   lead_person_name?: string | null;
   days_since_outgoing?: number | null;
 }
+
+export type OutreachDecision = 'keep_held' | 'release' | 'keep_contact_with_verified_role' | 'review_replacement';
+export interface OutreachControl {
+  id:string;version:number;scope_kind:string;scope_id:string;reason:string;owner_id:string;
+  context_hash:string;provider_stop_status:string;channel?:string|null;
+}
+export interface OutreachControlsResponse {
+  controls:OutreachControl[];applicationActionsBlocked:boolean;providerStopStatus:string;
+  context:{contextHash:string;complete:boolean;personId?:string|null;recipientEmail?:string|null;organizationId?:string|null;projectRole?:string|null;cadence?:string|null;reviewEvidence?:unknown};
+  provider?:{recipientEmail?:string|null;membershipState?:string|null;verifiedAt?:string|null;source?:string|null;localStatus?:string|null;sequenceId?:string|null}|null;
+  proposedContractor?:string|null;
+  proposals?:Array<{id:string;entity:string;entity_id:string;proposed_fields:Record<string,unknown>;reason:string;last_seen_at?:string|null}>;
+}
+
+export interface DraftReplacementContext {
+  draft:SdrDraft;
+  context:{contextHash:string;recipientEmail:string;personId:string;organizationId:string;stage:string;trigger:string;mailboxId:string|null;sequenceId:string|null;cadence:string;scheduledFor:string|null};
+}
+
+export type ViewedDraft = Pick<SdrDraft, 'revision' | 'contextHash'>;
+function draftVersion(viewed: ViewedDraft) {return {expectedRevision:viewed.revision,expectedContextHash:viewed.contextHash};}
 
 export type SdrOutreachStatus = "clear" | "contacted_recent" | "contacted_stale" | "sequenced";
 
@@ -215,6 +238,8 @@ export interface SdrLeadDetail {
   lead: SdrLead;
   drafts: {
     id: string;
+    revision: string;
+    contextHash: string;
     trigger_type: SdrTriggerType;
     status: string;
     subject: string | null;
@@ -643,7 +668,15 @@ export const sdrApi = {
     return sdrFetch<{ drafts: SdrDraft[] }>(`/api/sdr/drafts${q}`);
   },
 
+  outreachControls: (leadId:string) => sdrFetch<OutreachControlsResponse>(`/api/sdr/leads/${encodeURIComponent(leadId)}/controls`),
+  holdOutreach: (leadId:string,reason:string,contextHash:string) => sdrFetch<OutreachControl>(`/api/sdr/leads/${encodeURIComponent(leadId)}/controls`,{method:'POST',body:JSON.stringify({scope:{kind:'lead',id:leadId},reason,contextHash})}),
+  resolveOutreachControl: (leadId:string,controlId:string,fields:{expectedVersion:number;decision:OutreachDecision;evidence:string;contextHash:string}) => sdrFetch<{resolved:boolean;control:OutreachControl}>(`/api/sdr/leads/${encodeURIComponent(leadId)}/controls/${encodeURIComponent(controlId)}/resolve`,{method:'POST',body:JSON.stringify(fields)}),
+  reviewOutreach: (leadId:string,fields:{contextHash:string;projectRole:string;cadence:'standard'|'award_only';evidence:string}) => sdrFetch<{ok:boolean}>(`/api/sdr/leads/${encodeURIComponent(leadId)}/outreach-review`,{method:'POST',body:JSON.stringify(fields)}),
+
   getDraft: (id: string) => sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}`),
+
+  replacementContext: (id:string) => sdrFetch<DraftReplacementContext>(`/api/sdr/drafts/${id}/replacement-context`),
+  createReplacementDraft: (draft:SdrDraft,currentContextHash:string,reason:string) => sdrFetch<{draft:SdrDraft}>(`/api/sdr/drafts/${draft.id}/replacement`,{method:'POST',body:JSON.stringify({expectedDraftId:draft.id,...draftVersion(draft),currentContextHash,reason})}),
 
   engagementSummary: () => sdrFetch<SdrEngagementSummary>("/api/sdr/engagement/summary"),
 
@@ -655,22 +688,23 @@ export const sdrApi = {
       body: JSON.stringify(fields),
     }),
 
-  refreshDraft: (id: string) =>
-    sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}/refresh`, { method: "POST" }),
+  refreshDraft: (id: string, viewed: ViewedDraft) =>
+    sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}/refresh`, { method: "POST", body: JSON.stringify(draftVersion(viewed)) }),
 
   patchDraft: (
     id: string,
     fields: Partial<Pick<SdrDraft, "subject" | "body" | "scheduled_for" | "assigned_mailbox_id" | "apollo_sequence_id">>,
+    viewed: ViewedDraft,
   ) =>
     sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}`, {
       method: "PATCH",
-      body: JSON.stringify(fields),
+      body: JSON.stringify({...fields,...draftVersion(viewed)}),
     }),
 
-  rejectDraft: (id: string, reason: string) =>
+  rejectDraft: (id: string, reason: string, viewed: ViewedDraft) =>
     sdrFetch<{ draft: SdrDraft }>(`/api/sdr/drafts/${id}/reject`, {
       method: "POST",
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ reason,...draftVersion(viewed) }),
     }),
 
   // `override: true` lets an admin send to an already-contacted lead (server returns
@@ -678,10 +712,10 @@ export const sdrApi = {
   // { code, daysAgo, personName, lastOutgoing } for the UI to surface. The server can also
   // return 429 {code:"daily_cap_reached", mailbox, sentToday, cap, rampDay} or 409
   // {code:"mailbox_inactive", mailbox} — see onApprove()'s error branches in SdrInterface.tsx.
-  approveAndSendDraft: (id: string, override = false) =>
+  approveAndSendDraft: (id: string, viewed: ViewedDraft, override = false) =>
     sdrFetch<{ draft: SdrDraft; send: Record<string, unknown>; apollo_response: unknown }>(
       `/api/sdr/drafts/${id}/approve-and-send`,
-      { method: "POST", body: JSON.stringify(override ? { override: true } : {}) },
+      { method: "POST", body: JSON.stringify({...draftVersion(viewed), ...(override ? { override: true } : {})}) },
     ),
 
   listLeads: (params?: SdrLeadsQuery) => {

@@ -1,3 +1,4 @@
+import {DraftReplacementReview} from './sdr/DraftReplacementReview';
 import {previewEmailDocument, firstTouchPreview} from '../lib/sdrPreviewEmail';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -73,6 +74,7 @@ import PermitsTab from "./permits/PermitsTab";
 import TeamView from "./sdr/TeamView";
 import CrmFollowUps from "./sdr/CrmFollowUps";
 import CrmLeadHistory from "./sdr/CrmLeadHistory";
+import OutreachConflict from "./sdr/OutreachConflict";
 import SdrWorkspace from "./sdr/dashboard/SdrWorkspace";
 import SenderVerification from "./sdr/dashboard/SenderVerification";
 
@@ -1356,11 +1358,11 @@ function LeadDetailDrawer({
       const sent = d.status === "sent";
       items.push({
         kind: "draft",
-        label: sent ? `Email sent${d.assigned_to ? ` · ${d.assigned_to}` : ""}` : `Draft ${d.status}${d.assigned_to ? ` · ${d.assigned_to}` : ""}`,
+        label: sent ? `Queued in Apollo${d.assigned_to ? ` · ${d.assigned_to}` : ""}` : `Draft ${d.status}${d.assigned_to ? ` · ${d.assigned_to}` : ""}`,
         at: sent ? (d.sent_at || d.created_at) : d.created_at,
         tone: sent ? "brand" : "slate",
         subject: d.subject,
-        body: sent ? d.body : null, // show the exact email that went out
+        body: sent ? d.body : null, // show the exact copy accepted for enrollment
         from: d.sent_from, // which mailbox it was sent from
         signature: sent ? d.sender_signature : null, // append the real signature in the preview
       });
@@ -1639,6 +1641,7 @@ function LeadDetailDrawer({
               </div>
             </div>
           )}
+          <OutreachConflict key={`outreach-${leadId}`} leadId={leadId} userId={getUser()?.id||''} isAdmin={getUser()?.role==='admin'} onChanged={reload} />
           {getUser()?.role === "admin" && <CrmLeadHistory key={leadId} leadId={leadId} />}
         </div>
 
@@ -2222,9 +2225,10 @@ function QueueView({
     return c;
   }, [drafts]);
 
-  async function onApprove(id: string) {
+  async function onApprove(draft: SdrDraft) {
+    const id=draft.id;
     const send = async (override: boolean) => {
-      const result = await sdrApi.approveAndSendDraft(id, override);
+      const result = await sdrApi.approveAndSendDraft(id, draft, override);
       const warning = (result as { warning?: string }).warning;
       pushToast(warning ? "error" : "success", warning || "Draft approved — contact enrolled in Apollo.");
       await load();
@@ -2270,10 +2274,11 @@ function QueueView({
     }
   }
 
-  async function onReject(id: string, reason: string) {
+  async function onReject(draft: SdrDraft, reason: string) {
+    const id=draft.id;
     setBusyId(id);
     try {
-      await sdrApi.rejectDraft(id, reason);
+      await sdrApi.rejectDraft(id, reason, draft);
       pushToast("success", "Draft rejected.");
       await load();
     } catch (e) {
@@ -2283,10 +2288,11 @@ function QueueView({
     }
   }
 
-  async function onSaveEdit(id: string, subject: string, body: string) {
+  async function onSaveEdit(draft: SdrDraft, subject: string, body: string) {
+    const id=draft.id;
     setBusyId(id);
     try {
-      await sdrApi.patchDraft(id, { subject, body });
+      await sdrApi.patchDraft(id, { subject, body }, draft);
       pushToast("success", "Edits saved.");
       await load();
     } catch (e) {
@@ -2296,10 +2302,11 @@ function QueueView({
     }
   }
 
-  async function onRefreshFromPipedrive(id: string) {
+  async function onRefreshFromPipedrive(draft: SdrDraft) {
+    const id=draft.id;
     setBusyId(id);
     try {
-      await sdrApi.refreshDraft(id);
+      await sdrApi.refreshDraft(id, draft);
       pushToast("success", "Draft re-rendered from the live Pipedrive lead.");
       await load();
     } catch (e) {
@@ -2309,10 +2316,11 @@ function QueueView({
     }
   }
 
-  async function onSetSequenceId(id: string, sequenceId: string) {
+  async function onSetSequenceId(draft: SdrDraft, sequenceId: string) {
+    const id=draft.id;
     setBusyId(id);
     try {
-      await sdrApi.patchDraft(id, { apollo_sequence_id: sequenceId });
+      await sdrApi.patchDraft(id, { apollo_sequence_id: sequenceId }, draft);
       pushToast("success", "Apollo sequence id set.");
       await load();
     } catch (e) {
@@ -2330,7 +2338,7 @@ function QueueView({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <StatTile label="Open" value={counts.open} icon={<Inbox className="h-4 w-4" />} tone="indigo" />
           <StatTile label="Awaiting review" value={counts.pending} icon={<ListChecks className="h-4 w-4" />} tone="slate" />
-          <StatTile label="Sent" value={counts.sent} icon={<Send className="h-4 w-4" />} tone="emerald" />
+          <StatTile label="Enrolled drafts" value={counts.sent} icon={<Send className="h-4 w-4" />} tone="emerald" />
           <StatTile label="Failed" value={counts.failed} icon={<XCircle className="h-4 w-4" />} tone="rose" />
         </div>
       )}
@@ -2433,15 +2441,17 @@ function QueueView({
             key={d.id}
             draft={d}
             isAdmin={user.role === "admin"}
+            canReplace={user.role === "admin" || d.assigned_user_id === user.id}
+            onReplacementCreated={async () => {await load(); pushToast("success", "Replacement created in Open drafts for review. Nothing was sent.");}}
             mailbox={d.assigned_mailbox_id ? mailboxById[d.assigned_mailbox_id] : undefined}
             expanded={expandedId === d.id}
             onToggle={() => setExpandedId(expandedId === d.id ? null : d.id)}
             busy={busyId === d.id}
-            onApprove={() => onApprove(d.id)}
-            onReject={(reason) => onReject(d.id, reason)}
-            onSaveEdit={(s, b) => onSaveEdit(d.id, s, b)}
-            onRefresh={() => onRefreshFromPipedrive(d.id)}
-            onSetSequenceId={(seq) => onSetSequenceId(d.id, seq)}
+            onApprove={onApprove}
+            onReject={onReject}
+            onSaveEdit={onSaveEdit}
+            onRefresh={onRefreshFromPipedrive}
+            onSetSequenceId={onSetSequenceId}
           />
         ))}
       </div>
@@ -2458,10 +2468,10 @@ function QueueView({
   );
 }
 
-function DraftRow({
-  draft,
+export function DraftRow({
+  draft: latestDraft,
   isAdmin,
-  mailbox,
+  mailbox: latestMailbox,
   expanded,
   onToggle,
   busy,
@@ -2470,38 +2480,47 @@ function DraftRow({
   onSaveEdit,
   onRefresh,
   onSetSequenceId,
+  canReplace = false,
+  onReplacementCreated,
 }: {
   draft: SdrDraft;
   isAdmin: boolean;
+  canReplace?: boolean;
+  onReplacementCreated?: () => void | Promise<void>;
   mailbox?: SdrMailbox;
   expanded: boolean;
   onToggle: () => void;
   busy: boolean;
-  onApprove: () => void;
-  onReject: (reason: string) => void;
-  onSaveEdit: (subject: string, body: string) => void;
-  onRefresh: () => void;
-  onSetSequenceId: (sequenceId: string) => void;
+  onApprove: (draft: SdrDraft) => void;
+  onReject: (draft: SdrDraft, reason: string) => void;
+  onSaveEdit: (draft: SdrDraft, subject: string, body: string) => void;
+  onRefresh: (draft: SdrDraft) => void;
+  onSetSequenceId: (draft: SdrDraft, sequenceId: string) => void;
 }) {
+  // Keep the displayed revision stable while the rep reads or edits. Background
+  // polling must never silently replace their copy or grant approval to new copy.
+  const [reviewed,setReviewed]=useState({draft:latestDraft,mailbox:latestMailbox});
+  const draft=expanded?reviewed.draft:latestDraft;
+  const mailbox=expanded?reviewed.mailbox:latestMailbox;
+  const stale=expanded&&(latestDraft.revision!==draft.revision || latestDraft.contextHash!==draft.contextHash);
   const [subject, setSubject] = useState(draft.subject);
   const [body, setBody] = useState(draft.body);
   const [confirming, setConfirming] = useState<"approve" | "reject" | "refresh" | null>(null);
   const [rejectReason, setRejectReason] = useState("Not a good fit");
   const [seqInput, setSeqInput] = useState("");
 
-  // Re-sync local edit state when the draft itself changes server-side
-  useEffect(() => {
-    setSubject(draft.subject);
-    setBody(draft.body);
-  }, [draft.subject, draft.body, draft.updated_at]);
+  function loadCurrentDraft() {
+    setReviewed({draft:latestDraft,mailbox:latestMailbox});
+    setSubject(latestDraft.subject);setBody(latestDraft.body);setConfirming(null);
+  }
 
   const dirty = subject !== draft.subject || body !== draft.body;
-  const canSend = ["pending", "approved", "edited"].includes(draft.status);
+  const canSend = !stale && ["pending", "approved", "edited"].includes(draft.status);
   const leadTitle = (draft.metadata as { pipedrive_lead_title?: string })?.pipedrive_lead_title;
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-      <button onClick={onToggle} className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-50 text-left">
+      <button onClick={()=>{if(!expanded)loadCurrentDraft();onToggle();}} className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-50 text-left">
         {expanded ? (
           <ChevronDown className="h-4 w-4 text-slate-400 flex-shrink-0" />
         ) : (
@@ -2511,7 +2530,7 @@ function DraftRow({
           {draft.trigger_type}
         </span>
         <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full", STATUS_COLORS[draft.status])}>
-          {draft.status}
+          {draft.status === 'sent' ? 'enrolled' : draft.status}
         </span>
         <OutreachBadge status={draft.outreach_status} days={draft.days_since_outgoing} />
         <div className="flex-1 min-w-0">
@@ -2547,6 +2566,7 @@ function DraftRow({
             <MessageBody html={firstTouchPreview(body, mailbox?.signature_html || undefined, false)} title="Draft email" />
             <p className="mt-3 text-xs text-slate-500">{mailbox?.signature_html ? "Signature from the assigned mailbox. Apollo adds it when sending." : "Sender signature is unavailable in this preview."}</p>
           </section>
+          {stale && <div role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">This draft changed while you were reviewing it. Your text is preserved below. Copy any unsaved edits before loading the current version. <button className="underline font-semibold" onClick={loadCurrentDraft}>Load current draft</button></div>}
           <div>
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Subject</label>
             <input
@@ -2591,6 +2611,10 @@ function DraftRow({
             )}
           </div>
 
+          {canReplace && ["failed", "rejected", "cancelled"].includes(draft.status) && (
+            <DraftReplacementReview key={`${draft.id}:${draft.revision}`} draft={draft} disabled={busy || stale} onCreated={onReplacementCreated} />
+          )}
+
           {/* Admin: set a missing sequence id inline instead of via SQL */}
           {canSend && !draft.apollo_sequence_id && isAdmin && (
             <div className="flex items-center gap-2">
@@ -2602,7 +2626,7 @@ function DraftRow({
                 className="flex-1 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-mono focus:border-amber-400 focus:outline-none"
               />
               <button
-                onClick={() => seqInput.trim() && onSetSequenceId(seqInput.trim())}
+                onClick={() => seqInput.trim() && onSetSequenceId(draft,seqInput.trim())}
                 disabled={busy || !seqInput.trim()}
                 className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500 disabled:opacity-50"
               >
@@ -2626,8 +2650,8 @@ function DraftRow({
                 Cancel
               </button>
               <button
-                onClick={() => { setConfirming(null); onApprove(); }}
-                disabled={busy}
+                onClick={() => { setConfirming(null); onApprove(draft); }}
+                disabled={busy || stale}
                 className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50"
               >
                 Confirm send
@@ -2653,8 +2677,8 @@ function DraftRow({
                 Cancel
               </button>
               <button
-                onClick={() => { setConfirming(null); onReject(rejectReason.trim() || "(no reason given)"); }}
-                disabled={busy}
+                onClick={() => { setConfirming(null); onReject(draft,rejectReason.trim() || "(no reason given)"); }}
+                disabled={busy || stale}
                 className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
               >
                 Confirm reject
@@ -2676,8 +2700,8 @@ function DraftRow({
                 Cancel
               </button>
               <button
-                onClick={() => { setConfirming(null); onRefresh(); }}
-                disabled={busy}
+                onClick={() => { setConfirming(null); onRefresh(draft); }}
+                disabled={busy || stale}
                 className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-500 disabled:opacity-50"
               >
                 Confirm refresh
@@ -2689,7 +2713,7 @@ function DraftRow({
             <div className="flex items-center justify-between gap-2 pt-2">
               <button
                 onClick={() => setConfirming("refresh")}
-                disabled={busy}
+                disabled={busy || stale}
                 title="Re-render this draft from the live Pipedrive lead"
                 className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-2"
               >
@@ -2699,8 +2723,8 @@ function DraftRow({
               <div className="flex items-center gap-2">
                 {dirty && (
                   <button
-                    onClick={() => onSaveEdit(subject, body)}
-                    disabled={busy}
+                    onClick={() => onSaveEdit(draft,subject, body)}
+                    disabled={busy || stale}
                     className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
                   >
                     Save edits
@@ -2708,7 +2732,7 @@ function DraftRow({
                 )}
                 <button
                   onClick={() => setConfirming("reject")}
-                  disabled={busy}
+                  disabled={busy || stale}
                   className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 flex items-center gap-2"
                 >
                   <XCircle className="h-4 w-4" />
@@ -2908,7 +2932,7 @@ function EngagedView({ pushToast }: { pushToast: (kind: "success" | "error", tex
   return (
     <div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <StatTile label="Sent leads" value={summary.leads.length} icon={<Send className="h-4 w-4" />} tone="indigo" />
+        <StatTile label="Enrolled leads" value={summary.leads.length} icon={<Send className="h-4 w-4" />} tone="indigo" />
         <StatTile label="Hot leads" value={hot.length} icon={<Flame className="h-4 w-4" />} tone="rose" />
         <StatTile
           label="Total clicks"
