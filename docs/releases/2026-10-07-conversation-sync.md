@@ -9,7 +9,7 @@ This release collects email metadata into observation tables. It does not enable
 - Apply `2026-10-03-sdr-conversation-history.sql` if absent, then `2026-10-07-sdr-conversation-sync.sql` before enabling.
 - Recent-head, bounded recent catch-up and historical cursors remain independent. PostgreSQL locks prevent duplicate work on the same scope across replicas.
 - Default pages contain ten threads. A Pipedrive scope uses at most two GET requests per tick; the six recent scopes use at most twelve, and three historical scopes at most six. Completed unchanged thread fingerprints avoid rereading messages.
-- Recent scans stop at their fixed date boundary only after validating timestamp order. Invalid ordering or pagination remains partial. Gmail cursor recovery is bounded and never declares the restart immediately complete.
+- Recent scans stop at their fixed date boundary only after validating timestamp order using sent-folder sent time and inbox-folder received time. The ordering-version upgrade restarts older recent checkpoints once while retaining their date window; historical cursors are unchanged. Invalid ordering or pagination remains partial. Gmail cursor recovery is bounded and never declares the restart immediately complete.
 
 ## Evidence limits
 
@@ -24,3 +24,7 @@ Job health reports separate recent and historical collection scopes to administr
 953 tests across 88 files passed against isolated PostgreSQL, including unchanged original outbound-handler hashes. Production build, scoped lint, syntax and independent review passed. Real provider reads into a local disposable schema collected 126 Gmail and four Pipedrive messages across 20 scopes without errors; all origins stayed Unknown.
 
 Disable the collector flag and redeploy to stop new collection. Preserve observation tables and receipts. Do not restore an old database over staff work. No outbound, CRM business-record or workflow setting is part of this release.
+
+## Folder ordering follow-up
+
+The first production run exposed folder ordering differences from the generic latest-message clock. The follow-up uses each folder’s explicit clock and keeps missing timestamps partial. Verification: 959 tests across 89 files passed against isolated PostgreSQL, including recovery of persisted checkpoints and unchanged historical continuation.
