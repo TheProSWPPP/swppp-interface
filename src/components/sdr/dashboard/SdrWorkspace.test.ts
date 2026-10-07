@@ -10,10 +10,10 @@ it('preserves every cold workspace destination and makes the active route access
  for(const label of ['Dashboard','Leads','Queue','Priority','Inbox','Follow-ups','Mailboxes','Templates','Permits','Team','Switch user','Open navigation']) expect(html).toContain(label);
  expect(html).toContain('aria-current="page"');
 });
-it('retains the admin gate in navigation and all nurture destinations',()=>{
+it('keeps Team admin-only, exposes scoped Follow-ups to staff and retains nurture destinations',()=>{
  const rep=renderToStaticMarkup(createElement(SdrWorkspace,{...base,user:{...user,role:'sdr'}}));
  expect(rep).not.toContain('>Team<');
- expect(rep).not.toContain('>Follow-ups<');
+ expect(rep).toContain('>Follow-ups<');
  const nurture=renderToStaticMarkup(createElement(SdrWorkspace,{...base,lane:'nurture',active:'campaigns'}));
  for(const label of ['Campaigns','Lists','Contacts','Automations']) expect(nurture).toContain(label);
 });

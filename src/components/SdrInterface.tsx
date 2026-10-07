@@ -750,7 +750,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
           {(tab === "templates" || tab === "sequences") && <MessagingView user={user} pushToast={push} />}
           {tab === "permits" && <PermitsTab pushToast={(m, k) => push(k ?? "success", m)} />}
           {tab === "team" && user.role === "admin" && <TeamView pushToast={push} />}
-          {tab === "followups" && user.role === "admin" && <CrmFollowUps onOpenLead={setDeepLeadId} />}
+          {tab === "followups" && <CrmFollowUps onOpenLead={setDeepLeadId} isAdmin={user.role === "admin"} />}
         </>
       ) : (
         <>

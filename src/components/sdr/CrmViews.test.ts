@@ -6,7 +6,7 @@ import CrmLeadHistory from './CrmLeadHistory';
 import {crmPlainText,crmReadableEvidence,crmFollowupUnavailableMessage} from './crmViewState';
 import type {CrmObservations} from '../../lib/sdrCrmApi';
 it('shows loading and explains observation coverage without claiming an outreach gate',()=>{
- expect(renderToStaticMarkup(createElement(CrmFollowUps,{onOpenLead:()=>{}}))).toContain('Loading CRM follow-ups');
+ expect(renderToStaticMarkup(createElement(CrmFollowUps,{onOpenLead:()=>{}}))).toContain('Loading follow-ups');
  const html=renderToStaticMarkup(createElement(CrmLeadHistory,{leadId:'lead-1'}));
  expect(html).toContain('Loading CRM source history');
  expect(html).not.toMatch(/outreach blocked|acknowledge|hold outreach/i);
