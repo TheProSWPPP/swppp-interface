@@ -33,7 +33,7 @@ ALTER TABLE IF EXISTS sdr_lead_state ADD COLUMN IF NOT EXISTS crm_company_id tex
 -- Mirror accepted observations and batch ordering in the same database transaction.
 -- This protects local projections only; it never locks or writes Pipedrive.
 CREATE OR REPLACE FUNCTION sdr_project_crm_observation() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE read_at timestamptz; selected_person text; stage text; derived_trigger text;
+DECLARE read_at timestamptz; selected_person text; stage text; derived_trigger text; person_emails jsonb;
 BEGIN
   IF to_regclass('sdr_lead_state') IS NULL OR NEW.data IS NULL OR NEW.access_status!='accessible' OR NEW.lifecycle!='active' THEN RETURN NEW; END IF;
   read_at:=COALESCE(NEW.source_read_started_at,NEW.observed_at);
@@ -62,10 +62,14 @@ BEGIN
       AND (crm_source_read_started_at IS NULL OR read_at>=crm_source_read_started_at)
       AND (crm_source_updated_at IS NULL OR NEW.source_updated_at>=crm_source_updated_at);
   ELSIF NEW.entity='person' THEN
-    UPDATE sdr_lead_state SET crm_company_id=NEW.company_id,person_name=NEW.data->>'name',person_email=CASE
-      WHEN jsonb_typeof(NEW.data->'email')='array' THEN
-        (SELECT e->>'value' FROM jsonb_array_elements(NEW.data->'email') e ORDER BY COALESCE((e->>'primary')::boolean,false) DESC LIMIT 1)
-      ELSE COALESCE(NEW.data->>'primary_email',NEW.data->>'email') END,
+    -- Match the decision-context v2/v1 precedence, including authoritative empty arrays.
+    person_emails:=CASE WHEN jsonb_typeof(NEW.data->'emails')='array' THEN NEW.data->'emails'
+      WHEN jsonb_typeof(NEW.data->'email')='array' THEN NEW.data->'email' END;
+    UPDATE sdr_lead_state SET crm_company_id=NEW.company_id,person_name=NEW.data->>'name',person_email=NULLIF(lower(btrim(CASE
+      WHEN person_emails IS NOT NULL THEN
+        (SELECT e->>'value' FROM jsonb_array_elements(person_emails) WITH ORDINALITY AS emails(e,position)
+          ORDER BY CASE WHEN e->'primary'='true'::jsonb THEN 0 ELSE 1 END,position LIMIT 1)
+      ELSE COALESCE(NULLIF(NEW.data->>'primary_email',''),NEW.data->>'email') END)),''),
       crm_person_source_updated_at=NEW.source_updated_at,crm_person_source_read_started_at=read_at
     WHERE pipedrive_person_id=NEW.entity_id
       AND crm_company_id=NEW.company_id
