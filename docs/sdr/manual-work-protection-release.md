@@ -50,3 +50,19 @@ No automatic rollback may re-enroll a contact, resend a message, restore a whole
 Run database tests against an isolated local PostgreSQL database using `SDR_TEST_DATABASE_URL`, then `npm test` and `npm run build`. Tests refuse remote database targets. The full test suite must have no database skips for release validation.
 
 Independent review findings and real case captures belong in the private delivery directory. Public fixtures contain synthetic identities only. This change does not activate LinkedIn or send client updates.
+
+## Reply and alert reliability follow-up, October 7
+
+This addition is staged in the same candidate. It does not correct historical records or replay existing replies.
+
+- Project linking requires independent message evidence. A matching participant email, even a unique mirrored contact, does not authorize a project-specific action.
+- Fresh thread checks protect later staff work. Exact manually authored message evidence suppresses a redundant forward/task; later outbound traffic of unknown origin is held for review.
+- Older pending lead-specific actions must pass the same current project check. A useful reply with unresolved project identity can be forwarded to its verified internal owner with a neutral inbox link.
+- Gmail scans include archived replies within the existing activation/date boundary. Existing-message rescans refresh evidence without relinking history or replaying completed actions.
+- Internal forward reconciliation checks exact content markers and participants because Gmail may replace a supplied Message-ID. A missing search result never authorizes resend.
+- The additive open-alert outbox records email and CRM note outcomes separately. It requires an exact source-message anchor, current draft/contact identity, verified internal route and a fresh CRM check. Opens are reported as open activity, not proof of buying intent.
+- Alert retry after definite failure is bounded. Uncertain delivery requires reconciliation; an uncertain CRM note remains for review. Prior high_intent markers are not replayed. Eligibility is stored atomically with a newly received event while the flag is enabled, so earlier duplicate events cannot become new alerts after activation. Missing context is retained in an event-specific review record and job-health counts.
+
+Runtime requirements: keep `SDR_REPLY_ACTIONS_ENABLED=true`; the legacy reply path does not gain these checks. Apply `2026-10-07-sdr-open-alerts.sql` before enabling `SDR_OPEN_ALERTS_ENABLED=true`. The new open-alert worker is disabled by default, and the existing legacy alert path remains until that explicit switch. Job health reports unresolved durable alerts when enabled. This flag is not a production deployment receipt.
+
+Remaining rollout work: populate and continuously synchronize independently linked conversation history, validate real manually authored message provenance, review ambiguous cases and explicit unsubscribe scope, and complete the coordinated app/workflow observation gate above. Successful email delivery does not prove that manual CRM context is synchronized. No automatic rewrite of old notes, activities or staff choices is included.

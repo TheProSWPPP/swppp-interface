@@ -70,6 +70,7 @@ import { enrollmentRetryEnabled, beginEnrollmentAttempt, recordEnrollmentAttempt
 import { refreshRetryDraft } from "./lib/sdrRetryDraftRefresh.js";
 import { enrollmentSendBlock } from "./lib/sdrEnrollmentSendGuard.js";
 import { drainReplyActions } from "./lib/sdrReplyActions.js";
+import { enqueueOpenAlert, drainOpenAlerts, createOpenAlertClients, checkOpenAlertContext } from "./lib/sdrOpenAlerts.js";
 import { registerSdrHealthRoutes } from "./lib/sdrHealthRoutes.js";
 import { registerSdrOperationsRoutes } from "./lib/sdrOperationsRoutes.js";
 import { registerSdrImportAuditRoutes } from "./lib/sdrImportAuditRoutes.js";
@@ -1263,7 +1264,7 @@ async function initDB() {
     }
     console.log("Table 'automation_tasks' verified/created.");
     // Install additive protection before any route/worker can mutate outreach.
-    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql']) {
+    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql','2026-10-07-sdr-open-alerts.sql']) {
       await pool.query(fs.readFileSync(new URL('./migrations/'+migration,import.meta.url),'utf8'));
     }
   } catch (err) {
@@ -1487,6 +1488,20 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
       clients:createReplyActionClients({pool,getToken:accessTokenForMailbox,appBase}),
     })).catch(()=>console.error("[reply-actions] action run failed; see run health"));
   };
+  const runOpenAlerts = () => {
+    if (process.env.SDR_OPEN_ALERTS_ENABLED !== "true") return;
+    void trackSdrJob("open_alerts", async () => {
+      const counts = await drainOpenAlerts(pool, {
+        clients:createOpenAlertClients({gmail:gmailInbox,getToken:accessTokenForMailbox,pipedrive:pipedriveClient,baseUrl:appBase}),
+        checkContext:action=>checkOpenAlertContext(pool,action,{pipedrive:pipedriveClient}),
+      });
+      const pending=await pool.query("SELECT COUNT(*)::int AS n FROM sdr_open_alert_actions WHERE status NOT IN ('completed','skipped')");
+      const reviews=await pool.query("SELECT COUNT(*)::int AS n FROM sdr_open_alert_reviews WHERE resolved_at IS NULL");
+      return {coverage:pending.rows[0].n || reviews.rows[0].n ? "partial" : "complete",counts:{...counts,unresolved:pending.rows[0].n,contextReview:reviews.rows[0].n}};
+    }).catch(()=>console.error("[open-alerts] action run failed; see run health"));
+  };
+  setTimeout(runOpenAlerts, 110_000);
+  setInterval(runOpenAlerts, 5 * 60 * 1000);
   setTimeout(runReplyActions, 100_000);
   setInterval(runReplyActions, 5 * 60 * 1000);
   setTimeout(runInboxWatch, 90_000);
@@ -3635,8 +3650,8 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
       `INSERT INTO sdr_engagement_events (
          source, event_type, apollo_event_id, apollo_sequence_id,
          apollo_emailer_message_id, pipedrive_lead_id, pipedrive_contact_id, mailbox_email,
-         occurred_at, payload, process_status, processed_at
-       ) VALUES ('apollo', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
+         occurred_at, payload, process_status, processed_at, open_alert_eligible
+       ) VALUES ('apollo', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11)
        ON CONFLICT (apollo_event_id) DO NOTHING
        RETURNING id`,
       [
@@ -3653,6 +3668,7 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
         // events that actually drove side effects. They are terminal — step 4 below leaves
         // them alone rather than flipping them to 'processed'.
         policy.processStatus,
+        eventType === "email_opened" && process.env.SDR_OPEN_ALERTS_ENABLED === "true" && !backfillRecordOnly,
       ],
     );
     const newlyInserted = insertResult.rows.length > 0;
@@ -3731,10 +3747,18 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
         }
       }
 
-      // High intent: 3+ opens on a lead = active interest. Fire ONCE per lead — record a
-      // unique high_intent marker (dedup), then push a heads-up email to the rep + a Pipedrive
-      // note. The bell already surfaces 3-open leads passively (isHot); this is the active push.
-      if (eventType === "email_opened" && newlyInserted && leadId) {
+      // Opt-in durable alerts: separate email/note receipts, verified routing and
+      // fresh CRM checks. A repeated event may recover a failed enqueue; dedup is
+      // in the outbox. Backfill returns above and never enters this path.
+      if (eventType === "email_opened" && leadId && process.env.SDR_OPEN_ALERTS_ENABLED === "true") {
+        const eligible=(await pool.query("SELECT open_alert_eligible FROM sdr_engagement_events WHERE apollo_event_id=$1",[apolloEventId])).rows[0]?.open_alert_eligible === true;
+        if(eligible) {
+          const {rows:oc}=await pool.query("SELECT COUNT(*)::int AS n FROM sdr_engagement_events WHERE pipedrive_lead_id=$1 AND event_type='email_opened'",[leadId]);
+          const queued=await enqueueOpenAlert(pool,{eventId:apolloEventId,leadId,opens:oc[0]?.n||0,contactEmail,mailboxEmail,occurredAt});
+          sideEffect=queued.enqueued ? "open-alert-queued" : queued.review ? "open-alert-review" : "open-alert-recorded";
+        }
+      } else if (eventType === "email_opened" && newlyInserted && leadId) {
+        // Legacy delivery remains until the explicit durable-alert rollout flag.
         const { rows: oc } = await pool.query(
           `SELECT COUNT(*)::int AS n FROM sdr_engagement_events
             WHERE pipedrive_lead_id = $1 AND event_type = 'email_opened'`,
