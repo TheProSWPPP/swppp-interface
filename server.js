@@ -2965,19 +2965,24 @@ app.post("/api/sdr/inbox/threads/:id/compose", express.json({ limit: "4mb" }), a
 app.get("/api/sdr/leads/:leadId/thread", async (req, res) => {
   try {
     const { leadId } = req.params;
+    const companyId = process.env.SDR_CRM_COMPANY_ID;
+    if (!companyId) return res.status(503).json({ error: "CRM company is not configured" });
     // Metadata-only leak (it hands back which mailbox and which Gmail threadId), but the
     // threadId names a colleague's inbox and the lead it belongs to. Same rule as the drawer.
     // Returns the empty shape rather than 404 so the drawer degrades to "no thread" instead
     // of erroring, matching what this route already does for a lead with no contact email.
-    if (!(await leadVisibleTo(pool, req.sdrUser, leadId))) {
+    const { rows: leadRows } = await pool.query(
+      `SELECT lower(person_email) email FROM sdr_lead_state WHERE pipedrive_lead_id = $1 AND crm_company_id = $2`,
+      [leadId, companyId],
+    );
+    if (!leadRows.length || !(await leadVisibleTo(pool, req.sdrUser, leadId))) {
       return res.json({ mailbox: null, threadId: null });
     }
-    const { rows: leadRows } = await pool.query(
-      `SELECT lower(person_email) email FROM sdr_lead_state WHERE pipedrive_lead_id = $1`,
-      [leadId],
-    );
     const contactEmail = leadRows[0]?.email;
     if (!contactEmail) return res.json({ mailbox: null, threadId: null });
+    const connected = (await visibleMailboxes(req.sdrUser)).filter((v) => v.connected).map((v) => v.email);
+    if (!connected.length) return res.json({ mailbox: null, threadId: null });
+    const allowed = new Set(connected.map((email) => email.toLowerCase()));
 
     // Prefer the mailbox(es) we actually outreached from; fall back to any connected mailbox.
     const { rows: sendMb } = await pool.query(
@@ -2985,10 +2990,9 @@ app.get("/api/sdr/leads/:leadId/thread", async (req, res) => {
         WHERE s.pipedrive_lead_id = $1 GROUP BY m.email ORDER BY last DESC NULLS LAST`,
       [leadId],
     );
-    let candidates = sendMb.map((r) => r.email);
+    let candidates = sendMb.map((r) => r.email).filter((email) => allowed.has(email.toLowerCase()));
     if (!candidates.length) {
-      const vis = await visibleMailboxes(req.sdrUser);
-      candidates = vis.filter((v) => v.connected).map((v) => v.email);
+      candidates = connected;
     }
 
     for (const mb of candidates) {

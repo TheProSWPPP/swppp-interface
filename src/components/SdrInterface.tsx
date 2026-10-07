@@ -584,6 +584,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   const [drillListId, setDrillListId] = useState<number | null>(null);
   // Deep-link from Pipedrive: open this lead's drawer at the console level.
   const [deepLeadId, setDeepLeadId] = useState<string | null>(() => readLeadParam());
+  const [inboxLinkNotice,setInboxLinkNotice]=useState<string|null>(null);
   useEffect(() => {
     const onHash = () => setDeepLeadId(readLeadParam());
     window.addEventListener("hashchange", onHash);
@@ -591,6 +592,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
   }, []);
   function closeDeepLead() {
     setDeepLeadId(null);
+    setInboxLinkNotice(null);
     // strip ?lead= from the URL so it doesn't reopen on refresh
     const base = window.location.hash.split("?")[0] || "#/sdr";
     window.history.replaceState(null, "", base);
@@ -680,21 +682,24 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
     const openInboxLink = () => {
       const hash = window.location.hash;
       const qi = hash.indexOf("?");
-      if (qi === -1) return;
-      const inboxLead = new URLSearchParams(hash.slice(qi + 1)).get("inboxLead");
-      if (!inboxLead) return;
+      const inboxLead = qi === -1 ? null : new URLSearchParams(hash.slice(qi + 1)).get("inboxLead");
+      if (!inboxLead) { generation++; setInboxLinkNotice(null); return; }
       const request = ++generation;
+      setInboxLinkNotice(null);
       window.history.replaceState(null, "", hash.slice(0, qi));
       (async () => {
         try {
           const r = await sdrApi.findLeadThread(inboxLead);
           if (request !== generation) return;
           if (r?.threadId && r?.mailbox) {
+            setInboxLinkNotice(null);
             goInbox({ threadId: r.threadId, mailbox: r.mailbox });
             return;
           }
+          setInboxLinkNotice("No available inbox thread was found for this project. Check Pipedrive and other conversations.");
         } catch {
-          /* fall through to the drawer */
+          if (request !== generation) return;
+          setInboxLinkNotice("Inbox search is unavailable. Check the project in Pipedrive.");
         }
         if (request === generation) setDeepLeadId(inboxLead);
       })();
@@ -776,6 +781,7 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
 
       </SdrWorkspace>
 
+      {inboxLinkNotice&&<div role="status" className="fixed right-4 top-4 z-[60] max-w-sm rounded border border-amber-300 bg-amber-50 p-3 text-sm text-slate-800 shadow-lg">{inboxLinkNotice}<button type="button" className="ml-3 underline" onClick={()=>setInboxLinkNotice(null)}>Dismiss</button></div>}
       {/* Deep-link from Pipedrive (#/sdr?lead=<id>) → open that lead's detail */}
       {deepLeadId && (
         <LeadDetailDrawer
