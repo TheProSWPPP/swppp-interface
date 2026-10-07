@@ -6,6 +6,7 @@ import { registerSdrCrmObservationRoutes } from './lib/sdrCrmObservationRoutes.j
 // END OBSERVATION ADDITION
 // BEGIN OBSERVATION ADDITION
 import {createSalesHistoryRuntime} from './lib/salesHistoryRuntime.js';
+import {createConversationSyncRuntime} from './lib/sdrConversationSync.js';
 // END OBSERVATION ADDITION
 import express from "express";
 import cors from "cors";
@@ -7422,6 +7423,24 @@ if (crmObserverEnabled && process.env.PIPEDRIVE_API_TOKEN && crmCompanyId && pro
 // BEGIN OBSERVATION ADDITION
 const salesHistoryRuntime=createSalesHistoryRuntime({pool,apiToken:process.env.PIPEDRIVE_API_TOKEN});
 salesHistoryRuntime.start({enabled:process.env.SDR_SALES_HISTORY_ENABLED==='true'});
+// END OBSERVATION ADDITION
+// BEGIN OBSERVATION ADDITION
+// Conversation collection is independent from read routes and all action workers.
+// Its additive migration is applied before enabling this explicit flag.
+if (process.env.SDR_CONVERSATION_SYNC_ENABLED === 'true') {
+  if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.SDR_CONVERSATION_PIPEDRIVE_ACCOUNT) {
+    const conversationSync=createConversationSyncRuntime({
+      pool,getToken:accessTokenForMailbox,gmail:gmailInbox,pipedrive:pipedriveClient,
+      accountKey:process.env.SDR_CONVERSATION_PIPEDRIVE_ACCOUNT,
+      accounts:async()=>(await pool.query('SELECT mailbox_email FROM sdr_inbox_accounts ORDER BY mailbox_email')).rows.map(row=>row.mailbox_email),
+      runJob:({provider,account,scope,work})=>withJobRun(pool,{
+        job:scope.startsWith('history')?'conversation_backfill':'conversation_sync',
+        scope:`${provider}:${account}:${scope}`,
+      },work),
+    });
+    void conversationSync.start().catch(()=>console.error('[conversation-sync] initial collection failed; see collection health'));
+  } else console.error('[conversation-sync] enabled but database, Pipedrive token or verified account scope is missing');
+}
 // END OBSERVATION ADDITION
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, "dist")));
