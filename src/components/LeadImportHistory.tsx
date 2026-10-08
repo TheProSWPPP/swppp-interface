@@ -71,32 +71,46 @@ export default function LeadImportHistory({ job }: { job: LeadImportJob }) {
   const [filter, setFilter] = useState<HistoryFilter>("all");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [attempt, setAttempt] = useState(0);
+  const [requestGeneration, setRequestGeneration] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [result, setResult] = useState<{ key: string; data: JobRowsResponse } | null>(null);
   const [requestError, setRequestError] = useState<{ key: string; message: string } | null>(null);
-  const requestKey = JSON.stringify([job.id, page, filter, search, attempt]);
+  const requestKey = JSON.stringify([job.id, page, filter, search, requestGeneration]);
   const data = result?.key === requestKey ? result.data : null;
   const error = requestError?.key === requestKey ? requestError.message : null;
 
   useEffect(() => {
     let current = true;
     getJobRows(job.id, { page, page_size: PAGE_SIZE, filter, search })
-      .then((response) => { if (current) setResult({ key: requestKey, data: response }); })
-      .catch((cause: unknown) => { if (current) setRequestError({ key: requestKey, message: cause instanceof Error ? cause.message : "Rows unavailable" }); });
+      .then((response) => {
+        if (!current) return;
+        setRequestError(null);
+        setResult({ key: requestKey, data: response });
+      })
+      .catch((cause: unknown) => {
+        if (!current) return;
+        setResult(null);
+        setRequestError({ key: requestKey, message: cause instanceof Error ? cause.message : "Rows unavailable" });
+      });
     return () => { current = false; };
-  }, [job.id, page, filter, search, attempt, requestKey]);
+  }, [job.id, page, filter, search, requestGeneration, requestKey]);
 
+  const beginRequest = () => {
+    setResult(null);
+    setRequestError(null);
+    setRequestGeneration((value) => value + 1);
+    setExpandedId(null);
+  };
   const changeFilter = (next: HistoryFilter) => {
+    beginRequest();
     setFilter(next);
     setPage(0);
-    setExpandedId(null);
   };
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
+    beginRequest();
     setSearch(searchInput.trim());
     setPage(0);
-    setExpandedId(null);
   };
   const totalPages = data ? Math.max(1, Math.ceil(data.filtered_count / PAGE_SIZE)) : 1;
 
@@ -134,7 +148,7 @@ export default function LeadImportHistory({ job }: { job: LeadImportJob }) {
       {error ? (
         <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
           <p>{/\b(401|403)\b/.test(error) ? "Access to stored rows was denied." : "Stored rows could not be loaded."}</p>
-          <button type="button" onClick={() => setAttempt((value) => value + 1)} className="mt-2 min-h-11 rounded-lg border border-red-300 px-3 py-2 font-medium focus:outline-none focus:ring-2 focus:ring-brand-500">Retry rows</button>
+          <button type="button" onClick={beginRequest} className="mt-2 min-h-11 rounded-lg border border-red-300 px-3 py-2 font-medium focus:outline-none focus:ring-2 focus:ring-brand-500">Retry rows</button>
         </div>
       ) : !data ? (
         <p role="status" className="mt-4 text-sm text-slate-600">Loading stored rows…</p>
@@ -155,10 +169,10 @@ export default function LeadImportHistory({ job }: { job: LeadImportJob }) {
             </ol>
           )}
           <div className="mt-4 flex items-center justify-between gap-3 text-sm text-slate-600">
-            <button type="button" disabled={page === 0} onClick={() => { setPage((value) => Math.max(0, value - 1)); setExpandedId(null); }}
+            <button type="button" disabled={page === 0} onClick={() => { beginRequest(); setPage((value) => Math.max(0, value - 1)); }}
               className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-brand-500">Previous</button>
             <span>Page {page + 1} of {totalPages}</span>
-            <button type="button" disabled={page + 1 >= totalPages || data.rows.length === 0} onClick={() => { setPage((value) => value + 1); setExpandedId(null); }}
+            <button type="button" disabled={page + 1 >= totalPages || data.rows.length === 0} onClick={() => { beginRequest(); setPage((value) => value + 1); }}
               className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-brand-500">Next</button>
           </div>
         </>
