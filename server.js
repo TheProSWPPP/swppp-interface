@@ -7153,6 +7153,7 @@ if (crmObserverEnabled && process.env.PIPEDRIVE_API_TOKEN && crmCompanyId && pro
   registerSdrCrmObservationRoutes(app,{
     pool,companyId:crmCompanyId,authorizeWebhook,listUsers:()=>crmClient.listUsers(),
     canViewLead:(req,leadId)=>leadVisibleTo(pool,req.sdrUser,leadId),
+    resolveVisibleMailboxes:async user=>(await visibleMailboxes(user)).filter(mailbox=>mailbox.connected).map(mailbox=>mailbox.email.toLowerCase()),
   });
   crmObserverRuntime=createSdrCrmObserverRuntime({pool,client:crmClient,companyId:crmCompanyId});
   crmObserverRuntime.start({observerEnabled:true});
