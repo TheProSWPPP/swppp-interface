@@ -35,6 +35,7 @@ import {
   fromDateInputFormat,
 } from "../utils";
 import {
+  getAvailableDocumentLink,
   getDocumentsForTemplate,
   getTemplateColor,
   getTemplateName,
@@ -1352,7 +1353,7 @@ export default function ProjectDetail({
             <div className="flex flex-col gap-1">
               {[
                 { href: project.folderLink, icon: FolderOpen, label: "Dropbox Folder" },
-                { href: project.jobOrderLink, icon: FileText, label: "Job Order PDF" },
+                { href: getAvailableDocumentLink(project.jobOrderLink), icon: FileText, label: "Job Order PDF" },
                 { href: project.civilDrawingsLink, icon: FileCode, label: "Civil Drawings" },
                 { href: project.invoiceLink, icon: CreditCard, label: "Invoice" },
                 { href: project.trelloLink, icon: Trello, label: "Trello Card" },
@@ -1578,15 +1579,13 @@ export default function ProjectDetail({
                 const isManualTarget = !automated;
                 const isProjectReady = project.status === "Ready";
 
-                // Links are ONLY active if status is "Ready" OR it's a Job Order PDF that exists
                 const docLink =
                   doc === "Job Order PDF"
-                    ? project.jobOrderLink
-                    : isProjectReady
-                      ? "#" // Placeholder for ready documents
-                      : null;
+                    ? getAvailableDocumentLink(project.jobOrderLink)
+                    : undefined;
 
                 const isClickable = !!docLink;
+                const Row = isClickable ? "a" : "div";
                 const templateLink = getTemplateDocLink(
                   project.stateTemplateId || project.stateTemplateName,
                   doc,
@@ -1602,15 +1601,14 @@ export default function ProjectDetail({
                         : "bg-slate-50 border-slate-200 opacity-80",
                     )}
                   >
-                    <a
-                      href={docLink || undefined}
-                      target={docLink ? "_blank" : undefined}
-                      rel={docLink ? "noopener noreferrer" : undefined}
+                    <Row
+                      {...(docLink
+                        ? { href: docLink, target: "_blank", rel: "noopener noreferrer" }
+                        : {})}
                       className={cn(
                         "flex items-center p-3 group relative",
                         isClickable ? "cursor-pointer" : "cursor-default",
                       )}
-                      onClick={(e) => !isClickable && e.preventDefault()}
                     >
                       <div
                         className={cn(
@@ -1642,12 +1640,17 @@ export default function ProjectDetail({
                             Manual - Pending Automation
                           </span>
                         )}
-                        {automated && !isProjectReady && isApproved && (
+                        {!isClickable && (isProjectReady || project.status === "Complete") && (
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
+                            File link unavailable
+                          </span>
+                        )}
+                        {automated && !isClickable && project.status === "Approved for Generation" && (
                           <span className="text-[10px] text-brand-600 font-bold uppercase tracking-tight animate-pulse">
                             Generating...
                           </span>
                         )}
-                        {automated && !isApproved && !isClickable && (
+                        {automated && !isApproved && !isClickable && !isProjectReady && (
                           <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
                             Awaiting Approval
                           </span>
@@ -1656,7 +1659,7 @@ export default function ProjectDetail({
                       {isClickable && (
                         <ExternalLink className="h-3 w-3 ml-auto text-slate-400 group-hover:text-brand-400" />
                       )}
-                    </a>
+                    </Row>
 
                     {templateLink && (
                       <div className="px-3 pb-2 flex justify-end">

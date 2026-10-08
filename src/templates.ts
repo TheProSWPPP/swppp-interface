@@ -435,20 +435,33 @@ export function getDocumentsForTemplate(templateIdOrName?: string): string[] {
   return template ? template.documents : DEFAULT_DOCUMENTS;
 }
 
+export function getAvailableDocumentLink(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const link = value.trim();
+  if (!/^https?:\/\/[^/?#\s]+/i.test(link)) return undefined;
+  try {
+    const url = new URL(link);
+    if (!url.hostname || url.username || url.password) return undefined;
+    return link;
+  } catch {
+    return undefined;
+  }
+}
+
 export function getTemplateDocLink(
   templateIdOrName: string | undefined,
   docName: string
 ): string | undefined {
   // Special case for Job Order PDF - universal across all templates
   if (docName === "Job Order PDF") {
-    return "#"; // Placeholder for Job Order PDF template
+    return undefined;
   }
 
   if (!templateIdOrName) return undefined;
   const template = STATE_TEMPLATES.find(
     (t) => t.id === templateIdOrName || t.name === templateIdOrName
   );
-  return template?.templateLinks?.[docName];
+  return getAvailableDocumentLink(template?.templateLinks?.[docName]);
 }
 
 export function getTemplateName(templateIdOrName?: string): string | undefined {
