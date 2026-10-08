@@ -48,3 +48,15 @@ it('keeps every review evidence identity and its own valid parent source in orde
  expect(html).toContain('Open project in Pipedrive');expect(html).toContain('Find a conversation for this project');
  expect(html).not.toContain('other.pipedrive.com');
 });
+it('renders bounded recent CRM record evidence without inferring manual calls or email',()=>{
+ const task={id:'task-2',leadId:'lead-2',leadTitle:'Project',subject:'Call buyer',type:'call',note:null,ownerId:'7',dueDate:'2026-10-08',dueTime:null,done:false,sourceUpdatedAt:null,observedAt:null,sourceUrl:null,
+  recentRecords:{status:'available',reason:null,note:{id:'note-2',entity:'note',sourceUrl:'https://proswpppllc.pipedrive.com/leads/inbox/lead-2',linkEvidence:[],eventAt:'2026-04-01T09:00:00Z',sourceUpdatedAt:'2026-10-07T10:00:00Z',sourceUpdatedField:'update_time',observedAt:'2026-10-08T11:00:00Z',sourceReadStartedAt:null,originStatus:'unknown',text:'Older CRM note',textTruncated:false,subject:null,subjectTruncated:false},completedCall:{id:'call-2',entity:'activity',sourceUrl:null,linkEvidence:[],eventAt:null,sourceUpdatedAt:'2026-10-07T10:30:00Z',sourceUpdatedField:'update_time',observedAt:'2026-10-08T11:30:00Z',sourceReadStartedAt:null,originStatus:'unknown',text:'',textTruncated:false,subject:'Call',subjectTruncated:false},email:{status:'unavailable',reason:'no_verified_project_mail_source'},coverage:{notes:{status:'partial',checkedAt:'2026-10-08T11:00:00Z',errorCategory:null},activities:{status:'complete',checkedAt:'2026-10-08T11:00:00Z',errorCategory:null},checkedAt:'2026-10-08T12:00:00Z',partial:true},asOf:'2026-10-08T12:00:00Z'}} as CrmFollowUp;
+ const html=renderToStaticMarkup(createElement(FollowupProjectCard,{leadId:'lead-2',project:task,tasks:[task],today:'2026-10-08',ownerName:(_id:string|null|undefined,name:string|null|undefined)=>name||'Unknown',onOpenLead:()=>{}}));
+ expect(html).toContain('Recent CRM records');
+ expect(html).toContain('CRM note');expect(html).toContain('origin unverified');
+ expect(html).toContain('CRM call marked complete');expect(html).toContain('Completion time not established');
+ expect(html).toContain('2026');expect(html).toContain('Project-linked email context unavailable');
+ expect(html).toContain('note-2');expect(html).toContain('call-2');
+ expect(html).not.toContain('update_time');
+ expect(html).not.toMatch(/manual call|called at|quote sent/i);
+});

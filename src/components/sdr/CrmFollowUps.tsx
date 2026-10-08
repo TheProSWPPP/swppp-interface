@@ -1,15 +1,28 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {ArrowRight,CalendarClock,ExternalLink,RefreshCw,ShieldAlert} from 'lucide-react';
 import {crmPlainText,crmFollowupUnavailableMessage} from './crmViewState';
-import {sdrCrmApi,type CrmFollowUp,type CrmHealth} from '../../lib/sdrCrmApi';
+import {sdrCrmApi,type CrmFollowUp,type CrmHealth,type CrmRecentRecord} from '../../lib/sdrCrmApi';
 import {groupFollowups,followupNextAction,followupDue,chicagoDay} from './followupView';
 import FollowupReview from './FollowupReview';
 import {leadInboxHref,parentCrmUrl} from './followupNavigation';
 import './followups.css';
 
 const when=(value:string|null|undefined)=>value?new Date(value).toLocaleString('en-US',{timeZone:'America/Chicago',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' CT':'Unknown';
+const whenWithYear=(value:string|null|undefined)=>value?new Date(value).toLocaleString('en-US',{timeZone:'America/Chicago',year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' CT':'Unknown';
 const views=[['current','Current work'],['later','Later / undated'],['backlog','Older tasks'],['all','All tasks']] as const;
 const stopText=(status:string)=>status==='confirmed'?'Provider stop confirmed':`Provider stop ${['unresolved','unverified','requested'].includes(status)?status:'status unknown'}. Queued mail may still send.`;
+
+function RecentRecord({record,kind}:{record:CrmRecentRecord;kind:'note'|'call'}){
+ const url=parentCrmUrl(record.sourceUrl);
+ return <div>
+   <p><strong>{kind==='note'?'CRM note':'CRM call marked complete'}</strong> · source record updated {whenWithYear(record.sourceUpdatedAt)} · origin unverified</p>
+   <p>{kind==='note'?`Recorded creation time ${whenWithYear(record.eventAt)}.`:'Completion time not established.'}</p>
+   {record.subject&&<p>Subject: {crmPlainText(record.subject)}{record.subjectTruncated?' Preview truncated.':''}</p>}
+   {record.text&&<p>{crmPlainText(record.text)}{record.textTruncated?' Preview truncated.':''}</p>}
+   <p>Source {record.entity} {record.id} · Snapshot observed {whenWithYear(record.observedAt)} · Source read started {whenWithYear(record.sourceReadStartedAt)}</p>
+   {url&&<a className="fu-source" href={url} target="_blank" rel="noopener noreferrer">Open verified parent CRM record<ExternalLink size={14} aria-hidden="true"/></a>}
+ </div>
+}
 
 export function FollowupProjectCard({leadId,project,tasks,today,ownerName,onOpenLead}:{leadId:string;project:CrmFollowUp;tasks:CrmFollowUp[];today:string;ownerName:(id:string|null|undefined,name:string|null|undefined)=>string;onOpenLead:(id:string)=>void}){
  return <article className="fu-project" key={leadId}>
@@ -18,6 +31,15 @@ export function FollowupProjectCard({leadId,project,tasks,today,ownerName,onOpen
    {project.restrictions?.map(hold=><p key={hold.id} className="fu-restriction">{crmPlainText(hold.reason)} <span>{stopText(hold.providerStopStatus)}</span></p>)}
    {followupNextAction(project)&&<div className="fu-next"><strong>Next step</strong><span>{followupNextAction(project)}</span></div>}
    {project.attention&&<div className="fu-reply">Recent reply · received {when(project.attention.receivedAt)}<span>{project.lastReply?.staffResponseAt?`Response recorded ${when(project.lastReply.staffResponseAt)}. Other follow-up may be missing.`:'Response status unknown.'}</span><details><summary>Reply evidence</summary><p>Linked to this project · Classification: {project.lastReply?.intent?.replaceAll('_',' ')||'unknown'} · Mailbox: {project.attention.mailbox}</p><p>Message {project.attention.providerMessageId} · Gmail source {project.attention.sourceMessageId} · Verification: {project.attention.linkEvidence}</p><p>Detected {when(project.attention.detectedAt)} · Fact observed {when(project.attention.factObservedAt)}. Connected inbox history is partial.</p><p>Displayed CRM task updated at source {when(project.sourceUpdatedAt)} · Snapshot observed {when(project.observedAt)}. These times do not prove a staff response.</p></details></div>}
+   {project.recentRecords&&<details className="fu-project-context fu-recent"><summary>Recent CRM records</summary>
+    {project.recentRecords.status==='unavailable'?<p>CRM record context unavailable for this project. Check the source and collection coverage.</p>:<>
+     {!project.recentRecords.note&&!project.recentRecords.completedCall&&<p>No recent CRM record in available observations; coverage may be partial.</p>}
+     {project.recentRecords.note&&<RecentRecord record={project.recentRecords.note} kind="note"/>}
+     {project.recentRecords.completedCall&&<RecentRecord record={project.recentRecords.completedCall} kind="call"/>}
+    </>}
+    <p>Project-linked email context unavailable in this read. This does not establish whether staff emailed the buyer.</p>
+    <p>Notes collection: {project.recentRecords.coverage.notes.status} · Checked {whenWithYear(project.recentRecords.coverage.notes.checkedAt)}. Activities collection: {project.recentRecords.coverage.activities.status} · Checked {whenWithYear(project.recentRecords.coverage.activities.checkedAt)}. Context checked {whenWithYear(project.recentRecords.asOf)}; history may be partial.</p>
+   </details>}
    <ul className="fu-tasks">{tasks.map(task=>{const due=task.dueLocalDate??task.dueDate;return <li key={task.id} className={due&&due<today?'is-overdue':due===today?'is-today':''}><div className="fu-due"><CalendarClock size={16} aria-hidden="true"/><strong>{followupDue(due)}</strong><span>{due||'No date'}{task.dueLocalTime?` · ${task.dueLocalTime} CT`:''}</span></div><div className="fu-task"><strong>{task.subject||'Untitled activity'}</strong><div>{task.type==='email'?'Email activity · not a send receipt':task.type||'Activity'} · Task owner: {ownerName(task.ownerId,task.ownerName)}</div><details><summary>Notes and source</summary>{task.note&&<p>{crmPlainText(task.note)}</p>}<p>Complete or reschedule the original task in Pipedrive. Logging a new activity here does not close this task.</p>{parentCrmUrl(task.sourceUrl)&&<a className="fu-source" href={parentCrmUrl(task.sourceUrl)!} target="_blank" rel="noopener noreferrer">Open parent CRM record · task {task.id}<ExternalLink size={14}/></a>}<span className="fu-task-source">Task {task.id} · Source updated {when(task.sourceUpdatedAt)} · Snapshot observed {when(task.observedAt)}</span><span className="fu-task-source">Original CRM date: {task.dueDate||'No date'}{task.dueTime?` · ${task.dueTime} UTC`:''}</span></details></div></li>;})}</ul>
    <details className="fu-project-context"><summary>Contact and context</summary><p>{project.contactName||'Contact unverified'}{project.contactEmail?` · ${project.contactEmail}`:''}</p><p>Quote delivery: {project.quoteStatus==='unverified'?'Unverified':'Not recorded'}. Check the email thread before referring to a sent quote.</p>{project.leadLifecycle!=='active'&&<p>Project: {project.leadLifecycle||'Unknown'}</p>}{parentCrmUrl(project.sourceUrl)&&<a className="fu-source" href={parentCrmUrl(project.sourceUrl)!} target="_blank" rel="noopener noreferrer">Open project in Pipedrive<ExternalLink size={14} aria-hidden="true"/></a>}</details>
   </article>
@@ -58,7 +80,10 @@ export default function CrmFollowUps({onOpenLead,isAdmin=false}:{onOpenLead:(lea
     loaded.current=[];authorization.current=null;setItems(null);setHealth(null);setOwnerOptions([]);setNextCursor(null);setReplyCoverage('unknown');setLastCollectedAt(null);void load();return;
    }
    authorization.current=data.authorization||null;
-   loaded.current=cursor?[...loaded.current,...data.items]:data.items;
+   if(cursor){
+    const touched=new Map(data.items.map(item=>[item.leadId,item.recentRecords]));
+    loaded.current=[...loaded.current.map(item=>touched.has(item.leadId)?{...item,recentRecords:touched.get(item.leadId)}:item),...data.items];
+   }else loaded.current=data.items;
    setUnavailable(data.unavailable||null);
    setItems(data.unavailable?[]:loaded.current);
    setHealth(data.freshness);setNextCursor(data.nextCursor);
@@ -73,7 +98,7 @@ export default function CrmFollowUps({onOpenLead,isAdmin=false}:{onOpenLead:(lea
    else{loaded.current=[];authorization.current=null;setItems(null);setHealth(null);setOwnerOptions([]);setNextCursor(null);setReplyCoverage('unknown');setLastCollectedAt(null);setError(failure.message);}
   }finally{if(generation===requestGeneration.current)setLoading(false);}
  },[dueView,lifecycle,owner,activityType]);
- useEffect(()=>{void load();return ()=>{requestGeneration.current++;};},[load]);
+ useEffect(()=>{const generation=requestGeneration;if(pane==='tasks')void load();else{generation.current++;loaded.current=[];authorization.current=null;setItems(null);setNextCursor(null);setLoading(false);}return ()=>{generation.current++;};},[load,pane]);
  useEffect(()=>{if(isAdmin)sdrCrmApi.users().then(data=>setUserNames(Object.fromEntries(data.users.map(user=>[user.id,user.name])))).catch(()=>{});},[isAdmin]);
  const coverage=health?.scopes?.find(scope=>scope.scope==='activities');
  const ownerName=(id:string|null|undefined,name:string|null|undefined)=>name||userNames[id||'']||(id?`Owner ${id}`:'Unassigned');
