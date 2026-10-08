@@ -75,6 +75,7 @@ import { refreshRetryDraft } from "./lib/sdrRetryDraftRefresh.js";
 import { enrollmentSendBlock } from "./lib/sdrEnrollmentSendGuard.js";
 import { drainReplyActions } from "./lib/sdrReplyActions.js";
 import { enqueueOpenAlert, drainOpenAlerts, createOpenAlertClients, checkOpenAlertContext } from "./lib/sdrOpenAlerts.js";
+import { registerSdrReplyActionBacklogRoutes } from "./lib/sdrReplyActionBacklogRoutes.js";
 import { registerSdrHealthRoutes } from "./lib/sdrHealthRoutes.js";
 import { registerSdrOperationsRoutes } from "./lib/sdrOperationsRoutes.js";
 import { registerSdrImportAuditRoutes } from "./lib/sdrImportAuditRoutes.js";
@@ -7115,6 +7116,7 @@ registerSdrMetricsRoutes(app, {
   pool,
   resolveVisibleMailboxes: async (user) => (await visibleMailboxes(user)).map((mailbox) => mailbox.email.toLowerCase()),
 });
+registerSdrReplyActionBacklogRoutes(app, {pool,companyId:process.env.SDR_CRM_COMPANY_ID,resolveVisibleMailboxes:async user=>(await visibleMailboxes(user)).filter(mailbox=>mailbox.connected).map(mailbox=>mailbox.email)});
 registerSdrHealthRoutes(app, {
   pool,
   resolveVisibleMailboxes: async (user) => (await visibleMailboxes(user)).map(mailbox => mailbox.email),
