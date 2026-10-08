@@ -1,3 +1,4 @@
+import FollowupProjectContext from './FollowupProjectContext';
 import FollowupDraftEditor from './FollowupDraftEditor';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {ArrowRight,ExternalLink,RefreshCw} from 'lucide-react';
@@ -11,6 +12,7 @@ export function ReviewProjectCard({project,onOpenLead}:{project:FollowupReviewPr
    <header className="fu-project-heading"><h2><button type="button" onClick={()=>onOpenLead(project.leadId)}>{project.title||'Untitled project'}<ArrowRight size={16}/></button></h2><span className="fu-lead-owner">Lead owner: {project.ownerName||(project.ownerId?`Owner ${project.ownerId}`:'Unassigned')}</span></header>
    <div className="fu-nav"><a className="fu-source" href={leadInboxHref(project.leadId)} target="_blank" rel="noopener noreferrer">Find a conversation for this project<ExternalLink size={14} aria-hidden="true"/></a><p>Searches conversations for this project's current contact. Other threads may exist; check the task and project history.</p></div>
    <ol className="fu-evidence">{project.evidence.map((e,index)=><li key={`${e.entity}:${e.id}`}><details open={index===0}><summary>{e.entity==='note'?'CRM note':'Completed call'} · Record updated {when(e.sourceUpdatedAt)}</summary><p>{crmPlainText(e.text)}</p>{parentCrmUrl(e.sourceUrl)&&<a className="fu-source" href={parentCrmUrl(e.sourceUrl)!} target="_blank" rel="noopener noreferrer">Open parent CRM record for {e.entity} {e.id}<ExternalLink size={14} aria-hidden="true"/></a>}<span className="fu-task-source">{e.entity} {e.id} · Observed {when(e.observedAt)}</span></details></li>)}</ol>
+   <FollowupProjectContext key={project.leadId} leadId={project.leadId}/>
    <FollowupDraftEditor leadId={project.leadId}/>
    {parentCrmUrl(project.sourceUrl)&&<footer><a className="fu-source" href={parentCrmUrl(project.sourceUrl)!} target="_blank" rel="noopener noreferrer">Open project in Pipedrive<ExternalLink size={14}/></a></footer>}
   </article>;

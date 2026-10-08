@@ -1,3 +1,4 @@
+import {sdrReadRequest} from './sdrReadRequest';
 import {sdrFetch} from './sdrApi';
 
 export type CrmRecentRecord = {id:string;entity:'note'|'activity';sourceUrl:string|null;linkEvidence:Array<{type:'lead'|'deal';id:string;leadId:string}>;eventAt:string|null;sourceUpdatedAt:string;sourceUpdatedField:string;observedAt:string|null;sourceReadStartedAt:string|null;originStatus:'unknown';text:string;textTruncated:boolean;subject:string|null;subjectTruncated:boolean};
@@ -9,8 +10,16 @@ export type FollowupReviewProject = {leadId:string;title:string|null;ownerId:str
 export type CrmSnapshot = {entity:string;entity_id:string;data:Record<string,unknown>|null;lifecycle:string;source_updated_at:string|null;observed_at:string|null;source_url:string|null;access_status?:string};
 export type CrmHealth = {scopes:Array<{scope:string;status:string;checkedAt?:string|null;completedThrough?:string|null;errorCategory?:string|null}>;inbox:{pending:number;leased:number;dead:number;oldestPendingAt:string|null}|null;observedAt:string};
 export type CrmObservations = {lead:CrmSnapshot|null;items:CrmSnapshot[];revisions:Array<{entity:string;entity_id:string;action:string;source_at:string|null;observed_at:string|null;actor_evidence?:{source?:string;execution?:string;ownership?:string;accountId?:string|null}|null;event_id?:string|null;source_read_started_at?:string|null;observation_source_at?:string|null;data:Record<string,unknown>|null;source_url:string|null}>;hasMore?:{items:boolean;revisions:boolean};unavailable?:string|null;freshness:CrmHealth;source:string};
+export type FollowupProjectContextData = {
+ lead:{id:string;title:string;ownerId:string|null;ownerName:string|null;personId:string|null;contactName:string|null;contactEmail:string|null;sourceUpdatedAt:string|null;observedAt:string|null;sourceUrl:string|null};
+ holds:Array<{id:string;reason:string;scopeKind:string;providerStopStatus:string}>;openTaskCount:number;tasksLimited:boolean;
+ tasks:Array<{id:string;type:string|null;subject:string;subjectTruncated:boolean;note:string;noteTruncated:boolean;ownerId:string|null;ownerName:string|null;dueDate:string|null;dueTime:string|null;sourceUpdatedAt:string|null;observedAt:string|null;sourceUrl:string|null}>;
+ recentRecords:{status:string;reason:string|null;note:CrmRecentRecord|null;completedCall:CrmRecentRecord|null};
+ coverage:{partial:true;asOf:string;scopes:CrmHealth['scopes'];quoteStatus:'unknown';orderStatus:'unknown';emailStatus:'unavailable'};
+};
 const leadPath=(id:string)=>`/api/sdr/crm/leads/${encodeURIComponent(id)}`;
 export const sdrCrmApi={
+  followupContext:(id:string,signal?:AbortSignal)=>sdrReadRequest<FollowupProjectContextData>(`${leadPath(id)}/followup-context`,signal),
   followupReview:(query='')=>sdrFetch<{items:FollowupReviewProject[];nextCursor:string|null;freshness:CrmHealth;unavailable?:string|null}>(`/api/sdr/crm/followup-review${query}`),
   users:()=>sdrFetch<{users:Array<{id:string;name:string}>;checkedAt:string}>('/api/sdr/crm/users'),
   followups:(query='')=>sdrFetch<{items:CrmFollowUp[];owners?:Array<{id:string;name:string|null}>;nextCursor:string|null;freshness:CrmHealth;unavailable?:string|null;authorization?:string;replyCoverage?:{status:'partial'|'unknown';eligibleMailboxes:number;visibleMailboxes:number;lastCollectedAt:string|null}}>(`/api/sdr/crm/followups${query}`),
