@@ -1,3 +1,4 @@
+import OrderCandidates from './OrderCandidates';
 import {useEffect,useRef,useState} from 'react';
 import {sdrCrmApi,type FollowupProjectContextData,type CrmRecentRecord} from '../../lib/sdrCrmApi';
 import {getToken} from '../../lib/sdrApi';
@@ -30,5 +31,5 @@ export default function FollowupProjectContext({leadId}:{leadId:string}){
   finally{if(attempt===generation.current&&token===getToken())setLoading(false);}
  };
  return <div className="fu-project-context"><button className="fu-button" type="button" aria-expanded={open} onClick={()=>{if(open){generation.current++;request.current?.abort();setLoading(false);setOpen(false);setData(null);setError('');}else void load();}}>{open?'Hide project context':'Load project context'}</button>
- {open&&<div>{loading&&<p role="status">Loading project context…</p>}{error&&<p role="alert">{error}</p>}{current&&<ProjectContextDetails data={current}/>}<button className="fu-button" type="button" disabled={loading} onClick={()=>void load()}>{error?'Retry context':'Refresh collected context'}</button></div>}</div>;
+ {open&&<div>{loading&&<p role="status">Loading project context…</p>}{error&&<p role="alert">{error}</p>}{current&&<><ProjectContextDetails data={current}/><OrderCandidates key={leadId} leadId={leadId}/></>}<button className="fu-button" type="button" disabled={loading} onClick={()=>void load()}>{error?'Retry context':'Refresh collected context'}</button></div>}</div>;
 }

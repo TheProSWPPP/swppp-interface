@@ -1,3 +1,4 @@
+import FollowupProjectContext from './FollowupProjectContext';
 import {useEffect,useId,useRef,useState} from 'react';
 import {followupDraftApi,type FollowupDraftResponse} from '../../lib/sdrFollowupDraftApi';
 import {getToken} from '../../lib/sdrApi';
@@ -98,9 +99,10 @@ function DraftWorkspace({leadId,onClose}:{leadId:string;onClose:()=>void}){
     </details>
     <a href={`https://proswpppllc.pipedrive.com/leads/inbox/${encodeURIComponent(leadId)}`} target="_blank" rel="noopener noreferrer">Open project in Pipedrive</a>
    </section>
+   <section className="fu-draft-context" aria-label="Draft preparation"><p>Review the original task, latest conversation and any order evidence before using your draft.</p><FollowupProjectContext key={leadId} leadId={leadId}/></section>
    <label htmlFor={`${id}-subject`}>Subject</label><input id={`${id}-subject`} maxLength={500} value={text.subject} disabled={saving} onChange={event=>{setText({...text,subject:event.target.value});setNotice('');}}/>
    <label htmlFor={`${id}-body`}>Message</label><textarea id={`${id}-body`} rows={9} maxLength={20000} value={text.body} disabled={saving} onChange={event=>{setText({...text,body:event.target.value});setNotice('');}}/>
-   <p className="fu-draft-boundary">Check the latest email conversation before using this draft. Email history and website orders are not verified here. No verified website-order link is available in this view.</p>
+   <p className="fu-draft-boundary">Check the latest email conversation before using this draft. Email history and website orders are not verified here. Available inventory matches are candidates until checked against source evidence.</p>
    {conflict&&<div className="fu-warning"><strong>{conflict==='revision'?'A newer saved version exists.':'CRM context changed since this draft was saved or opened.'}</strong>{conflict==='revision'&&current.draft&&<details><summary>Compare with saved version</summary><p>{current.draft.subject}</p><pre>{current.draft.body}</pre></details>}<label><input type="checkbox" checked={acknowledged} onChange={event=>setAcknowledged(event.target.checked)}/>I reviewed the current CRM context{conflict==='revision'?' and saved version':''}. Save my text with this context.</label></div>}
    <footer><span>{dirty?'Unsaved changes':current.draft?`Saved privately · ${timestamp(current.draft.updatedAt)}`:'New private draft'}</span><button type="button" className="fu-button" disabled={saving||!text.body.trim()||Boolean(conflict&&!acknowledged)} onClick={()=>void save()}>{saving?'Saving…':'Save draft'}</button><button type="button" className="fu-button" disabled={saving||!text.body.trim()} onClick={()=>void copy()}>Copy draft</button></footer>
    {notice&&<p role="status">{notice}</p>}

@@ -1,3 +1,4 @@
+import {registerSdrPreparationEvidenceRoutes} from './lib/sdrPreparationEvidenceRoutes.js';
 import {registerSdrOperationsSnapshotRoutes} from './lib/sdrOperationsSnapshotRoutes.js';
 import { readInboxPages, inboxLeadEvidence, applyInboxHandled } from './lib/sdrInboxOverview.js';
 import { buildEngagementSummary } from './lib/sdrEngagementSummary.js';
@@ -7119,6 +7120,7 @@ registerSdrMetricsRoutes(app, {
 });
 registerSdrReplyActionBacklogRoutes(app, {pool,companyId:process.env.SDR_CRM_COMPANY_ID,resolveVisibleMailboxes:async user=>(await visibleMailboxes(user)).filter(mailbox=>mailbox.connected).map(mailbox=>mailbox.email)});
 registerSdrOperationsSnapshotRoutes(app,{pool,companyId:process.env.SDR_CRM_COMPANY_ID,resolveVisibleMailboxes:async (user,db)=>(await visibleMailboxes(user,db)).filter(mailbox=>mailbox.connected).map(mailbox=>mailbox.email)});
+registerSdrPreparationEvidenceRoutes(app,{pool,companyId:process.env.SDR_CRM_COMPANY_ID,resolveVisibleMailboxes:async (user,db)=>(await visibleMailboxes(user,db)).filter(mailbox=>mailbox.connected).map(mailbox=>mailbox.email)});
 registerSdrHealthRoutes(app, {
   pool,
   resolveVisibleMailboxes: async (user) => (await visibleMailboxes(user)).map(mailbox => mailbox.email),
