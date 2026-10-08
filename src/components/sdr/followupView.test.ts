@@ -7,11 +7,11 @@ it('preserves separate manual task dates and owners when grouping paginated proj
  const groups=groupFollowups([task('1'),task('3','b'),second,task('1')]);
  expect(groups).toHaveLength(2);expect(groups[0].tasks.map(x=>[x.id,x.dueDate,x.ownerId])).toEqual([['1','2026-10-07','derek'],['2','2026-10-12','sarah']]);
 });
-it('prioritizes restrictions over an interested reply, and stops suggesting response checks after a staff response',()=>{
- const replied={...task('1'),lastReply:{receivedAt:'2026-10-06',intent:'interested',staffResponseAt:null}};
+it('prioritizes restrictions over recent reply attention without inferring response absence',()=>{
+ const replied={...task('1'),attention:{reason:'recent_verified_reply' as const,providerMessageId:'r1',sourceMessageId:'m1',threadId:'t1',mailbox:'rep@example.test',receivedAt:'2026-10-06',detectedAt:'2026-10-06',factObservedAt:'2026-10-06',linkEvidence:'verified'}};
  expect(followupNextAction({...replied,restrictions:[{id:'h',reason:'Opt out',providerStopStatus:'unverified'}]})).toContain('restriction');
- expect(followupNextAction(replied)).toContain('team has responded');
- expect(followupNextAction({...replied,lastReply:{...replied.lastReply,staffResponseAt:'2026-10-07'}})).toBeNull();
+ expect(followupNextAction(replied)).toContain('original task in Pipedrive');
+ expect(followupNextAction({...replied,lastReply:{receivedAt:'2026-10-06',intent:'interested',staffResponseAt:'2026-10-07'}})).toContain('original task in Pipedrive');
 });
 it('uses the Chicago day across midnight and DST without shifting scheduled dates',()=>{
  expect(chicagoDay(new Date('2026-10-08T02:00:00Z'))).toBe('2026-10-07');

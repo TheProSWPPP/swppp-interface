@@ -7,7 +7,7 @@ export function groupFollowups(items:CrmFollowUp[]) {
 export function followupNextAction(item:CrmFollowUp) {
  if(item.restrictions?.length)return 'Review the restriction before contacting this buyer.';
  if(item.outreachReviewRequired)return 'Confirm the current contact and outreach restrictions.';
- if(item.lastReply&&!item.lastReply.staffResponseAt)return 'Read the latest reply and check whether the team has responded.';
+ if(item.attention)return 'Review the conversation and any contact restrictions. Update the original task in Pipedrive.';
  if(item.type==='email')return 'Check the email thread for delivery and replies.';
  return null;
 }
