@@ -1,3 +1,5 @@
+import {createApprovalObservationRecorder} from './lib/sdrApprovalObservations.js';
+import {registerApprovalObservationHealth} from './lib/sdrApprovalObservationHealth.js';
 import {registerSdrPreparationEvidenceRoutes} from './lib/sdrPreparationEvidenceRoutes.js';
 import {registerSdrOperationsSnapshotRoutes} from './lib/sdrOperationsSnapshotRoutes.js';
 import { readInboxPages, inboxLeadEvidence, applyInboxHandled } from './lib/sdrInboxOverview.js';
@@ -4397,6 +4399,9 @@ app.post("/api/sdr/drafts/:id/refresh",async(req,res)=>{
   }catch(err){draftMutationFailure(res,err);}
 });
 
+const approvalObservations=createApprovalObservationRecorder({companyId:process.env.SDR_CRM_COMPANY_ID,connectionString:process.env.DATABASE_URL});
+app.post('/api/sdr/drafts/:id/approve-and-send',approvalObservations.middleware);
+
 // SDR drafts — approve + atomically enroll in Apollo + record sdr_sends.
 // Wrapped in per-lead advisory lock to prevent parallel enrollment races.
 app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
@@ -7121,6 +7126,7 @@ registerSdrMetricsRoutes(app, {
 registerSdrReplyActionBacklogRoutes(app, {pool,companyId:process.env.SDR_CRM_COMPANY_ID,resolveVisibleMailboxes:async user=>(await visibleMailboxes(user)).filter(mailbox=>mailbox.connected).map(mailbox=>mailbox.email)});
 registerSdrOperationsSnapshotRoutes(app,{pool,companyId:process.env.SDR_CRM_COMPANY_ID,resolveVisibleMailboxes:async (user,db)=>(await visibleMailboxes(user,db)).filter(mailbox=>mailbox.connected).map(mailbox=>mailbox.email)});
 registerSdrPreparationEvidenceRoutes(app,{pool,companyId:process.env.SDR_CRM_COMPANY_ID,resolveVisibleMailboxes:async (user,db)=>(await visibleMailboxes(user,db)).filter(mailbox=>mailbox.connected).map(mailbox=>mailbox.email)});
+registerApprovalObservationHealth(app,{pool,companyId:process.env.SDR_CRM_COMPANY_ID,stats:approvalObservations.stats});
 registerSdrHealthRoutes(app, {
   pool,
   resolveVisibleMailboxes: async (user) => (await visibleMailboxes(user)).map(mailbox => mailbox.email),
