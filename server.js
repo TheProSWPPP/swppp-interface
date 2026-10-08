@@ -1,3 +1,4 @@
+import {registerSdrOperationsSnapshotRoutes} from './lib/sdrOperationsSnapshotRoutes.js';
 import { readInboxPages, inboxLeadEvidence, applyInboxHandled } from './lib/sdrInboxOverview.js';
 import { buildEngagementSummary } from './lib/sdrEngagementSummary.js';
 // BEGIN OBSERVATION ADDITION
@@ -2668,9 +2669,9 @@ async function accessTokenForMailbox(mailboxEmail) {
 
 // All .co mailboxes visible to this user: admin sees every mailbox, an SDR sees the one
 // whose local-part matches their own (jg@proswppp.com → jg@proswppp.co), connected or not.
-async function visibleMailboxes(sdrUser) {
+async function visibleMailboxes(sdrUser, db=pool) {
   const isAdmin = sdrUser?.role === "admin";
-  const { rows } = await pool.query(
+  const { rows } = await db.query(
     `SELECT m.email, (a.mailbox_email IS NOT NULL) AS connected, a.connected_at,
             COALESCE(u.display_name, u.username) AS owner_name
        FROM sdr_mailboxes m
@@ -7117,6 +7118,7 @@ registerSdrMetricsRoutes(app, {
   resolveVisibleMailboxes: async (user) => (await visibleMailboxes(user)).map((mailbox) => mailbox.email.toLowerCase()),
 });
 registerSdrReplyActionBacklogRoutes(app, {pool,companyId:process.env.SDR_CRM_COMPANY_ID,resolveVisibleMailboxes:async user=>(await visibleMailboxes(user)).filter(mailbox=>mailbox.connected).map(mailbox=>mailbox.email)});
+registerSdrOperationsSnapshotRoutes(app,{pool,companyId:process.env.SDR_CRM_COMPANY_ID,resolveVisibleMailboxes:async (user,db)=>(await visibleMailboxes(user,db)).filter(mailbox=>mailbox.connected).map(mailbox=>mailbox.email)});
 registerSdrHealthRoutes(app, {
   pool,
   resolveVisibleMailboxes: async (user) => (await visibleMailboxes(user)).map(mailbox => mailbox.email),
