@@ -46,9 +46,9 @@ describe("recorded import history", () => {
     const html = renderToStaticMarkup(createElement(LeadImportHistory, { job }));
     expect(html).toContain("Recorded import results");
     expect(html).toContain("synthetic.csv");
-    expect(html).toContain("Stored rows may have been updated");
-    expect(html).toContain("CRM contact selected at import and selection reason are unavailable");
-    expect(html).toContain("do not verify current Pipedrive data");
+    expect(html).toContain("Stored import records may have been updated");
+    expect(html).toContain("Counts and results do not confirm current Pipedrive data");
+    expect(html).toContain("The original CRM contact and selection reason were not recorded");
     expect(html).not.toMatch(/<a\b|href=|>Approve<|>Delete<|>Restore</);
   });
 

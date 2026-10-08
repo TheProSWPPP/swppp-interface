@@ -108,8 +108,8 @@ export default function LeadImportHistory({ job }: { job: LeadImportJob }) {
       <p className="mt-1 text-sm text-slate-700 break-all">{job.filename} · {job.status}</p>
       {job.error_message && <p className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-sm text-red-800 break-words">{job.error_message}</p>}
       <p className="mt-3 text-sm text-slate-600">
-        Stored rows may have been updated. CRM contact selected at import and selection reason are unavailable.
-        Counts reflect stored import records and do not verify current Pipedrive data. Uploaded is a recorded row result, not current CRM verification.
+        Stored import records may have been updated. Counts and results do not confirm current Pipedrive data.
+        The original CRM contact and selection reason were not recorded.
       </p>
 
       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
