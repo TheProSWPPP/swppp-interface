@@ -10,6 +10,7 @@ import {
   type LeadImportStatus,
 } from "../lib/leadUploadApi";
 import LeadImportPreview from "./LeadImportPreview";
+import LeadImportHistory from "./LeadImportHistory";
 import { cn } from "../utils";
 
 const STATUS_LABEL: Record<LeadImportStatus, string> = {
@@ -34,7 +35,7 @@ function isTerminal(s: LeadImportStatus) {
   return s === "done" || s === "error";
 }
 
-function ProgressRow({ job, onDelete, onOpen }: { job: LeadImportJob; onDelete?: () => void; onOpen?: () => void }) {
+export function ProgressRow({ job, onDelete, onOpen, onHistory }: { job: LeadImportJob; onDelete?: () => void; onOpen?: () => void; onHistory?: () => void }) {
   const pctCleaned = job.total_rows ? Math.round((job.cleaned_rows / job.total_rows) * 100) : 0;
   const pctUploaded = job.total_rows ? Math.round((job.uploaded_rows / job.total_rows) * 100) : 0;
   return (
@@ -45,7 +46,7 @@ function ProgressRow({ job, onDelete, onOpen }: { job: LeadImportJob; onDelete?:
       )}
       onClick={onOpen}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className={cn("flex items-start justify-between gap-3", onHistory && "flex-wrap")}>
         <div className="flex items-start gap-3 min-w-0">
           <FileText className="h-5 w-5 text-slate-400 mt-0.5 shrink-0" />
           <div className="min-w-0">
@@ -55,7 +56,7 @@ function ProgressRow({ job, onDelete, onOpen }: { job: LeadImportJob; onDelete?:
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className={cn("flex items-center gap-2", onHistory && "flex-wrap")}>
           <span
             className={cn(
               "text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap flex items-center gap-1.5",
@@ -67,6 +68,15 @@ function ProgressRow({ job, onDelete, onOpen }: { job: LeadImportJob; onDelete?:
             {job.status === "error" && <AlertCircle className="h-3 w-3" />}
             {STATUS_LABEL[job.status]}
           </span>
+          {onHistory && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onHistory(); }}
+              className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              View recorded rows
+            </button>
+          )}
           {onDelete && (
             <button
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
@@ -113,6 +123,7 @@ const ACTIVE_JOB_KEY = "lead_import_active_job_id";
 
 export default function LeadUpload() {
   const [activeJob, setActiveJob] = useState<LeadImportJob | null>(null);
+  const [selectedHistoryJob, setSelectedHistoryJob] = useState<LeadImportJob | null>(null);
   const [recent, setRecent] = useState<LeadImportJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -267,7 +278,7 @@ export default function LeadUpload() {
             </div>
           )}
           <h2 className="text-sm font-semibold text-slate-700 mb-2">Current import</h2>
-          <ProgressRow job={activeJob} onDelete={() => handleDelete(activeJob.id)} />
+          <ProgressRow job={activeJob} onDelete={() => handleDelete(activeJob.id)} onHistory={isTerminal(activeJob.status) ? () => setSelectedHistoryJob(activeJob) : undefined} />
         </div>
       )}
 
@@ -282,6 +293,15 @@ export default function LeadUpload() {
         </div>
       )}
 
+      {selectedHistoryJob && (
+        <div className="mt-6">
+          <div className="mb-2 flex justify-end">
+            <button type="button" onClick={() => setSelectedHistoryJob(null)} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-500">Close recorded rows</button>
+          </div>
+          <LeadImportHistory key={selectedHistoryJob.id} job={selectedHistoryJob} />
+        </div>
+      )}
+
       {recent.length > 0 && (
         <div className="mt-8">
           <h2 className="text-sm font-semibold text-slate-700 mb-2">Recent imports</h2>
@@ -290,8 +310,9 @@ export default function LeadUpload() {
               <ProgressRow
                 key={job.id}
                 job={job}
-                onDelete={() => handleDelete(job.id)}
-                onOpen={() => setActiveJob(job)}
+                onDelete={isTerminal(job.status) ? undefined : () => handleDelete(job.id)}
+                onOpen={isTerminal(job.status) ? undefined : () => setActiveJob(job)}
+                onHistory={isTerminal(job.status) ? () => setSelectedHistoryJob(job) : undefined}
               />
             ))}
           </div>
