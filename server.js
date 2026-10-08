@@ -5,6 +5,7 @@ import { registerWorkspaceOverviewRoutes } from './lib/workspaceOverviewRoutes.j
 import { createPipedriveObservationClient } from './lib/pipedriveObservationClient.js';
 import { createSdrCrmObserverRuntime } from './lib/sdrCrmObserverRuntime.js';
 import { registerSdrCrmObservationRoutes } from './lib/sdrCrmObservationRoutes.js';
+import { registerSdrFollowupDraftRoutes } from './lib/sdrFollowupDraftRoutes.js';
 // END OBSERVATION ADDITION
 // BEGIN OBSERVATION ADDITION
 import {createSalesHistoryRuntime} from './lib/salesHistoryRuntime.js';
@@ -1267,7 +1268,7 @@ async function initDB() {
     }
     console.log("Table 'automation_tasks' verified/created.");
     // Install additive protection before any route/worker can mutate outreach.
-    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql','2026-10-07-sdr-open-alerts.sql']) {
+    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql','2026-10-07-sdr-open-alerts.sql','2026-10-08-sdr-followup-drafts.sql']) {
       await pool.query(fs.readFileSync(new URL('./migrations/'+migration,import.meta.url),'utf8'));
     }
   } catch (err) {
@@ -7138,6 +7139,7 @@ if (process.env.SDR_CONVERSATION_HISTORY_ENABLED === "true") {
 let crmObserverRuntime = null;
 const crmObserverEnabled = process.env.SDR_CRM_OBSERVER_ENABLED === 'true';
 const crmCompanyId = process.env.SDR_CRM_COMPANY_ID;
+if(crmCompanyId)registerSdrFollowupDraftRoutes(app,{pool,companyId:crmCompanyId});
 if(crmCompanyId)registerSdrOutreachControlRoutes(app,{pool,companyId:crmCompanyId,canViewLead:(req,id)=>leadVisibleTo(pool,req.sdrUser,id)});
 if (crmObserverEnabled && process.env.PIPEDRIVE_API_TOKEN && crmCompanyId && process.env.DATABASE_URL) {
   const crmClient = createPipedriveObservationClient({token:process.env.PIPEDRIVE_API_TOKEN,sourceHost:process.env.SDR_CRM_SOURCE_HOST||'proswpppllc.pipedrive.com'});
