@@ -32,13 +32,14 @@ export default function SystemDocs() {
             <li><b>Lead Upload</b> — Derek drops the CSV in the Lead Import section of this app</li>
             <li><b>Cleaning</b> — Claude AI abbreviates project titles using the same rules every time (cached so identical raw titles produce identical clean titles)</li>
             <li><b>Pipedrive push</b> — cleaned leads are created in Pipedrive with all custom fields set</li>
-            <li><b>Auto CMD refresh</b> — as soon as the import finishes, all newly-imported lead IDs are sent to the CMD Refresh On-Demand workflow which scrapes bidder + contact data for each lead, paced 30s apart</li>
-            <li><b>SDR queue</b> — once a lead has fresh CMD data (<code className="bg-slate-100 px-1.5 rounded">Last Refresh &lt; 24h</code>), it becomes eligible for the daily Pipedrive sequence drip</li>
+            <li><b>CMD lookup</b> — project stage and bidder information are checked, with contact lookup where the source information is available</li>
+            <li><b>SDR queue</b> — freshness is one input to queue decisions; current approval, contact and protection checks still apply</li>
           </ol>
           <Box>
-            <b>Freshness gate:</b> the SDR queue refuses to release a sequence email
-            unless the lead's CMD data was scraped within the last 24 hours. This
-            prevents stale or wrong contact info from going out to prospects.
+            <b>Freshness and contact evidence:</b> a recent Last Refresh date does
+            not prove that contact lookup completed or that the intended buyer was
+            identified. Missing new contact information does not mean the current
+            Pipedrive contact is wrong.
           </Box>
         </Section>
 
@@ -46,36 +47,19 @@ export default function SystemDocs() {
         <Section
           icon={<Clock className="h-6 w-6" />}
           color="indigo"
-          title="CMD Refresh — keeping bidder data fresh"
+          title="CMD Refresh — project and contact checks"
         >
           <p>
-            CMD Insight (Construction Market Data) is where we get bidder names, contacts, and project status.
-            Three workflows keep this data fresh:
+            CMD Insight (Construction Market Data) provides project stage and bidder
+            information. Refresh workflows process selected projects in batches;
+            a completed batch does not mean every eligible project was checked.
           </p>
-          <Table headers={["Workflow", "Runs", "Cap", "What it does"]}>
-            <Row cells={[
-              "CMD Smart Refresh - AM",
-              "Weekdays 5 AM",
-              "100 leads",
-              "Picks new leads (added in last 48h) + leads with project Start date in last 14 days OR future. Oldest-refreshed-first.",
-            ]}/>
-            <Row cells={[
-              "CMD Smart Refresh - PM",
-              "Weekdays 5 PM",
-              "100 leads",
-              "Same logic — second pass to catch afternoon bid postings and any leads missed by AM cycle.",
-            ]}/>
-            <Row cells={[
-              "CMD Refresh On-Demand",
-              "Triggered after every lead import",
-              "Whatever was just imported",
-              "Webhook-fired by the import workflow. New leads go from CSV to refreshed CMD data within minutes, not hours.",
-            ]}/>
-          </Table>
           <p>
-            Each refresh logs into CMD once, scrapes the project's winning bidder, then reuses
-            the same browser session to scrape the contractor's contacts. That session-reuse
-            cuts our scraping cost by 70-90% vs logging in from scratch for every step.
+            Contact lookup depends on resolving the bidder and finding usable company
+            information. A missing company-profile URL or unsuccessful extraction can
+            leave contact information incomplete even when a Last Refresh date is recorded.
+            Review the source evidence and the team's current Pipedrive selections before
+            requesting a contact change.
           </p>
         </Section>
 
@@ -188,7 +172,7 @@ export default function SystemDocs() {
             ]}/>
             <Row cells={[
               "Last Refresh",
-              "Auto-stamped after a successful CMD refresh. The SDR queue requires this < 24h before releasing a sequence email."
+              "Records a CMD project refresh. It does not certify completed contact lookup, the intended buyer, or readiness for outreach."
             ]}/>
             <Row cells={[
               "Start",
@@ -217,17 +201,17 @@ export default function SystemDocs() {
         <Section
           icon={<GitBranch className="h-6 w-6" />}
           color="rose"
-          title="Apollo Verify — picking the best contact"
+          title="Apollo Verify — contact evidence"
         >
           <p>
-            After the CMD refresh pulls bidder + contact data, the system runs an Apollo
-            verification step to make sure Derek is reaching out to the right person —
-            never a generic <code className="bg-slate-100 px-1.5 rounded">info@</code> address if a real human exists.
+            Existing Pipedrive people and Apollo results can provide contact candidates.
+            Address verification and role information help assess a candidate, but do
+            not establish that the person is the buyer for this project.
           </p>
           <ul className="list-disc list-inside space-y-1.5 ml-2">
-            <li><b>If the contractor's org is already in Pipedrive</b> with persons, score by closed-deals count + recent activity, prefer non-generic emails over <code className="bg-slate-100 px-1.5 rounded">info@</code>/<code className="bg-slate-100 px-1.5 rounded">bids@</code></li>
-            <li><b>If not</b>, query Apollo for people at the org's domain. Score by seniority (C-suite / VP / Director / Manager) + role keywords (estimator, project manager, civil engineer, SWPPP). Threshold for swap is score ≥ 5.</li>
-            <li><b>Mid-sequence guard</b> — if the lead is already enrolled in a sequence, swapping the contact mid-flight would be disruptive. The system defers the swap and writes a note.</li>
+            <li><b>Check project context</b> — confirm the contractor, person's role and current project relationship</li>
+            <li><b>Preserve staff work</b> — compare candidates with the latest contact choices, notes and follow-up tasks in Pipedrive</li>
+            <li><b>Review proposed changes</b> — a candidate or proposed update is not proof that the lead's contact has changed</li>
           </ul>
         </Section>
       </div>
