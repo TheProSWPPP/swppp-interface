@@ -51,13 +51,13 @@ export default function SalesTrend({data,previous,monthBaseline,comparisonLabel,
 
   return <>
     <section className="sales-trend" aria-labelledby={`${id}-title`} data-measure={measure}>
-      <div className="sales-trend-heading"><div><h2 id={`${id}-title`}>Monthly performance</h2><p>Dated Pipedrive wins</p></div>
+      <div className="sales-trend-heading"><div><h2 id={`${id}-title`}>Monthly performance</h2><p>Pipedrive won deals</p></div>
         <div className="sales-segments" role="group" aria-label="Chart metric">{measures.map(item=><button key={item.id} aria-pressed={measure===item.id} onClick={()=>setMeasure(item.id)}>{item.label}</button>)}</div>
       </div>
       <div className="sales-chart-toolbar"><div className="sales-chart-legend"><span><i/>{measures.find(item=>item.id===measure)?.label}</span>{compare&&<span><i className="is-previous"/>{comparisonLabel}</span>}{warnings.length>0&&<span className="sales-review-key"><i/>Date review</span>}</div>
         <div className="sales-chart-actions"><label className="sales-compare-toggle"><input type="checkbox" checked={compare} onChange={event=>setCompare(event.target.checked)}/>Compare</label><div className="sales-chart-style" role="group" aria-label="Chart style"><button aria-label="Bar chart" aria-pressed={style==='bars'} onClick={()=>setStyle('bars')}><BarChart3 size={18}/></button><button aria-label="Line chart" aria-pressed={style==='line'} onClick={()=>setStyle('line')}><ChartNoAxesCombined size={18}/></button></div></div>
       </div>
-      {compare&&<p className="sales-chart-comparison-note">{comparisonLoading?'Loading comparison…':!previous?'Comparison unavailable. Retry from the summary above.':priorValues.every(value=>value===null)?'Comparison withheld: these periods have incomplete data or sale dates needing review.':`Compared with ${monthLabel(previous.window.from.slice(0,7))} through ${monthLabel(priorRows.at(-1)?.month||previous.window.from.slice(0,7))}. Months needing date review are omitted from the comparison.`}</p>}
+      {compare&&<p className="sales-chart-comparison-note">{comparisonLoading?'Loading comparison…':!previous?'Comparison unavailable. Use Retry comparison above.':priorValues.every(value=>value===null)?'Comparison withheld: incomplete data or dates needing review.':`Compared with ${monthLabel(previous.window.from.slice(0,7))} through ${monthLabel(priorRows.at(-1)?.month||previous.window.from.slice(0,7))}. Date review months excluded.`}</p>}
       {!rows.length?<div className="sales-chart-empty">No monthly records are available for these dates. Choose another period or refresh sales.</div>:<div ref={scrollRef} className="sales-chart-scroll" role="region" aria-label="Sales chart, scroll horizontally for more months" tabIndex={0}>
         <div className="sales-chart-canvas" style={{minWidth:width}} onMouseLeave={()=>setHovered(null)}>
           <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
@@ -81,7 +81,7 @@ export default function SalesTrend({data,previous,monthBaseline,comparisonLabel,
       </div>}
       {active&&<div className="sales-month-inspector" aria-label="Selected month details"><div className="sales-month-title"><strong>{monthLabel(active.month)}</strong>{active.partialMonth&&<span>Partial month</span>}{warnings.some(w=>w.month===active.month)&&<span className="sales-review-label">Dates need review</span>}<button className="sales-month-open" onClick={()=>onOpenMonth(active.from,active.to)}>View month<ArrowUpRight size={16}/></button></div><dl>{measures.map(item=><div key={item.id}><dt>{item.label}</dt><dd>{salesAmount(monthMetric(data,active,item.id).state==='unavailable'?null:active[item.id],item.id!=='sales')}</dd>{compare&&<small className={`sales-change is-${changeTone(monthMetric(data,active,item.id),monthMetric(previous,activePrior,item.id))}`}>{delta(activeIndex,item.id)}</small>}</div>)}</dl></div>}
     </section>
-    <section className="sales-breakdown" aria-labelledby={`${id}-breakdown`}><div className="sales-breakdown-heading"><h2 id={`${id}-breakdown`}>Month by month</h2><span>Changes vs. the previous month</span></div>
+    <section className="sales-breakdown" aria-labelledby={`${id}-breakdown`}><div className="sales-breakdown-heading"><h2 id={`${id}-breakdown`}>Month by month</h2><span>Change vs. prior month</span></div>
       <div className="sales-table-scroll" role="region" aria-label="Monthly sales breakdown" tabIndex={0}><table><thead><tr><th scope="col">Month</th><th scope="col">Sales won</th><th scope="col">Revenue</th><th scope="col">Average sale</th><th scope="col">Sales change</th><th scope="col">Revenue change</th></tr></thead><tbody>{rows.map((row,index)=>{
         const baselineRows=monthBaseline?monthlySales(monthBaseline.activity,monthBaseline.window):priorRows;
         const prior=rows[index-1]||baselineRows.find(item=>item.to===row.from),source=index>0?data:monthBaseline||previous;
