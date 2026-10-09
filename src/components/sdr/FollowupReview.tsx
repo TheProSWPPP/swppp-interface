@@ -9,12 +9,10 @@ import {leadInboxHref,parentCrmUrl} from './followupNavigation';
 const when=(date:string|null|undefined)=>date?new Date(date).toLocaleString('en-US',{timeZone:'America/Chicago',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' CT':'Unknown';
 export function ReviewProjectCard({project,onOpenLead}:{project:FollowupReviewProject;onOpenLead:(id:string)=>void}){
  return <article className="fu-project fu-review-project">
-   <header className="fu-project-heading"><h2><button type="button" onClick={()=>onOpenLead(project.leadId)}>{project.title||'Untitled project'}<ArrowRight size={16}/></button></h2><span className="fu-lead-owner">Lead owner: {project.ownerName||(project.ownerId?`Owner ${project.ownerId}`:'Unassigned')}</span></header>
-   <div className="fu-nav"><a className="fu-source" href={leadInboxHref(project.leadId)} target="_blank" rel="noopener noreferrer">Find a conversation for this project<ExternalLink size={14} aria-hidden="true"/></a><p>Searches conversations for this project's current contact. Other threads may exist; check the task and project history.</p></div>
+   <header className="fu-project-heading"><div className="fu-project-identity"><h2><button type="button" onClick={()=>onOpenLead(project.leadId)}>{project.title||'Untitled project'}<ArrowRight size={16}/></button></h2><span className="fu-lead-owner">Lead owner: {project.ownerName||(project.ownerId?`Owner ${project.ownerId}`:'Unassigned')}</span></div>{parentCrmUrl(project.sourceUrl)&&<a className="fu-source" href={parentCrmUrl(project.sourceUrl)!} target="_blank" rel="noopener noreferrer">Open project in Pipedrive<ExternalLink size={14}/></a>}</header>
+   <div className="fu-nav"><a className="fu-source" title="Searches conversations for this project’s current contact. Other threads may exist; check the task and project history." href={leadInboxHref(project.leadId)} target="_blank" rel="noopener noreferrer">Find a conversation for this project<ExternalLink size={14} aria-hidden="true"/></a><span className="fu-search-scope">Current contact only</span></div>
    <ol className="fu-evidence">{project.evidence.map((e,index)=><li key={`${e.entity}:${e.id}`}><details open={index===0}><summary>{e.entity==='note'?'CRM note':'Completed call'} · Record updated {when(e.sourceUpdatedAt)}</summary><p>{crmPlainText(e.text)}</p>{parentCrmUrl(e.sourceUrl)&&<a className="fu-source" href={parentCrmUrl(e.sourceUrl)!} target="_blank" rel="noopener noreferrer">Open parent CRM record for {e.entity} {e.id}<ExternalLink size={14} aria-hidden="true"/></a>}<span className="fu-task-source">{e.entity} {e.id} · Observed {when(e.observedAt)}</span></details></li>)}</ol>
-   <FollowupProjectContext key={project.leadId} leadId={project.leadId}/>
-   <FollowupDraftEditor leadId={project.leadId}/>
-   {parentCrmUrl(project.sourceUrl)&&<footer><a className="fu-source" href={parentCrmUrl(project.sourceUrl)!} target="_blank" rel="noopener noreferrer">Open project in Pipedrive<ExternalLink size={14}/></a></footer>}
+   <div className="fu-project-tools"><FollowupProjectContext key={project.leadId} leadId={project.leadId}/><FollowupDraftEditor leadId={project.leadId}/></div>
   </article>;
 }
 export default function FollowupReview({onOpenLead}:{onOpenLead:(id:string)=>void}) {
@@ -39,8 +37,8 @@ export default function FollowupReview({onOpenLead}:{onOpenLead:(id:string)=>voi
  },[]);
  useEffect(()=>{void load();return()=>{generation.current++;};},[load]);
  return <div className="fu-review">
-  <div className="fu-review-intro"><div><h2>Review next steps</h2><p>Recent notes and completed calls on active projects with no open task in the collected CRM records.</p></div><button type="button" className="fu-button" disabled={loading} onClick={()=>void load()}><RefreshCw size={16}/>Refresh</button></div>
-  <p className="fu-state fu-warning">Review candidates from partial CRM history. Check the latest conversation, promised timing, contact and holds before acting.</p>
+  <div className="fu-review-intro"><div><h2>Review next steps</h2><p>Active projects with recent CRM context and no collected open task.</p></div><button type="button" className="fu-button" disabled={loading} onClick={()=>void load()}><RefreshCw size={16}/>Refresh</button></div>
+  <p className="fu-state fu-warning">Partial CRM history. Check the conversation, promised timing, contact and holds before acting.</p>
   <details className="fu-review-help"><summary>Review checklist and source coverage</summary><p className="fu-review-guidance">Decide whether to reply, confirm a quote or documents, call, wait for a promised date, coordinate with the PM, review the contact, or close the opportunity. Record the decision on the existing Pipedrive project.</p>
   <div className="fu-coverage"><span>Last 90 days by CRM record update · Up to 5 recent notes/calls per project · Known [Auto] notes excluded</span><span>{['notes','activities','leads'].map(name=>`${name}: ${health?.scopes.find(s=>s.scope===name)?.status||'unknown'} · checked ${when(health?.scopes.find(s=>s.scope===name)?.checkedAt)}`).join(' · ')}</span></div></details>
   {unavailable&&<p className="fu-state fu-warning" role="alert">{crmFollowupUnavailableMessage(unavailable)}</p>}

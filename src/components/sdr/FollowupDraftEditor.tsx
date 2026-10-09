@@ -85,7 +85,7 @@ function DraftWorkspace({leadId,onClose}:{leadId:string;onClose:()=>void}){
     else if(!event.shiftKey&&(document.activeElement===last||document.activeElement===root.current)){event.preventDefault();first?.focus();}
    }
   }}>
-  <header><div><h2 id={`${id}-title`}>Private follow-up draft</h2><p>Visible to you. Write and save your own message here.</p></div><button className="fu-button" type="button" disabled={saving} onClick={close}>Close</button></header>
+  <header><div><h2 id={`${id}-title`}>Private follow-up draft</h2><p>Private to you. Copy into Pipedrive to use.</p></div><button className="fu-button" type="button" disabled={saving} onClick={close}>Close</button></header>
   {loading&&<p role="status">Loading your draft…</p>}
   {error&&<p role="alert" className="fu-warning">{error}</p>}
   {current&&<>
@@ -97,14 +97,13 @@ function DraftWorkspace({leadId,onClose}:{leadId:string;onClose:()=>void}){
      {current.context.records.map(record=><div key={`${record.entity}:${record.id}`}><strong>{record.subject||`${record.entity} ${record.id}`}</strong><p>{record.type||record.entity} · {record.entity==='activity'?`CRM marked ${record.done?'done':'open'} · Due ${record.dueDate||'undated'} · Owner ${record.ownerId||'unassigned'} · `:''}Record updated: {timestamp(record.sourceUpdatedAt)}</p><p>{record.text}{record.textTruncated?'… Preview truncated.':''}</p></div>)}
      <p>An activity marked done does not establish an email send or completed conversation.</p>
     </details>
-    <a href={`https://proswpppllc.pipedrive.com/leads/inbox/${encodeURIComponent(leadId)}`} target="_blank" rel="noopener noreferrer">Open project in Pipedrive</a>
    </section>
    <section className="fu-draft-context" aria-label="Draft preparation"><p>Review the original task, latest conversation and any order evidence before using your draft.</p><FollowupProjectContext key={leadId} leadId={leadId}/></section>
    <label htmlFor={`${id}-subject`}>Subject</label><input id={`${id}-subject`} maxLength={500} value={text.subject} disabled={saving} onChange={event=>{setText({...text,subject:event.target.value});setNotice('');}}/>
    <label htmlFor={`${id}-body`}>Message</label><textarea id={`${id}-body`} rows={9} maxLength={20000} value={text.body} disabled={saving} onChange={event=>{setText({...text,body:event.target.value});setNotice('');}}/>
    <p className="fu-draft-boundary">Check the latest email conversation before using this draft. Email history and website orders are not verified here. Available inventory matches are candidates until checked against source evidence.</p>
    {conflict&&<div className="fu-warning"><strong>{conflict==='revision'?'A newer saved version exists.':'CRM context changed since this draft was saved or opened.'}</strong>{conflict==='revision'&&current.draft&&<details><summary>Compare with saved version</summary><p>{current.draft.subject}</p><pre>{current.draft.body}</pre></details>}<label><input type="checkbox" checked={acknowledged} onChange={event=>setAcknowledged(event.target.checked)}/>I reviewed the current CRM context{conflict==='revision'?' and saved version':''}. Save my text with this context.</label></div>}
-   <footer><span>{dirty?'Unsaved changes':current.draft?`Saved privately · ${timestamp(current.draft.updatedAt)}`:'New private draft'}</span><button type="button" className="fu-button" disabled={saving||!text.body.trim()||Boolean(conflict&&!acknowledged)} onClick={()=>void save()}>{saving?'Saving…':'Save draft'}</button><button type="button" className="fu-button" disabled={saving||!text.body.trim()} onClick={()=>void copy()}>Copy draft</button></footer>
+   <footer><span>{dirty?'Unsaved changes':current.draft?`Saved privately · ${timestamp(current.draft.updatedAt)}`:'New private draft'}</span><button type="button" className="fu-button" disabled={saving||!text.body.trim()||Boolean(conflict&&!acknowledged)} onClick={()=>void save()}>{saving?'Saving…':'Save draft'}</button><button type="button" className="fu-button" disabled={saving||!text.body.trim()} onClick={()=>void copy()}>Copy draft</button><a className="fu-source" href={`https://proswpppllc.pipedrive.com/leads/inbox/${encodeURIComponent(leadId)}`} target="_blank" rel="noopener noreferrer">Open project in Pipedrive</a></footer>
    {notice&&<p role="status">{notice}</p>}
   </>}
  </div></div>;
