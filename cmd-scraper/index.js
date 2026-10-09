@@ -162,6 +162,79 @@ function mapProjectStage(stage) {
   return stage;
 }
 
+// Recover only source-linked awarded GC identities after the bidder/feed lookup fails.
+async function recoverParticipantAward(bidder, page) {
+  if (bidder?.awardSource !== "update_feed_unmatched" || bidder.companyUrl || !bidder.company) return bidder;
+  const originalUrl = page.url();
+  try {
+    const state = await page.evaluate(() => {
+      const grid = document.querySelector("#grdProjectParticipants");
+      if (!grid || grid.getAttribute("role") !== "grid" ||
+          grid.getAttribute("aria-hidden") !== "false" || grid.getAttribute("aria-disabled") !== "false" ||
+          grid.querySelector('.x-mask, .x-grid-loading, [role="progressbar"]')) return null;
+      const headers = Array.from(grid.querySelectorAll("[role=columnheader]"))
+        .map(el => el.textContent.replace("Cell value has been edited", "").trim());
+      const expected = ["Company Role", "Company Name", "Contact Name", "Contact Status", "Street Address", "Phone", "Email", "Fax Number", "DataSource"];
+      if (headers.length !== expected.length || headers.some((h, i) => h !== expected[i])) return null;
+      const rows = grid.querySelectorAll("table.x-grid-item").length;
+      if (!rows) return null;
+      const control = document.querySelector("#lnkProjectParticipants");
+      if (!control) return { rows, mode: "complete" };
+      if (control.offsetParent === null || control.getAttribute("aria-disabled") === "true") return null;
+      const text = control.textContent.trim();
+      if (text === "Show Less" && control.className.split(/\s+/).includes("expanded")) return { rows, mode: "complete" };
+      if (text === "Show More" && control.getAttribute("onclick") === "expandCollapseProjectParticipants(this.innerHTML)") return { rows, mode: "expand" };
+      return null;
+    });
+    if (!state) return bidder;
+    if (state.mode === "expand") {
+      await page.click("#lnkProjectParticipants", { timeout: 5000 });
+      await page.waitForFunction((initialRows) => {
+        const grid = document.querySelector("#grdProjectParticipants");
+        const control = document.querySelector("#lnkProjectParticipants");
+        return !!grid && !!control && !grid.querySelector('.x-mask, .x-grid-loading, [role="progressbar"]') &&
+          grid.querySelectorAll("table.x-grid-item").length > initialRows &&
+          control.textContent.trim() === "Show Less" && control.className.split(/\s+/).includes("expanded");
+      }, state.rows, { timeout: 5000 });
+    }
+    if (page.url() !== originalUrl) return bidder;
+    const identity = await page.evaluate(() => {
+      const grid = document.querySelector("#grdProjectParticipants");
+      if (!grid || grid.getAttribute("role") !== "grid" ||
+          grid.getAttribute("aria-hidden") !== "false" || grid.getAttribute("aria-disabled") !== "false" ||
+          grid.querySelector('.x-mask, .x-grid-loading, [role="progressbar"]')) return null;
+      const headers = Array.from(grid.querySelectorAll("[role=columnheader]"))
+        .map(el => el.textContent.replace("Cell value has been edited", "").trim());
+      const expected = ["Company Role", "Company Name", "Contact Name", "Contact Status", "Street Address", "Phone", "Email", "Fax Number", "DataSource"];
+      if (headers.length !== expected.length || headers.some((h, i) => h !== expected[i])) return null;
+      const control = document.querySelector("#lnkProjectParticipants");
+      if (control && (control.offsetParent === null || control.textContent.trim() !== "Show Less" ||
+          !control.className.split(/\s+/).includes("expanded"))) return null;
+      const rows = grid.querySelectorAll("table.x-grid-item");
+      if (!rows.length) return null;
+      const norm = s => s.trim().replace(/\s+/g, " ").toLowerCase();
+      let selected = null;
+      for (const row of rows) {
+        const cells = row.querySelectorAll("td");
+        if (norm(cells[0]?.textContent || "") !== "awarded - general contractor") continue;
+        const name = cells[1]?.querySelector("div.x-grid-cell-inner")?.textContent?.trim() || "";
+        const onclick = cells[1]?.querySelector("a")?.getAttribute("onclick") || "";
+        const match = /^navigateToDetailsPage\('([1-9]\d*\|US)','ProjectInformation','Company'\)$/.exec(onclick);
+        if (!name || !match || (selected && (selected.name !== norm(name) || selected.id !== match[1]))) return null;
+        selected = { name: norm(name), id: match[1] };
+      }
+      return selected;
+    });
+    if (!identity || identity.name !== bidder.company.trim().replace(/\s+/g, " ").toLowerCase()) return bidder;
+    const numericId = identity.id.split("|")[0];
+    return { ...bidder, companyId: identity.id,
+      companyUrl: "https://insight.cmdgroup.com/Company/Home/CompanyInformation/" + numericId,
+      awardSource: "participant_awarded_gc" };
+  } catch {
+    return bidder;
+  }
+}
+
 // === Scrape: project page → bidder grid + military hint ===
 async function scrapeBidder(projectUrl) {
   await ensureLoggedIn();
@@ -360,8 +433,9 @@ async function scrapeBidder(projectUrl) {
   });
 
   const stage = mapProjectStage(rawStageEarly);
+  const recoveredBidder = await recoverParticipantAward(bidder, page);
 
-  return { bidder, military, stage, raw_stage: rawStageEarly, page_url: page.url() };
+  return { bidder: recoveredBidder, military, stage, raw_stage: rawStageEarly, page_url: page.url() };
 }
 
 // === Scrape: company page → all contacts ===
