@@ -7136,7 +7136,7 @@ registerSdrOperationsRoutes(app, {
   resolveVisibleMailboxes: async (user) => (await visibleMailboxes(user)).map(mailbox => mailbox.email),
 });
 registerSdrImportAuditRoutes(app, { pool });
-registerSdrOrderReconciliationRoutes(app, { pool });
+registerSdrOrderReconciliationRoutes(app, { pool, companyId: process.env.SDR_CRM_COMPANY_ID });
 if (process.env.SDR_CONVERSATION_HISTORY_ENABLED === "true") {
   registerSdrConversationRoutes(app, {
     pool,
