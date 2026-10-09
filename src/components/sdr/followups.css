@@ -150,3 +150,19 @@
  .fu-draft-workspace h2{font-size:18px}
  .fu-draft-workspace footer>.fu-source{margin-left:0}
 }
+
+/* Explicit publication of a saved private draft as a CRM lead note. */
+.fu-handoff{margin-top:20px;padding:20px;border:1px solid #b9cdd9;border-radius:4px;background:#f7fafb}
+.fu-handoff>h3{margin:0;font-size:17px}
+.fu-handoff>p{margin:8px 0 14px}
+.fu-handoff-context{display:flex;flex-wrap:wrap;gap:4px 20px;margin:16px 0;color:#526575}
+.fu-handoff-context p{margin:0}
+.fu-handoff-preview{padding:16px;background:#fff;border:1px solid #dce4eb;border-radius:4px;max-height:360px;overflow:auto}
+.fu-handoff-preview pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:13px;line-height:1.7}
+.fu-handoff-review{display:flex;align-items:center;gap:10px;min-height:44px;margin:12px 0;font-size:13px;cursor:pointer}
+.fu-handoff-review input{flex-shrink:0;width:18px;height:18px;accent-color:#205b82}
+.fu-handoff .fu-handoff-confirm{background:#205b82;border-color:#205b82;color:#fff}
+.fu-handoff-receipt{margin-top:14px;font-size:14px}
+.fu-handoff-receipt .fu-source{margin-left:16px}
+.fu-handoff:focus-visible,.fu-handoff-preview:focus-visible{outline:3px solid #4a87b1;outline-offset:3px}
+@media(max-width:600px){.fu-handoff{padding:14px}.fu-handoff-preview{padding:12px}.fu-handoff-receipt .fu-source{margin-left:0;display:flex}}
