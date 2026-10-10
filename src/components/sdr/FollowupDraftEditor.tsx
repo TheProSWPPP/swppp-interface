@@ -1,4 +1,5 @@
 import FollowupProjectContext from './FollowupProjectContext';
+import FollowupPreparation from './FollowupPreparation';
 import FollowupHandoff from './FollowupHandoff';
 import type {HandoffInput} from '../../lib/sdrFollowupHandoffApi';
 import {useCallback,useEffect,useId,useRef,useState} from 'react';
@@ -17,6 +18,7 @@ export default function FollowupDraftEditor({leadId}:{leadId:string}){
 
 function DraftWorkspace({leadId,onClose}:{leadId:string;onClose:()=>void}){
  const id=useId(),root=useRef<HTMLDivElement>(null),generation=useRef(0),busy=useRef(false);
+ const editorVersion=useRef(0);
  const [current,setCurrent]=useState<FollowupDraftResponse|null>(null),[text,setText]=useState<DraftText>(empty),[saved,setSaved]=useState<DraftText>(empty);
  const [loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [conflict,setConflict]=useState<'context'|'revision'|null>(null),[acknowledged,setAcknowledged]=useState(false);
@@ -24,6 +26,8 @@ function DraftWorkspace({leadId,onClose}:{leadId:string;onClose:()=>void}){
  const handoffBusy=useRef(false);
  const handoffStatus=useCallback((pending:boolean,unresolved:boolean)=>{handoffBusy.current=pending;setHandoffPending(pending);setHandoffUnresolved(unresolved);},[]);
  const dirty=isUnsaved(text,saved);
+ const preparationBlocked=dirty||saving||handoffPending||handoffUnresolved||Boolean(handoff)||Boolean(conflict);
+ const preparationSnapshot=()=>({leadId,session:getToken(),editorVersion:editorVersion.current,revision:current?.draft?.revision||0,contextToken:current?.contextToken||'',handoffUnresolved:handoffUnresolved||handoffPending||Boolean(handoff)});
  const token=useRef(getToken());
  useEffect(()=>{
   const requests=generation,attempt=++requests.current;
@@ -112,8 +116,9 @@ function DraftWorkspace({leadId,onClose}:{leadId:string;onClose:()=>void}){
     </details>
    </section>
    <section className="fu-draft-context" aria-label="Draft preparation"><p>Review the original task, latest conversation and any order evidence before using your draft.</p><FollowupProjectContext key={leadId} leadId={leadId}/></section>
-   <label htmlFor={`${id}-subject`}>Subject</label><input id={`${id}-subject`} maxLength={500} value={text.subject} disabled={saving||handoffPending||handoffUnresolved} onChange={event=>{setHandoff(null);setText({...text,subject:event.target.value});setNotice('');}}/>
-   <label htmlFor={`${id}-body`}>Message</label><textarea id={`${id}-body`} rows={9} maxLength={20000} value={text.body} disabled={saving||handoffPending||handoffUnresolved} onChange={event=>{setHandoff(null);setText({...text,body:event.target.value});setNotice('');}}/>
+   <FollowupPreparation leadId={leadId} current={current} blocked={preparationBlocked} getSnapshot={preparationSnapshot} onApply={proposal=>{if(preparationBlocked||proposal.contextToken!==current.contextToken||proposal.revision!==(current.draft?.revision||0))return;editorVersion.current++;setHandoff(null);setText({subject:proposal.subject,body:proposal.body});setNotice('Proposal applied to your private draft. Review and save it deliberately.');}}/>
+   <label htmlFor={`${id}-subject`}>Subject</label><input id={`${id}-subject`} maxLength={500} value={text.subject} disabled={saving||handoffPending||handoffUnresolved} onChange={event=>{editorVersion.current++;setHandoff(null);setText({...text,subject:event.target.value});setNotice('');}}/>
+   <label htmlFor={`${id}-body`}>Message</label><textarea id={`${id}-body`} rows={9} maxLength={20000} value={text.body} disabled={saving||handoffPending||handoffUnresolved} onChange={event=>{editorVersion.current++;setHandoff(null);setText({...text,body:event.target.value});setNotice('');}}/>
    <p className="fu-draft-boundary">Check the latest email conversation before using this draft. Email history and website orders are not verified here. Available inventory matches are candidates until checked against source evidence.</p>
    {conflict&&<div className="fu-warning"><strong>{conflict==='revision'?'A newer saved version exists.':'CRM context changed since this draft was saved or opened.'}</strong>{conflict==='revision'&&current.draft&&<details><summary>Compare with saved version</summary><p>{current.draft.subject}</p><pre>{current.draft.body}</pre></details>}<label><input type="checkbox" checked={acknowledged} onChange={event=>setAcknowledged(event.target.checked)}/>I reviewed the current CRM context{conflict==='revision'?' and saved version':''}. Save my text with this context.</label></div>}
    <footer><span>{dirty?'Unsaved changes':current.draft?`Saved privately · ${timestamp(current.draft.updatedAt)}`:'New private draft'}</span><button type="button" className="fu-button" disabled={saving||handoffPending||handoffUnresolved||!text.body.trim()||Boolean(conflict&&!acknowledged)} onClick={()=>void save()}>{saving?'Saving…':'Save draft'}</button><button type="button" className="fu-button" disabled={saving||!text.body.trim()} onClick={()=>void copy()}>Copy draft</button><button type="button" className="fu-button" disabled={Boolean(handoff)||saving||handoffPending||handoffUnresolved||!text.body.trim()||Boolean(conflict&&!acknowledged)} onClick={()=>void previewHandoff()}>Preview Pipedrive note</button><a className="fu-source" href={`https://proswpppllc.pipedrive.com/leads/inbox/${encodeURIComponent(leadId)}`} target="_blank" rel="noopener noreferrer">Open project in Pipedrive</a></footer>
