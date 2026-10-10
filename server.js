@@ -10,6 +10,7 @@ import { createPipedriveObservationClient } from './lib/pipedriveObservationClie
 import { createSdrCrmObserverRuntime } from './lib/sdrCrmObserverRuntime.js';
 import { registerSdrCrmObservationRoutes } from './lib/sdrCrmObservationRoutes.js';
 import { registerSdrFollowupDraftRoutes } from './lib/sdrFollowupDraftRoutes.js';
+import {registerSdrSalesLoopRoutes} from './lib/sdrSalesLoopRoutes.js';
 import {registerSdrFollowupHandoffRoutes} from './lib/sdrFollowupHandoffRoutes.js';
 // END OBSERVATION ADDITION
 // BEGIN OBSERVATION ADDITION
@@ -7167,6 +7168,7 @@ let crmObserverRuntime = null;
 const crmObserverEnabled = process.env.SDR_CRM_OBSERVER_ENABLED === 'true';
 const crmCompanyId = process.env.SDR_CRM_COMPANY_ID;
 if(crmCompanyId)registerSdrFollowupDraftRoutes(app,{pool,companyId:crmCompanyId});
+if(crmCompanyId)registerSdrSalesLoopRoutes(app,{pool,companyId:crmCompanyId,enabled:false});
 registerSdrFollowupHandoffRoutes(app,{pool,companyId:crmCompanyId,sourceHost:process.env.SDR_CRM_SOURCE_HOST||'proswpppllc.pipedrive.com',token:process.env.PIPEDRIVE_API_TOKEN,enabled:process.env.SDR_FOLLOWUP_HANDOFFS_ENABLED==='true'});
 if(crmCompanyId)registerSdrOutreachControlRoutes(app,{pool,companyId:crmCompanyId,canViewLead:(req,id)=>leadVisibleTo(pool,req.sdrUser,id)});
 if (crmObserverEnabled && process.env.PIPEDRIVE_API_TOKEN && crmCompanyId && process.env.DATABASE_URL) {
