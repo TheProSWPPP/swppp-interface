@@ -39,7 +39,7 @@ import {setOutreachControl} from './lib/sdrOutreachControls.js';
 import {configureCrmWriteProtection} from './lib/sdrCrmWriteProtection.js';
 import {registerSdrOutreachControlRoutes} from './lib/sdrOutreachControlRoutes.js';
 import {assertSendSafety} from './lib/sdrSendSafety.js';
-import {withProviderContactLock,reserveEnrollment,recordEnrollmentReceipt,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
+import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
 import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
 import { sdrDraftVerifyEnabled, checkDraftEmail } from "./lib/sdrDraftVerify.js";
@@ -1274,7 +1274,7 @@ async function initDB() {
     }
     console.log("Table 'automation_tasks' verified/created.");
     // Install additive protection before any route/worker can mutate outreach.
-    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql','2026-10-07-sdr-open-alerts.sql','2026-10-08-sdr-followup-drafts.sql','2026-10-10-sdr-followup-handoffs.sql']) {
+    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-10-sdr-enrollment-phases.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql','2026-10-07-sdr-open-alerts.sql','2026-10-08-sdr-followup-drafts.sql','2026-10-10-sdr-followup-handoffs.sql']) {
       await pool.query(fs.readFileSync(new URL('./migrations/'+migration,import.meta.url),'utf8'));
     }
   } catch (err) {
@@ -1438,8 +1438,8 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
       const r = await runAutoOutreach(pool, { mailboxSentToday });
       const fresh = r?.mode === "send" && Array.isArray(r.createdDrafts) ? await enrollAutoDrafts(r.createdDrafts) : {enrolled:0,skipped:0};
       if (r?.skipped) return r;
-      return {coverage:r?.errors?.length||recovered.skipped||fresh.skipped ? "partial" : "complete",
-        counts:{created:r?.created||0,enrolled:recovered.enrolled+fresh.enrolled,deferred:recovered.skipped+fresh.skipped}};
+      return {coverage:r?.errors?.length||r?.scanLimitReached||recovered.skipped||fresh.skipped ? "partial" : "complete",
+        counts:{created:r?.created||0,capacity:r?.capacity||0,selected:r?.eligible||0,scanned:r?.scanned||0,refused:r?.refused||0,scanLimitReached:r?.scanLimitReached?1:0,enrolled:recovered.enrolled+fresh.enrolled,deferred:recovered.skipped+fresh.skipped}};
     })
       .catch((e) => console.error("[auto-outreach] run failed:", e.message));
   };
@@ -4724,7 +4724,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         const safetyContext=await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID,actionKey:`draft:${draft.id}:${draft.revision}`,phase:'locked_preflight'});
         const contactDays=await readContactSendDaysAgo(client,{apolloContactId:String(apolloContactId),recipientEmail:draft.contact_email_snapshot});
         if(contactDays!==null&&contactDays<=await contactCooldownDays())throw draftConflict('contact_cooldown');
-        const reservation=await reserveEnrollment({pool:client,apollo:apolloClient,context:{...safetyContext,apolloContactId},draftRevision:current.revision,actionId:crypto.randomUUID()});
+        const reservation=await reserveEnrollment({pool:client,apollo:apolloClient,context:{...safetyContext,apolloContactId},draftRevision:current.revision,actionId:crypto.randomUUID(),enrollmentMode:'sdr_draft_v1'});
 
         // Carry the approved subject/body into Apollo contact custom fields.
         // The sequences' step-1 templates merge {{contact.swppp_draft_subject/body}},
@@ -4746,10 +4746,12 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         // can't fail "required dynamic variable missing" (a real cause of failed sends).
         await assertCurrentEnrollment();
         await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID,actionKey:`draft:${draft.id}:${draft.revision}`,phase:'pre_fields'});
+        await advanceEnrollmentPhase({pool:client,reservation,expectedPhase:'reserved',nextPhase:'fields_started'});
         await apolloClient.updateContactCustomFields(apolloContactId, customFields, {
           first_name: draftMeta.first_name || "there",
           last_name: draftMeta.last_name,
         });
+        await advanceEnrollmentPhase({pool:client,reservation,expectedPhase:'fields_started',nextPhase:'fields_completed'});
 
         // Enroll in sequence with the assigned mailbox as the sender
         // NeverBounce is now our authoritative pre-enroll deliverability check (the verification
@@ -4761,12 +4763,16 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           await assertCurrentEnrollment();
           if (crmLifecycleEnabled()) {
             const crm = await verifyCrmLead(draft.pipedrive_lead_id, { pool });
-            if (!crm.allowed) throw Object.assign(new Error("Pipedrive lead requires verification before outreach"), {
-              code: crm.reason, status: crm.retryable ? 503 : 409, preserveDraft: true,
-            });
+            if (!crm.allowed) {
+              await recordPreAddRefusal({pool:client,reservation,refusal:{kind:'crm_returned_denial',reason:crm.reason}});
+              throw Object.assign(new Error("Pipedrive lead requires verification before outreach"), {
+                code: crm.reason, status: crm.retryable ? 503 : 409, preserveDraft: true,
+              });
+            }
           }
           await assertCurrentEnrollment();
           await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID,actionKey:`draft:${draft.id}:${draft.revision}`,phase:'pre_enroll'});
+          await advanceEnrollmentPhase({pool:client,reservation,expectedPhase:'fields_completed',nextPhase:'add_started'});
           return apolloClient.addContactsToSequence(
             draft.apollo_sequence_id,
             [apolloContactId],
@@ -4803,8 +4809,8 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         const acknowledged=enrollResponse.contacts.find(c=>String(c.id)===String(apolloContactId));
         const membership=acknowledged?.contact_campaign_statuses?.find(c=>String(c.emailer_campaign_id)===String(draft.apollo_sequence_id));
         const membershipId=membership?.emailer_campaign_contact_id||membership?.id;
-        if(membershipId)await recordEnrollmentReceipt({pool:client,reservationId:reservation.reservationId,receipt:{id:String(membershipId),contactId:String(apolloContactId),campaignId:String(draft.apollo_sequence_id),addedAt:membership.added_at||null}});
-        else await client.query("UPDATE sdr_provider_operations SET state='unresolved',reason='accepted_generation_unverified',receipt=$2::jsonb,updated_at=NOW() WHERE id=$1",[reservation.reservationId,JSON.stringify({accepted:true,contactId:String(apolloContactId),campaignId:String(draft.apollo_sequence_id)})]);
+        if(membershipId)await recordEnrollmentReceipt({pool:client,reservationId:reservation.reservationId,reservation,receipt:{id:String(membershipId),contactId:String(apolloContactId),campaignId:String(draft.apollo_sequence_id),addedAt:membership.added_at||null}});
+        else await recordEnrollmentUncertainty({pool:client,reservationId:reservation.reservationId,reservation,reason:'accepted_generation_unverified',receipt:{accepted:true,contactId:String(apolloContactId),campaignId:String(draft.apollo_sequence_id)}});
         // Only local finalization is transactional. The reservation survives crashes.
         await client.query('BEGIN');
         try {
