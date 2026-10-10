@@ -4432,10 +4432,18 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       // Durable exact receipt precedes capacity checks and provider waits. A retry cannot
       // regenerate copy merely because this first request encountered a daily cap.
       draft=await withLeadLock(pool,draft.pipedrive_lead_id,async client=>{
-        const current=(await client.query('SELECT * FROM sdr_drafts WHERE id=$1 FOR UPDATE',[draft.id])).rows[0];
+        const current=(await client.query('SELECT *,updated_at::text AS enrollment_version FROM sdr_drafts WHERE id=$1 FOR UPDATE',[draft.id])).rows[0];
         const checked=checkViewedDraft({draft:current,expectedRevision:req.body.expectedRevision,expectedContextHash:req.body.expectedContextHash});
         if(!checked.allowed)throw draftConflict(checked.code);
-        const approved=(await client.query("UPDATE sdr_drafts SET status='approved',approved_at=NOW(),approved_by=$2,updated_at=NOW() WHERE id=$1 RETURNING *,updated_at::text AS enrollment_version",[current.id,req.sdrUser.sub])).rows[0];
+        let retainReviewedVersion=false;
+        if(current.status==='approved' && current.approved_at && String(current.approved_by)===String(req.sdrUser.sub)) {
+          const receipt=(await client.query('SELECT context_hash,subject,body,actor FROM sdr_draft_approvals WHERE draft_id=$1 AND revision=$2 ORDER BY created_at DESC,id DESC LIMIT 1',[current.id,current.revision])).rows[0];
+          retainReviewedVersion=receipt?.context_hash===draftContextHash(current) && receipt.subject===current.subject && receipt.body===current.body &&
+            receipt.actor?.execution==='interactive' && receipt.actor?.source==='sdr_ui' && String(receipt.actor?.accountId)===String(req.sdrUser.sub);
+        }
+        // A same-actor deliberate repeat keeps the reviewed artifact; writing approved_at
+        // again would increment the draft revision and strand an exact terminal refusal.
+        const approved=retainReviewedVersion?current:(await client.query("UPDATE sdr_drafts SET status='approved',approved_at=NOW(),approved_by=$2,updated_at=NOW() WHERE id=$1 RETURNING *,updated_at::text AS enrollment_version",[current.id,req.sdrUser.sub])).rows[0];
         await recordDraftApproval(client,approved,req.sdrUser);
         return approved;
       });
