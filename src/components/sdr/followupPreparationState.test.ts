@@ -10,3 +10,13 @@ describe('private proposal application guard',()=>{
   for(const patch of [{editorVersion:6},{leadId:'B'},{session:'token-2'},{revision:3},{contextToken:'context-2'},{handoffUnresolved:true}])expect(canApplyProposal(request,{...request,...patch})).toBe(false);
  });
 });
+
+import {isConversationReviewCurrent} from './followupPreparationState';
+describe('conversation review bound to selected evidence',()=>{
+ const review={leadId:'A',contextToken:'context-1',revision:2,sourceId:'note-1',action:'reply'};
+ it('requires a fresh confirmation after CRM context, effective source, action or draft revision changes',()=>{
+  expect(isConversationReviewCurrent(null,review)).toBe(false);
+  expect(isConversationReviewCurrent(review,review)).toBe(true);
+  for(const patch of [{leadId:'B'},{contextToken:'context-2'},{revision:3},{sourceId:'fallback-note'},{action:'wait'}])expect(isConversationReviewCurrent(review,{...review,...patch})).toBe(false);
+ });
+});
