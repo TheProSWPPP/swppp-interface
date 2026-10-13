@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import {changedProjectFields,reconcileProjectSave,preserveDirtyBaseline,type ProjectSaver} from '../projectPersistence';
+import { useState, useEffect, useRef } from "react";
 import type { Project } from "../data";
 import {
   ArrowLeft,
@@ -46,7 +47,7 @@ import {
 interface ProjectDetailProps {
   project: Project;
   onBack: () => void;
-  onUpdate: (project: Project) => void;
+  onUpdate: ProjectSaver;
   onDelete: () => void;
 }
 
@@ -64,7 +65,7 @@ function stripMarkdown(text: string): string {
 export default function ProjectDetail({
   project,
   onBack,
-  onUpdate,
+  onUpdate: persistProject,
   onDelete,
 }: ProjectDetailProps) {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -73,6 +74,49 @@ export default function ProjectDetail({
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [savedToast, setSavedToast] = useState(false);
   const [formData, setFormData] = useState<Project>(project);
+  const currentForm = useRef(project);
+  const baseline = useRef(project);
+  const saving = useRef(false);
+  const [saveError, setSaveError] = useState("");
+  const [conflictProject, setConflictProject] = useState<Project | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  currentForm.current = formData;
+
+  const onUpdate = async (submitted: Project) => {
+    if (saving.current) {
+      setSaveError("A save is still in progress. Wait for it to finish, then try this action again.");
+      return false;
+    }
+    const {patch, expected} = changedProjectFields(baseline.current, submitted);
+    if (Object.keys(patch).length === 1) return true;
+    const beforeSubmit = currentForm.current;
+    saving.current = true;
+    setIsSaving(true);
+    setSaveError("");
+    setSavedToast(false);
+    try {
+      const authoritative = await persistProject(patch, expected);
+      if (!authoritative) throw new Error("The project save was not confirmed");
+      baseline.current = authoritative;
+      setFormData((current) => reconcileProjectSave(current, submitted, authoritative, beforeSubmit));
+      setConflictProject(null);
+      setSaveError("");
+      setSavedToast(true);
+      setTimeout(() => setSavedToast(false), 2000);
+      return true;
+    } catch (error) {
+      const failure = error as Error & {conflicts?: string[]; project?: Project};
+      setSaveError(failure.conflicts?.length ? `Changed by someone else: ${failure.conflicts.join(", ")}. Your edits are kept.` : "Save failed. Your edits are kept.");
+      setConflictProject(failure.project || null);
+      return false;
+    } finally {
+      saving.current = false;
+      setIsSaving(false);
+    }
+  };
+
+  const currentSave = useRef(onUpdate);
+  currentSave.current = onUpdate;
 
   const isPending =
     project.status === "Pending Review" || project.status === "New";
@@ -92,33 +136,26 @@ export default function ProjectDetail({
     ...getDocumentsForTemplate(project.stateTemplateId || project.stateTemplateName),
     "Job Order PDF",
   ];
+  const documentKeys: Record<string, string> = {SWPPP:"swppp", "Job Cover Letter":"cover_letter", "Construction Site Notice":"site_notice", NOI:"noi", "NOI (IDEM)":"noi", NOT:"not", "Job Order PDF":"job_order"};
+  const currentResults = project.generationState === "current" ? project.generation?.outputs : undefined;
+  const recordedFileCount = documentTargets.filter(doc => currentResults?.[documentKeys[doc]]?.outcome === "produced" || (doc === "Job Order PDF" && !currentResults?.job_order && getAvailableDocumentLink(project.jobOrderLink))).length;
   const jobOrderFileLink = getAvailableDocumentLink(project.jobOrderLink);
   const documentFolderLink = getAvailableDocumentLink(project.folderLink);
 
   useEffect(() => {
-    setFormData({
-      ...project,
-      swpppProjectDescription:
-        project.swpppProjectDescription ||
-        `This project consists of the construction of a ${project.projectName} facility located in <city>, <county>, <state>.`,
-    });
+    setFormData((current) => project.id === baseline.current.id
+      ? reconcileProjectSave(current, baseline.current, project)
+      : project);
+    baseline.current = project.id === baseline.current.id
+      ? preserveDirtyBaseline(currentForm.current, baseline.current, project)
+      : project;
   }, [project]);
 
-  // Aggressive Auto-Save: Save changes automatically after 1 second of inactivity
   useEffect(() => {
-    if (isApproved) return; // Don't auto-save for approved projects
-
-    const timer = setTimeout(() => {
-      // Only save if formData has actually changed from the original project
-      if (JSON.stringify(formData) !== JSON.stringify(project)) {
-        onUpdate(formData);
-        setSavedToast(true);
-        setTimeout(() => setSavedToast(false), 2000);
-      }
-    }, 1000); // Wait 1 second after last change
-
+    if (isApproved || isSaving || saveError) return;
+    const timer = setTimeout(() => { void currentSave.current(currentForm.current); }, 1000);
     return () => clearTimeout(timer);
-  }, [formData, isApproved]); // Trigger whenever formData changes
+  }, [formData, isApproved, isSaving, saveError]);
 
   // Automatic County and City Extraction
   useEffect(() => {
@@ -172,6 +209,7 @@ export default function ProjectDetail({
   }, [formData.latitude, formData.longitude, isApproved]);
 
   const handleChange = (field: keyof Project, value: any) => {
+    if (!conflictProject) setSaveError("");
     setFormData((prev) => {
       const updated = { ...prev, [field]: value };
       // Clear AI badge when user manually edits a field
@@ -199,7 +237,7 @@ export default function ProjectDetail({
     "Gabions",
   ];
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     const missingFields: string[] = [];
     if (!formData.landDisturbanceArea) missingFields.push("Disturbed Area");
     if (!formData.projectAddress) missingFields.push("Project Address");
@@ -208,17 +246,17 @@ export default function ProjectDetail({
       ? `\n\nNote: The following fields are empty:\n• ${missingFields.join("\n• ")}\n\nProceed anyway?`
       : "";
     if (!confirm(`Approve "${formData.projectName}" for document generation?${warning}`)) return;
-    // Mock API call / Generation process
     setIsGenerating(true);
-    setTimeout(() => {
-      onUpdate({
-        ...formData,
-        status: formData.isIndustrial
+    try {
+      await onUpdate({
+        ...currentForm.current,
+        status: currentForm.current.isIndustrial
           ? "Manual Processing"
           : "Approved for Generation",
       });
+    } finally {
       setIsGenerating(false);
-    }, 2000);
+    }
   };
 
   const handleAccept = () => {
@@ -294,12 +332,13 @@ export default function ProjectDetail({
 
         // Update project with all regenerated data from n8n
         // This includes environmental data, coordinates, etc.
-        onUpdate({
-          ...formData,
+        const saved = await onUpdate({
+          ...currentForm.current,
           ...regeneratedData,
           status: "Pending Review", // Keep as Pending Review for manual approval
         });
 
+        if (!saved) return;
         alert(
           "Project data regenerated successfully! Please review the updated information before approving.",
         );
@@ -478,6 +517,15 @@ export default function ProjectDetail({
 
   return (
     <>
+    {saveError && <div role="alert" className="mx-6 mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+      {saveError}
+      {conflictProject && <button className="ml-3 underline" onClick={() => {
+        baseline.current = conflictProject;
+        setFormData(conflictProject);
+        setConflictProject(null);
+        setSaveError("");
+      }}>Use latest values</button>}
+    </div>}
     {/* Auto-save toast */}
     {savedToast && (
       <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 bg-slate-900 text-white text-sm font-medium px-4 py-2.5 rounded-xl shadow-xl animate-in fade-in slide-in-from-bottom-2">
@@ -590,6 +638,7 @@ export default function ProjectDetail({
                   project.status === "Ready") && (
                   <button
                     onClick={handleCancelGeneration}
+                    disabled={isSaving}
                     className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded-full border border-red-200 transition-colors uppercase tracking-tight"
                     title="Cancel Generation & Reset"
                   >
@@ -1422,7 +1471,7 @@ export default function ProjectDetail({
             </h4>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
               {isApproved
-                ? "Documents queued for generation. Downloads available below."
+                ? "Approval recorded. Check individual file links below."
                 : isManual
                   ? "Marked for manual processing. Handled outside system."
                   : isNew
@@ -1473,6 +1522,7 @@ export default function ProjectDetail({
                   </button>
                   <button
                     onClick={handleAccept}
+                    disabled={isSaving}
                     className="flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-slate-900 hover:bg-slate-800 transition-all shadow-sm shadow-slate-900/10"
                   >
                     Accept
@@ -1484,7 +1534,7 @@ export default function ProjectDetail({
                 <>
                   <button
                     onClick={handleRetrigger}
-                    disabled={isRetriggering}
+                    disabled={isRetriggering || isSaving}
                     className="w-full flex items-center justify-center px-4 py-2.5 border border-amber-300 text-sm font-medium rounded-lg text-amber-900 bg-amber-50 hover:bg-amber-100 hover:border-amber-400 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-sm"
                   >
                     {isRetriggering ? (
@@ -1503,7 +1553,7 @@ export default function ProjectDetail({
                   <button
                     onClick={handleApprove}
                     disabled={
-                      isGenerating ||
+                      isGenerating || isSaving ||
                       (!formData.plansUploaded && !formData.isIndustrial)
                     }
                     className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-brand-600 hover:bg-brand-700 focus:ring-4 focus:ring-brand-500/20 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-brand-600/20"
@@ -1549,7 +1599,7 @@ export default function ProjectDetail({
 
                   <button
                     onClick={handleRetrigger}
-                    disabled={isRetriggering}
+                    disabled={isRetriggering || isSaving}
                     className="w-full flex items-center justify-center px-4 py-2.5 border border-amber-300 text-sm font-medium rounded-lg text-amber-900 bg-amber-50 hover:bg-amber-100 hover:border-amber-400 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-sm"
                   >
                     {isRetriggering ? (
@@ -1576,11 +1626,12 @@ export default function ProjectDetail({
             </h4>
             <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
               <p className="text-sm font-semibold text-slate-800">
-                {jobOrderFileLink ? 1 : 0} of {documentTargets.length} file links recorded
+                {recordedFileCount} of {documentTargets.length} file links recorded
               </p>
               <p className="text-xs leading-relaxed text-slate-600">
                 Project status and folder links do not confirm document contents or customer delivery.
               </p>
+              {project.generationState === "stale" && <p className="text-xs text-amber-800">Earlier inputs · results need a new review.</p>}
               {documentFolderLink && (
                 <a
                   href={documentFolderLink}
@@ -1597,10 +1648,10 @@ export default function ProjectDetail({
                 const isManualTarget = !automated;
                 const isProjectReady = project.status === "Ready";
 
-                const docLink =
-                  doc === "Job Order PDF"
-                    ? jobOrderFileLink
-                    : undefined;
+                const receipt = currentResults?.[documentKeys[doc]];
+                const docLink = receipt?.outcome === "produced"
+                  ? getAvailableDocumentLink(receipt.url)
+                  : receipt ? undefined : doc === "Job Order PDF" ? jobOrderFileLink : undefined;
 
                 const isClickable = !!docLink;
                 const Row = isClickable ? "a" : "div";
@@ -1653,20 +1704,25 @@ export default function ProjectDetail({
                             doc !== "Job Order PDF" &&
                             "(Automated)"}
                         </span>
-                        {isManualTarget && (
+                        {isManualTarget && !receipt && (
                           <span className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
                             Manual - Pending Automation
                           </span>
                         )}
+                        {receipt && receipt.outcome !== "produced" && (
+                          <span className="text-xs font-medium text-slate-700">
+                            {{failed:"Output failed",not_configured:"Not configured",review_required:"Needs review"}[receipt.outcome]}
+                          </span>
+                        )}
                         <span className="text-xs leading-relaxed text-slate-600">
-                          {isClickable ? "File link recorded" : "Output unverified · File link unavailable"}
+                          {receipt ? receipt.outcome === "produced" ? "Provider file recorded" : receipt.reason : isClickable ? "File link recorded" : "Output unverified · File link unavailable"}
                         </span>
-                        {automated && !isClickable && project.status === "Approved for Generation" && (
+                        {automated && !receipt && !isClickable && project.status === "Approved for Generation" && (
                           <span className="text-xs leading-relaxed text-slate-600">
                             Approval recorded
                           </span>
                         )}
-                        {automated && !isApproved && !isClickable && !isProjectReady && (
+                        {automated && !receipt && !isApproved && !isClickable && !isProjectReady && (
                           <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
                             Awaiting Approval
                           </span>

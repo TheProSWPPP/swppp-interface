@@ -2,11 +2,11 @@
   "protectedAppFiles": [
     {
       "path": "src/App.tsx",
-      "sha256": "027ce273fc0669561aecf6c183477cfe1257ea5b523495a6cee4c2d5d6e27631"
+      "sha256": "7155e1e7ea4417331a5ed8e941d1c1c5e9b6ecfb51bcbb7eedf4a34306d71f2a"
     },
     {
       "path": "src/data.ts",
-      "sha256": "eceb6cbe48b6e3a5008afa90bb29c9f46698306c19201ed5d63092740af5994d"
+      "sha256": "daaccde230b98df078339a0c489737490c55f16449b3e29b483ee87e1a5668a8"
     },
     {
       "path": "src/index.css",
@@ -14,7 +14,7 @@
     },
     {
       "path": "src/components/Dashboard.tsx",
-      "sha256": "fdadc5ed9498544cabe8fd5ad553d439cd311459b974f6d4ec7ae60bfbc9b707"
+      "sha256": "f548bd125277dd5a8f49278fc3ea32d79c85e5aebb2795edcbbe867c8c414f04"
     },
     {
       "path": "src/components/ProjectList.tsx",
@@ -22,7 +22,7 @@
     },
     {
       "path": "src/components/ProjectDetail.tsx",
-      "sha256": "3b8c963b62cc4738326d8a10f9ee5b81b0168ba55a2b70ba7a420171fedd2a0b"
+      "sha256": "958cba168e55652ba9bbd6028f160bdeca142cbb7323f7b79a52834356afeb58"
     },
     {
       "path": "src/components/ArchiveList.tsx",
@@ -89,17 +89,17 @@
     {
       "method": "GET",
       "path": "/api/projects",
-      "sha256": "b0d9a18a73b430f14ba8650df1db4c1bb5d1fbd379618f2d63a55ff9cf6e8b23"
+      "sha256": "89cb7a0146e39e5cb580bfd40a193fc0ea7f0c46935e9ce8901cb5b5c9b7a9cf"
     },
     {
       "method": "POST",
       "path": "/api/projects",
-      "sha256": "f48c1ffa5df4c2036d4a0d96772a62e12134af180f630196ea58948973fc1789"
+      "sha256": "aab51dcf73183cda8aebe47dc0f52be17196faaa82fdb143fd9ae04a0f4011c2"
     },
     {
       "method": "PUT",
       "path": "/api/projects/:id",
-      "sha256": "458323ff19647bb016feb8bb2298f0e6990c1edbfd0ff6cd0435921eefa575f6"
+      "sha256": "27bc3c21dd1dfa465971b6d27fcd4ea02b2bd7935990377c70648600d939f788"
     },
     {
       "method": "DELETE",
@@ -124,7 +124,7 @@
     {
       "method": "POST",
       "path": "/api/projects/:id/analyze-plans",
-      "sha256": "3d4a67e29e5f5407fab4ace09e76a2b601ca64931213928d8483c1d6802282dd"
+      "sha256": "e625fffaaa1f81cd4812857bb1e2edbeae78d3dfb5723257d97bbaa37cdbcd6a"
     }
   ],
   "protectedServerDeclarations": [

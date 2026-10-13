@@ -1,3 +1,4 @@
+import type {ProjectPatch} from './projectPersistence';
 import { useState, useEffect } from "react";
 import { type Project } from "./data";
 import Dashboard from "./components/Dashboard";
@@ -92,29 +93,26 @@ function App() {
     if (view === "dashboard") fetchProjects();
   }, [view]);
 
-  const handleUpdateProject = (updatedProject: Project) => {
-    setProjects((prev) =>
-      prev.map((p) => (p.id === updatedProject.id ? updatedProject : p)),
-    );
-
-    fetch(`/api/projects/${updatedProject.id}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      credentials: "include",
-      body: JSON.stringify(updatedProject),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      })
-      .catch((err) => {
-        console.error("Failed to update project:", err);
-        push(
-          "error",
-          "Couldn't save your changes — they may not have persisted. Check your connection and try again.",
-        );
+  const handleUpdateProject = async (patch: ProjectPatch, expected?: Record<string, unknown>): Promise<Project> => {
+    try {
+      const res = await fetch(`/api/projects/${patch.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ ...patch, ...(expected ? { __expectedValues: expected } : {}) }),
       });
+      const data = await res.json();
+      if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { conflicts: data.conflicts, project: data.project });
+      setProjects((prev) => prev.map((p) => p.id === data.id ? data : p));
+      return data;
+    } catch (err) {
+      const failure = err as Error & { project?: Project };
+      if (failure.project?.id === patch.id) {
+        setProjects((prev) => prev.map((p) => p.id === patch.id ? failure.project! : p));
+      }
+      push("error", "Couldn't save your changes. Your edits are kept in this view.");
+      throw err;
+    }
   };
 
   const handleDeleteProject = (projectId: string) => {

@@ -243,3 +243,11 @@ describe("OPS document output evidence", () => {
     expect(html).not.toContain("javascript:");
   });
 });
+
+describe('generation result visibility',()=>{
+ const generation={schemaVersion:1 as const,runId:'run-fixture',contextDigest:'a'.repeat(64),approvedAt:'2026-10-13T10:00:00Z',events:[],outputs:{swppp:{documentKey:'swppp',outcome:'produced' as const,provider:'dropbox',fileId:'id:fixture',path:'/Fixture/swppp.pdf',url:'https://www.dropbox.com/scl/fi/abc/swppp.pdf?dl=1'}}};
+ it('does not label a receipt-backed file as pending automation',()=>{const html=rowFor(render({generation,generationState:'current'}),'SWPPP');expect(html).toContain('Provider file recorded');expect(html).not.toContain('Manual - Pending Automation');});
+ it('shows failed output without an approval-only badge',()=>{const html=rowFor(render({status:'Approved for Generation',generation:{...generation,outputs:{job_order:{documentKey:'job_order',outcome:'failed',reasonCode:'write',reason:'File output failed'}}},generationState:'current'}),'Job Order PDF');expect(html).toContain('File output failed');expect(html).not.toContain('Approval recorded');});
+ it('shows current individual SWPPP output without claiming delivery or all documents generated',()=>{const html=render({generation,generationState:'current'});expect(html).toContain('Provider file recorded');expect(html).toContain('https://www.dropbox.com/scl/fi/abc/swppp.pdf?dl=1');expect(html).not.toContain('Delivered to customer');});
+ it('keeps stale results historical and marks review reasons',()=>{expect(render({generation,generationState:'stale'})).toContain('Earlier inputs');const html=render({generation:{...generation,outputs:{swppp:{documentKey:'swppp',outcome:'review_required',reasonCode:'template',reason:'Template needs review'}}},generationState:'current'});expect(html).toContain('Template needs review');});
+});
