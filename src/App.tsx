@@ -1,4 +1,4 @@
-import type {ProjectPatch} from './projectPersistence';
+import {requestProjectSave,type ProjectPatch} from './projectPersistence';
 import { useState, useEffect } from "react";
 import { type Project } from "./data";
 import Dashboard from "./components/Dashboard";
@@ -95,14 +95,7 @@ function App() {
 
   const handleUpdateProject = async (patch: ProjectPatch, expected?: Record<string, unknown>): Promise<Project> => {
     try {
-      const res = await fetch(`/api/projects/${patch.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ ...patch, ...(expected ? { __expectedValues: expected } : {}) }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { conflicts: data.conflicts, project: data.project });
+      const data = await requestProjectSave(patch, expected);
       setProjects((prev) => prev.map((p) => p.id === data.id ? data : p));
       return data;
     } catch (err) {

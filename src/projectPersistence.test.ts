@@ -29,3 +29,9 @@ it('retains authoritative lookup history during manual edits and keeps dirty fie
  expect(baseline).toMatchObject({waterway:'Old river',environmentLookupStatus:{waterway:'review-required'},generationNote:'SWPPP upload failed'});
  expect(changedProjectFields(baseline,merged)).toEqual({patch:{id:'1',waterway:'My verified river'},expected:{waterway:'Old river'}});
 });
+
+it('explicit retrigger provenance saves even with unchanged business fields and includes every expected metadata value',()=>{
+ const saved={...base,status:'Pending Review',environmentLookupStatus:{overall:'complete'},environmentLookupNotes:{ms4:'Existing history'}} as unknown as Project;
+ const provenance={metadata:{environmentLookupStatus:{overall:'failed' as const},environmentLookupNotes:{overall:'Lookup failed; review needed.'}},expected:{environmentLookupStatus:saved.environmentLookupStatus,environmentLookupNotes:saved.environmentLookupNotes}};
+ expect(changedProjectFields(saved,saved,provenance)).toEqual({patch:{id:'1',environmentLookupStatus:{overall:'failed'},environmentLookupNotes:{overall:'Lookup failed; review needed.'}},expected:{environmentLookupStatus:{overall:'complete'},environmentLookupNotes:{ms4:'Existing history'}}});
+});

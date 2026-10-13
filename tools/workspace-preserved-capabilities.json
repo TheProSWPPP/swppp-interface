@@ -1,7 +1,7 @@
 {
   "scope": "October 7 Follow-ups local revision: staff document mutation handlers preserved. Follow-ups navigation now available to SDR staff with existing lead visibility enforced server-side. No outbound action changes.",
   "handlers": {
-    "handleUpdateProject": "e7058d804189175406965b0073c9ffdba5d545a9cd16986dc67c2d1ee4f8e123",
+    "handleUpdateProject": "c0e7e1fa32181f552dc7a59f32dff500b2accc9c631bbd7274f42d44d488f870",
     "handleDeleteProject": "c15e427af3b275459793eb6935e6b8becc4365e02788833cadc1e60f524872cb",
     "handleBulkDeleteProjects": "00de78db25707ee72fd2be848d6cb02d50dd35c11e51fb13bd5900b7d0c4f817"
   },

@@ -2,6 +2,7 @@ import {changedProjectFields,reconcileProjectSave,preserveDirtyBaseline,type Pro
 import { useState, useEffect, useRef } from "react";
 import type { Project } from "../data";
 import { environmentLookupReview, boundedReviewNote } from '../environmentLookupReview';
+import { prepareRetriggerSave, requestProjectRetrigger, type LookupProvenance } from '../projectRetrigger';
 import {
   ArrowLeft,
   CheckCircle,
@@ -78,20 +79,23 @@ export default function ProjectDetail({
   const currentForm = useRef(project);
   const baseline = useRef(project);
   const saving = useRef(false);
+  const saveCompletion = useRef<Promise<void> | null>(null);
   const [saveError, setSaveError] = useState("");
   const [conflictProject, setConflictProject] = useState<Project | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   currentForm.current = formData;
 
-  const onUpdate = async (submitted: Project) => {
+  const onUpdate = async (submitted: Project, provenance?: LookupProvenance) => {
     if (saving.current) {
       setSaveError("A save is still in progress. Wait for it to finish, then try this action again.");
       return false;
     }
-    const {patch, expected} = changedProjectFields(baseline.current, submitted);
+    const {patch, expected} = changedProjectFields(baseline.current, submitted, provenance);
     if (Object.keys(patch).length === 1) return true;
     const beforeSubmit = currentForm.current;
     saving.current = true;
+    let releaseSave: () => void = () => {};
+    saveCompletion.current = new Promise<void>(resolve => { releaseSave = resolve; });
     setIsSaving(true);
     setSaveError("");
     setSavedToast(false);
@@ -99,6 +103,7 @@ export default function ProjectDetail({
       const authoritative = await persistProject(patch, expected);
       if (!authoritative) throw new Error("The project save was not confirmed");
       baseline.current = authoritative;
+      currentForm.current = reconcileProjectSave(currentForm.current, submitted, authoritative, beforeSubmit);
       setFormData((current) => reconcileProjectSave(current, submitted, authoritative, beforeSubmit));
       setConflictProject(null);
       setSaveError("");
@@ -112,6 +117,8 @@ export default function ProjectDetail({
       return false;
     } finally {
       saving.current = false;
+      saveCompletion.current = null;
+      releaseSave();
       setIsSaving(false);
     }
   };
@@ -293,6 +300,8 @@ export default function ProjectDetail({
       return;
 
     setIsRetriggering(true);
+    const lookupBase = baseline.current;
+    const requested = currentForm.current;
 
     try {
       // Prepare data with Customer Details and Project Details fields
@@ -319,35 +328,19 @@ export default function ProjectDetail({
         landDisturbanceArea: formData.landDisturbanceArea,
       };
 
-      const response = await fetch(
-        "https://proswppp.app.n8n.cloud/webhook/re-trigger",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(retriggerData),
-        },
-      );
-
-      if (response.ok) {
-        const regeneratedData = await response.json();
-
-        // Update project with all regenerated data from n8n
-        // This includes environmental data, coordinates, etc.
-        const saved = await onUpdate({
-          ...currentForm.current,
-          ...regeneratedData,
-          status: "Pending Review", // Keep as Pending Review for manual approval
-        });
-
-        if (!saved) return;
-        alert(
-          "Project data regenerated successfully! Please review the updated information before approving.",
-        );
-      } else {
-        alert("Failed to re-trigger project. Please try again.");
+      const result = await requestProjectRetrigger(retriggerData);
+      if (saveCompletion.current) await saveCompletion.current;
+      const prepared = prepareRetriggerSave(lookupBase, requested, currentForm.current, result);
+      const saved = await onUpdate(prepared.submitted, prepared.provenance);
+      if (!saved) {
+        alert("Lookup results could not be saved. Your edits are kept; review the save error before trying again.");
+        return;
       }
+      alert(result.failed
+        ? "Lookup failed or was incomplete. Review notes were saved; existing information was kept where results were unavailable."
+        : prepared.needsReview
+          ? "Lookup results saved with review notes. Verify the environmental information before approving."
+          : "Lookup results saved. Review the updated information before approving.");
     } catch (error) {
       console.error("Re-trigger failed:", error);
       alert("Error re-triggering project. Please check your connection.");

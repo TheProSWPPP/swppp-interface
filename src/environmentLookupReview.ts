@@ -25,7 +25,7 @@ export function environmentLookupReview(status: unknown, notes: unknown): string
       case 'complete': case 'approved-order-input': break;
       case 'failed':
         warning = key === 'overall'
-          ? 'Intake recorded a lookup failure; staff should review the environmental information.'
+          ? 'A lookup failure was recorded; staff should review the environmental information.'
           : `${label} lookup recorded a failure; staff should verify current values.`;
         break;
       case 'review-required': warning = `${label} lookup needs staff review.`; break;
