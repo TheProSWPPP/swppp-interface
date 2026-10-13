@@ -1,3 +1,4 @@
+import type {ProjectSaver} from '../projectPersistence';
 import { useState, useEffect } from "react";
 import type { Project } from "../data";
 import ProjectList from "./ProjectList";
@@ -10,7 +11,7 @@ interface DashboardProps {
   isLoading?: boolean;
   loadError?: boolean;
   onRetry?: () => void;
-  onUpdateProject: (project: Project) => void;
+  onUpdateProject: ProjectSaver;
   onDeleteProject: (projectId: string) => void;
   onBulkDeleteProjects: (projectIds: string[]) => void;
 }
@@ -171,9 +172,16 @@ export default function Dashboard({
         <ProjectDetail
           project={selectedProject}
           onBack={closeProject}
-          onUpdate={(updated) => {
-            onUpdateProject(updated);
-            setSelectedProject(updated);
+          onUpdate={async (updated, expected) => {
+            try {
+              const authoritative = await onUpdateProject(updated, expected);
+              if (authoritative) setSelectedProject(authoritative);
+              return authoritative;
+            } catch (error) {
+              const failure = error as Error & { project?: Project };
+              if (failure.project?.id === updated.id) setSelectedProject(failure.project);
+              throw error;
+            }
           }}
           onDelete={() => {
             onDeleteProject(selectedProject.id);

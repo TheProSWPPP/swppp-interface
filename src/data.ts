@@ -8,7 +8,20 @@ export type ProjectStatus =
   | "Manual Processing"
   | "";
 
+export interface GenerationOutput {
+  documentKey: string;
+  outcome: "produced" | "failed" | "not_configured" | "review_required";
+  provider?: string; fileId?: string; path?: string; url?: string;
+  reasonCode?: string; reason?: string;
+}
+export interface ProjectGeneration {
+  schemaVersion: 1; runId: string; contextDigest: string; approvedAt: string;
+  outputs: Record<string, GenerationOutput>;
+  events: {eventId: string; digest: string; receivedAt: string}[];
+}
 export interface Project {
+  generation?: ProjectGeneration;
+  generationState?: "current" | "stale" | "legacy";
   id: string;
   projectName: string;
   email: string;
