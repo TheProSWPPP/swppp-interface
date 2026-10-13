@@ -88,6 +88,13 @@ export default function ProjectDetail({
     project.status === "Processing" ||
     project.status === "";
 
+  const documentTargets = [
+    ...getDocumentsForTemplate(project.stateTemplateId || project.stateTemplateName),
+    "Job Order PDF",
+  ];
+  const jobOrderFileLink = getAvailableDocumentLink(project.jobOrderLink);
+  const documentFolderLink = getAvailableDocumentLink(project.folderLink);
+
   useEffect(() => {
     setFormData({
       ...project,
@@ -1567,13 +1574,24 @@ export default function ProjectDetail({
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
               <FileText className="h-4 w-4" /> Documents to be Generated
             </h4>
+            <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+              <p className="text-sm font-semibold text-slate-800">
+                {jobOrderFileLink ? 1 : 0} of {documentTargets.length} file links recorded
+              </p>
+              <p className="text-xs leading-relaxed text-slate-600">
+                Project status and folder links do not confirm document contents or customer delivery.
+              </p>
+              {documentFolderLink && (
+                <a
+                  href={documentFolderLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-brand-700 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2"
+                >Check project folder<ExternalLink className="h-4 w-4" /></a>
+              )}
+            </div>
             <div className="space-y-2">
-              {[
-                ...getDocumentsForTemplate(
-                  project.stateTemplateId || project.stateTemplateName,
-                ),
-                "Job Order PDF",
-              ].map((doc) => {
+              {documentTargets.map((doc) => {
                 const automated =
                   isAutomatedDocument(doc) || doc === "Job Order PDF";
                 const isManualTarget = !automated;
@@ -1581,7 +1599,7 @@ export default function ProjectDetail({
 
                 const docLink =
                   doc === "Job Order PDF"
-                    ? getAvailableDocumentLink(project.jobOrderLink)
+                    ? jobOrderFileLink
                     : undefined;
 
                 const isClickable = !!docLink;
@@ -1640,14 +1658,12 @@ export default function ProjectDetail({
                             Manual - Pending Automation
                           </span>
                         )}
-                        {!isClickable && (isProjectReady || project.status === "Complete") && (
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
-                            File link unavailable
-                          </span>
-                        )}
+                        <span className="text-xs leading-relaxed text-slate-600">
+                          {isClickable ? "File link recorded" : "Output unverified · File link unavailable"}
+                        </span>
                         {automated && !isClickable && project.status === "Approved for Generation" && (
-                          <span className="text-[10px] text-brand-600 font-bold uppercase tracking-tight animate-pulse">
-                            Generating...
+                          <span className="text-xs leading-relaxed text-slate-600">
+                            Approval recorded
                           </span>
                         )}
                         {automated && !isApproved && !isClickable && !isProjectReady && (
