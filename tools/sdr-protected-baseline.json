@@ -2,7 +2,7 @@
   "protectedAppFiles": [
     {
       "path": "src/App.tsx",
-      "sha256": "7155e1e7ea4417331a5ed8e941d1c1c5e9b6ecfb51bcbb7eedf4a34306d71f2a"
+      "sha256": "ac88e27986199f342877c90681debebb289a4e5d214e4ea24b6c4a324b28fe39"
     },
     {
       "path": "src/data.ts",
@@ -22,7 +22,7 @@
     },
     {
       "path": "src/components/ProjectDetail.tsx",
-      "sha256": "a6b9bc25377314e732eb41a0707570a54fa2eefd13ac1542ad8014d5a2d95051"
+      "sha256": "65ff09982f2c9c9f9e4140cb546baedc81dafc820569ea9ca0c0045fc85c680a"
     },
     {
       "path": "src/components/ArchiveList.tsx",
@@ -83,6 +83,14 @@
     {
       "path": "src/components/SeoIdeas.tsx",
       "sha256": "403a7d7e40d4cc9e3fa0f82846e86437999874a16eadc3ddeb6ffcb07329477c"
+    },
+    {
+      "path": "src/projectPersistence.ts",
+      "sha256": "dbc02c16a66c727fd5d2c3b2bc6164cec14a6241e67462b89754763086c8dea8"
+    },
+    {
+      "path": "src/projectRetrigger.ts",
+      "sha256": "c8c91595238b3431f1f7fe0f237e243a4caaadbc3677cdeb86c7c34e7dc58c78"
     }
   ],
   "protectedServerRoutes": [
