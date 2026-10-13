@@ -144,7 +144,7 @@ describe("document link availability", () => {
       for (const row of rows.filter((candidate) => !candidate.includes(">Job Order PDF"))) {
         expect(row).not.toMatch(/<a\b|href=|target=/);
         if (status === "Approved for Generation") {
-          expect(row).toContain(row.includes("(Automated)") ? "Generating..." : "Manual - Pending Automation");
+          expect(row).toContain(row.includes("(Automated)") ? "Approval recorded" : "Manual - Pending Automation");
         } else {
           expect(row).toContain("File link unavailable");
         }
@@ -209,4 +209,45 @@ describe("document link availability", () => {
     expect(render({ status: "Approved for Generation" })).toContain("Re-trigger Generation");
     expect(render({ status: "Pending Review" })).toContain("Upload PDF (max 1 GB)");
   });
+});
+
+
+describe("OPS document output evidence", () => {
+  it("does not treat Ready and a project folder as proof of generated files", () => {
+    const html = sections(render({ folderLink: "https://example.invalid/project-folder" })).documents;
+    expect(html).toContain("0 of 4 file links recorded");
+    expect(html).toContain("Output unverified");
+    expect(html).toContain("Project status and folder links do not confirm document contents or customer delivery.");
+    expect(html).toMatch(/<a\b[^>]*href="https:\/\/example\.invalid\/project-folder"[^>]*>Check project folder/);
+    expect(html).not.toContain("Generated successfully");
+  });
+
+  it("counts only the supplied Job Order file, independently of project status", () => {
+    const html = sections(render({ status: "Pending Review", jobOrderLink: "https://example.invalid/job.pdf", folderLink: "https://example.invalid/folder" })).documents;
+    expect(html).toContain("1 of 4 file links recorded");
+    expect(rowFor(render({ status: "Pending Review", jobOrderLink: "https://example.invalid/job.pdf" }), "Job Order PDF")).toContain("File link recorded");
+    expect(html).not.toContain("4 of 4 file links recorded");
+  });
+
+  it("does not imply an approved project is currently generating files", () => {
+    const html = sections(render({ status: "Approved for Generation" })).documents;
+    expect(html).toContain("Output unverified");
+    expect(html).not.toContain("Generating...");
+    expect(html).toContain("Approval recorded");
+  });
+
+  it("does not count a folder as a file or expose invalid folder links", () => {
+    const html = sections(render({ jobOrderLink: "#", folderLink: "javascript:alert(1)" })).documents;
+    expect(html).toContain("0 of 4 file links recorded");
+    expect(html).not.toContain("Check project folder");
+    expect(html).not.toContain("javascript:");
+  });
+});
+
+describe('generation result visibility',()=>{
+ const generation={schemaVersion:1 as const,runId:'run-fixture',contextDigest:'a'.repeat(64),approvedAt:'2026-10-13T10:00:00Z',events:[],outputs:{swppp:{documentKey:'swppp',outcome:'produced' as const,provider:'dropbox',fileId:'id:fixture',path:'/Fixture/swppp.pdf',url:'https://www.dropbox.com/scl/fi/abc/swppp.pdf?dl=1'}}};
+ it('does not label a receipt-backed file as pending automation',()=>{const html=rowFor(render({generation,generationState:'current'}),'SWPPP');expect(html).toContain('Provider file recorded');expect(html).not.toContain('Manual - Pending Automation');});
+ it('shows failed output without an approval-only badge',()=>{const html=rowFor(render({status:'Approved for Generation',generation:{...generation,outputs:{job_order:{documentKey:'job_order',outcome:'failed',reasonCode:'write',reason:'File output failed'}}},generationState:'current'}),'Job Order PDF');expect(html).toContain('File output failed');expect(html).not.toContain('Approval recorded');});
+ it('shows current individual SWPPP output without claiming delivery or all documents generated',()=>{const html=render({generation,generationState:'current'});expect(html).toContain('Provider file recorded');expect(html).toContain('https://www.dropbox.com/scl/fi/abc/swppp.pdf?dl=1');expect(html).not.toContain('Delivered to customer');});
+ it('keeps stale results historical and marks review reasons',()=>{expect(render({generation,generationState:'stale'})).toContain('Earlier inputs');const html=render({generation:{...generation,outputs:{swppp:{documentKey:'swppp',outcome:'review_required',reasonCode:'template',reason:'Template needs review'}}},generationState:'current'});expect(html).toContain('Template needs review');});
 });

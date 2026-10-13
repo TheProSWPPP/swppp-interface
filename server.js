@@ -1,3 +1,4 @@
+import {stripGenerationMetadata,projectGenerationView,updateProject,mergeProjectPatch,mergePlanAnalysis,registerGenerationResultRoute} from './lib/projectGenerationResults.js';
 import {createApprovalObservationRecorder} from './lib/sdrApprovalObservations.js';
 import {registerApprovalObservationHealth} from './lib/sdrApprovalObservationHealth.js';
 import {registerSdrPreparationEvidenceRoutes} from './lib/sdrPreparationEvidenceRoutes.js';
@@ -4919,7 +4920,7 @@ app.get("/api/projects", async (req, res) => {
     memoryProjects = memoryProjects.map((p) =>
       p.status === "New" ? { ...p, status: "Pending Review" } : p
     );
-    return res.json(memoryProjects);
+    return res.json(memoryProjects.map(projectGenerationView));
   }
 
   try {
@@ -4931,14 +4932,14 @@ app.get("/api/projects", async (req, res) => {
     const result = await pool.query(
       "SELECT data FROM projects WHERE archived = FALSE ORDER BY id DESC"
     );
-    res.json(result.rows.map((r) => r.data));
+    res.json(result.rows.map((r) => projectGenerationView(r.data)));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 app.post("/api/projects", async (req, res) => {
-  const newProject = req.body;
+  const newProject = { ...stripGenerationMetadata(req.body), id: req.body.id };
   if (!newProject.id) newProject.id = Date.now().toString();
   // Default to "New" status if not provided (allows external webhooks to set their own status)
   if (!newProject.status) newProject.status = "New";
@@ -5026,61 +5027,35 @@ app.post("/api/projects", async (req, res) => {
   }
 });
 
+// This route remains behind the existing Basic authentication wall.
+registerGenerationResultRoute(app, { pool: process.env.DATABASE_URL ? pool : null, secret: N8N_CALLBACK_SECRET });
 app.put("/api/projects/:id", async (req, res) => {
   const { id } = req.params;
-  const updates = req.body;
-
   if (!process.env.DATABASE_URL) {
     const index = memoryProjects.findIndex((p) => p.id === id);
-    if (index !== -1) {
-      memoryProjects[index] = { ...memoryProjects[index], ...updates };
-      return res.json(memoryProjects[index]);
+    if (index === -1) return res.status(404).json({ error: "Not found" });
+    try {
+      memoryProjects[index] = mergeProjectPatch(memoryProjects[index], req.body, req.body.__expectedValues);
+      return res.json(projectGenerationView(memoryProjects[index]));
+    } catch (err) {
+      return res.status(err.status || 500).json({ error: err.message, conflicts: err.conflicts, project: err.project });
     }
-    return res.status(404).json({ error: "Not found" });
   }
-
   try {
-    const current = await pool.query(
-      "SELECT data FROM projects WHERE id = $1",
-      [id]
-    );
-    if (current.rows.length === 0)
-      return res.status(404).json({ error: "Not found" });
-
-    const oldStatus = current.rows[0].data.status;
-    const updatedData = { ...current.rows[0].data, ...updates };
-    const newStatus = updatedData.status;
-
-    await pool.query(
-      "UPDATE projects SET name = $1, status = $2, data = $3 WHERE id = $4",
-      [updatedData.projectName, updatedData.status, updatedData, id]
-    );
-
-    // Trigger n8n webhook on approval
-    if (
-      newStatus !== oldStatus &&
-      (newStatus === "Approved for Generation" ||
-        newStatus === "Manual Processing")
-    ) {
-      console.log(
-        `Triggering n8n webhook for project: ${updatedData.projectName}`
-      );
+    const { project: updatedData, trigger } = await updateProject(pool, id, req.body, { expectedValues: req.body.__expectedValues });
+    // Dispatch only after the atomic status transition commits.
+    if (trigger) {
       fetch(N8N_WEBHOOK_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedData),
       })
-        .then((response) => {
-          console.log(`n8n webhook response: ${response.status}`);
-        })
-        .catch((err) => {
-          console.error("Failed to trigger n8n webhook:", err);
-        });
+        .then((response) => console.log(`n8n webhook response: ${response.status}`))
+        .catch((err) => console.error("Failed to trigger n8n webhook:", err));
     }
-
-    res.json(updatedData);
+    res.json(projectGenerationView(updatedData));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.status ? err.message : "Unable to save project", conflicts: err.conflicts, project: err.project });
   }
 });
 
@@ -6945,19 +6920,8 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         : null;
     }
 
-    // Save to DB
-    if (process.env.DATABASE_URL) {
-      const current = await pool.query("SELECT data FROM projects WHERE id = $1", [id]);
-      if (current.rows.length > 0) {
-        const updatedData = {
-          ...current.rows[0].data,
-          planAnalysisSummary: analysisData.summary || "",
-          planAnalysisDate: new Date().toISOString(),
-          planAnalysisRaw: analysisData,
-        };
-        await pool.query("UPDATE projects SET data = $1 WHERE id = $2", [updatedData, id]);
-      }
-    }
+    // Merge only analysis-owned fields under the same row lock as staff/results.
+    if (process.env.DATABASE_URL) await mergePlanAnalysis(pool, id, analysisData);
 
     res.json({ data: analysisData });
   } catch (err) {
