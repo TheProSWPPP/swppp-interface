@@ -22,7 +22,7 @@
     },
     {
       "path": "src/components/ProjectDetail.tsx",
-      "sha256": "6c5921b7961d429d93a3bed7318ae1cd38c1649aef9e3b58ad6167b85bdc43a4"
+      "sha256": "958cba168e55652ba9bbd6028f160bdeca142cbb7323f7b79a52834356afeb58"
     },
     {
       "path": "src/components/ArchiveList.tsx",

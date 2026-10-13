@@ -115,6 +115,9 @@ export default function ProjectDetail({
     }
   };
 
+  const currentSave = useRef(onUpdate);
+  currentSave.current = onUpdate;
+
   const isPending =
     project.status === "Pending Review" || project.status === "New";
 
@@ -150,7 +153,7 @@ export default function ProjectDetail({
 
   useEffect(() => {
     if (isApproved || isSaving || saveError) return;
-    const timer = setTimeout(() => { void onUpdate(currentForm.current); }, 1000);
+    const timer = setTimeout(() => { void currentSave.current(currentForm.current); }, 1000);
     return () => clearTimeout(timer);
   }, [formData, isApproved, isSaving, saveError]);
 
