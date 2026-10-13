@@ -1,7 +1,7 @@
 import type {Project} from './data';
 export type ProjectPatch = Partial<Project> & {id:string};
 export type ProjectSaver = (patch:ProjectPatch,expected?:Record<string,unknown>) => Promise<Project | void> | Project | void;
-const serverFields = new Set(['id','generation','generationState','generationRunId','generationContextDigest','runId','contextDigest']);
+const serverFields = new Set(['id','generation','generationState','generationRunId','generationContextDigest','runId','contextDigest','environmentLookupStatus','environmentLookupNotes','generationNote']);
 const equal = (a:unknown,b:unknown) => JSON.stringify(a??null)===JSON.stringify(b??null);
 export function changedProjectFields(base:Project,current:Project){
  const patch:ProjectPatch={id:base.id},expected:Record<string,unknown>={};

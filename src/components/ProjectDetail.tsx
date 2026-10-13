@@ -1,6 +1,7 @@
 import {changedProjectFields,reconcileProjectSave,preserveDirtyBaseline,type ProjectSaver} from '../projectPersistence';
 import { useState, useEffect, useRef } from "react";
 import type { Project } from "../data";
+import { environmentLookupReview, boundedReviewNote } from '../environmentLookupReview';
 import {
   ArrowLeft,
   CheckCircle,
@@ -141,6 +142,8 @@ export default function ProjectDetail({
   const recordedFileCount = documentTargets.filter(doc => currentResults?.[documentKeys[doc]]?.outcome === "produced" || (doc === "Job Order PDF" && !currentResults?.job_order && getAvailableDocumentLink(project.jobOrderLink))).length;
   const jobOrderFileLink = getAvailableDocumentLink(project.jobOrderLink);
   const documentFolderLink = getAvailableDocumentLink(project.folderLink);
+  const lookupWarnings = environmentLookupReview(project.environmentLookupStatus, project.environmentLookupNotes);
+  const generationNote = boundedReviewNote(project.generationNote);
 
   useEffect(() => {
     setFormData((current) => project.id === baseline.current.id
@@ -1089,6 +1092,14 @@ export default function ProjectDetail({
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
               <Map className="h-4 w-4" /> Location & Environmental
             </h4>
+            {lookupWarnings.length > 0 && (
+              <div role="note" aria-label="Lookup review" className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-relaxed text-amber-900">
+                <p className="font-semibold flex items-center gap-2"><AlertTriangle className="h-4 w-4 shrink-0" />Lookup review</p>
+                <ul className="mt-1 space-y-1 list-disc pl-5">
+                  {lookupWarnings.map((warning, index) => <li key={index} className="break-words">{warning}</li>)}
+                </ul>
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -1632,6 +1643,7 @@ export default function ProjectDetail({
                 Project status and folder links do not confirm document contents or customer delivery.
               </p>
               {project.generationState === "stale" && <p className="text-xs text-amber-800">Earlier inputs · results need a new review.</p>}
+              {generationNote && <p role="note" aria-label="Document review" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-relaxed text-amber-900 break-words"><span className="font-semibold">Document review: </span>{generationNote}</p>}
               {documentFolderLink && (
                 <a
                   href={documentFolderLink}
