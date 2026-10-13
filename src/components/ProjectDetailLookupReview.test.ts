@@ -26,7 +26,7 @@ describe('project lookup review visibility', () => {
     const html = render({ waterway: 'Staff verified river', environmentLookupStatus: { waterway: 'failed', overall: 'failed' } });
     expect(html).toContain('Lookup review');
     expect(html).toContain('Waterbodies lookup recorded a failure');
-    expect(html).toContain('Intake recorded a lookup failure');
+    expect(html).toContain('A lookup failure was recorded');
     expect(html).toContain('staff should verify current values');
     expect(html).toContain('value="Staff verified river"');
     expect(html.indexOf('Lookup review')).toBeGreaterThan(html.indexOf('Location &amp; Environmental'));
