@@ -6,7 +6,7 @@
     },
     {
       "path": "src/data.ts",
-      "sha256": "daaccde230b98df078339a0c489737490c55f16449b3e29b483ee87e1a5668a8"
+      "sha256": "e36f280f6533b393fbf903c9202c7971e8a58bdf9deb3a0ff5db2e261b5e0874"
     },
     {
       "path": "src/index.css",
@@ -22,7 +22,7 @@
     },
     {
       "path": "src/components/ProjectDetail.tsx",
-      "sha256": "958cba168e55652ba9bbd6028f160bdeca142cbb7323f7b79a52834356afeb58"
+      "sha256": "a6b9bc25377314e732eb41a0707570a54fa2eefd13ac1542ad8014d5a2d95051"
     },
     {
       "path": "src/components/ArchiveList.tsx",
