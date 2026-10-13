@@ -144,7 +144,7 @@ describe("document link availability", () => {
       for (const row of rows.filter((candidate) => !candidate.includes(">Job Order PDF"))) {
         expect(row).not.toMatch(/<a\b|href=|target=/);
         if (status === "Approved for Generation") {
-          expect(row).toContain(row.includes("(Automated)") ? "Generating..." : "Manual - Pending Automation");
+          expect(row).toContain(row.includes("(Automated)") ? "Approval recorded" : "Manual - Pending Automation");
         } else {
           expect(row).toContain("File link unavailable");
         }
@@ -208,5 +208,38 @@ describe("document link availability", () => {
     expect(buttonFor(industrial, "Confirm Manual Processing")).not.toContain('disabled=""');
     expect(render({ status: "Approved for Generation" })).toContain("Re-trigger Generation");
     expect(render({ status: "Pending Review" })).toContain("Upload PDF (max 1 GB)");
+  });
+});
+
+
+describe("OPS document output evidence", () => {
+  it("does not treat Ready and a project folder as proof of generated files", () => {
+    const html = sections(render({ folderLink: "https://example.invalid/project-folder" })).documents;
+    expect(html).toContain("0 of 4 file links recorded");
+    expect(html).toContain("Output unverified");
+    expect(html).toContain("Project status and folder links do not confirm document contents or customer delivery.");
+    expect(html).toMatch(/<a\b[^>]*href="https:\/\/example\.invalid\/project-folder"[^>]*>Check project folder/);
+    expect(html).not.toContain("Generated successfully");
+  });
+
+  it("counts only the supplied Job Order file, independently of project status", () => {
+    const html = sections(render({ status: "Pending Review", jobOrderLink: "https://example.invalid/job.pdf", folderLink: "https://example.invalid/folder" })).documents;
+    expect(html).toContain("1 of 4 file links recorded");
+    expect(rowFor(render({ status: "Pending Review", jobOrderLink: "https://example.invalid/job.pdf" }), "Job Order PDF")).toContain("File link recorded");
+    expect(html).not.toContain("4 of 4 file links recorded");
+  });
+
+  it("does not imply an approved project is currently generating files", () => {
+    const html = sections(render({ status: "Approved for Generation" })).documents;
+    expect(html).toContain("Output unverified");
+    expect(html).not.toContain("Generating...");
+    expect(html).toContain("Approval recorded");
+  });
+
+  it("does not count a folder as a file or expose invalid folder links", () => {
+    const html = sections(render({ jobOrderLink: "#", folderLink: "javascript:alert(1)" })).documents;
+    expect(html).toContain("0 of 4 file links recorded");
+    expect(html).not.toContain("Check project folder");
+    expect(html).not.toContain("javascript:");
   });
 });
