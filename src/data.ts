@@ -19,9 +19,14 @@ export interface ProjectGeneration {
   outputs: Record<string, GenerationOutput>;
   events: {eventId: string; digest: string; receivedAt: string}[];
 }
+export type EnvironmentLookupField = 'soil' | 'waterway' | 'species' | 'ms4' | 'county' | 'coordinates' | 'overall';
+export type EnvironmentLookupOutcome = 'complete' | 'approved-order-input' | 'no-qualifying-results' | 'inferred' | 'review-required' | 'no-operator-found' | 'failed';
 export interface Project {
   generation?: ProjectGeneration;
   generationState?: "current" | "stale" | "legacy";
+  generationNote?: string;
+  environmentLookupStatus?: Partial<Record<EnvironmentLookupField, EnvironmentLookupOutcome>>;
+  environmentLookupNotes?: Partial<Record<'species' | 'ms4' | 'overall', string>>;
   id: string;
   projectName: string;
   email: string;
