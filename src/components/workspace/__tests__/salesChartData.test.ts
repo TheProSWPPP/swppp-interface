@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import type {MetricsResponse} from '../../../lib/sdrMetricsApi';
-import {comparable,monthMetric,changeTone} from '../salesChartData';
+import {comparable,monthMetric,changeTone,trendMonths} from '../salesChartData';
 import {monthlySales} from '../../sdr/dashboard/salesMonths';
 
 const rows=monthlySales([
@@ -34,5 +34,16 @@ describe('sales chart trust boundaries',()=>{
  });
  it('distinguishes a complete month with no valued sales from incomplete history',()=>{
   expect(monthMetric(data,{...rows[1],sales:0,revenue:0,valuedWins:0,average:null},'average')).toEqual({value:null,state:'unavailable',reason:'no_valued_wins'});
+ });
+ it('appends the current month to date after complete months, marked in progress',()=>{
+  const day=(date:string,wins:number,value:number)=>({date,messages_completed:0,first_touches:0,followups_completed:0,human_replies_received:0,company_won_deals:wins,company_won_booked_value:value,company_valued_wins:wins});
+  const months={window:{from:'2025-10-01',to:'2026-10-01',timezone:'America/Chicago',provisional:false},activity:[day('2025-10-03',51,74872),day('2026-09-10',21,51665)]} as MetricsResponse;
+  const current={window:{from:'2026-10-01',to:'2026-10-16',timezone:'America/Chicago',provisional:true},activity:[day('2026-10-02',1,0)]} as MetricsResponse;
+  const result=trendMonths(months,current);
+  expect(result.map(row=>[row.month,row.sales,!!row.inProgress])).toEqual([['2025-10',51,false],['2026-09',21,false],['2026-10',1,true]]);
+  expect(result[2]).toMatchObject({from:'2026-10-01',to:'2026-10-16',partialMonth:true});
+  expect(monthMetric({...current,metrics:data.metrics} as MetricsResponse,result[2],'sales').state).toBe('partial');
+  expect(trendMonths(months,{...current,window:{...current.window,from:'2026-09-15'}})).toHaveLength(2);
+  expect(trendMonths(months)).toHaveLength(2);
  });
 });
