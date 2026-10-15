@@ -325,6 +325,7 @@ export interface SdrSequence {
   steps: SdrSequenceStep[];
   coverage?: "complete" | "partial";
   errorCategory?: string | null;
+  pause_reason?: string | null;
   omitted_steps?: Array<{position:number|null;step_type:string|null;reason:string}>;
 }
 
