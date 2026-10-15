@@ -27,6 +27,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import pg from "pg";
 import { PDFDocument } from "pdf-lib";
+import { splitPdf } from "./lib/planPdfSplit.js";
 import fs from "fs";
 import os from "os";
 import { execFile } from "child_process";
@@ -257,53 +258,6 @@ function compressWithGhostscript(inputPath, outputPath) {
       else resolve(outputPath);
     });
   });
-}
-
-// Split a PDF into chunks that each fit under maxBytes using pdf-lib
-async function splitPdf(pdfBuffer, maxBytes) {
-  const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-  const totalPages = pdfDoc.getPageCount();
-
-  // Binary search for how many pages fit in one chunk
-  async function findChunkSize(startPage) {
-    const remaining = totalPages - startPage;
-    let lo = 1, hi = Math.min(remaining, 200);
-    // Quick check: do all remaining pages fit?
-    const allDoc = await PDFDocument.create();
-    const allIdx = Array.from({ length: remaining }, (_, i) => startPage + i);
-    const allCopied = await allDoc.copyPages(pdfDoc, allIdx);
-    for (const p of allCopied) allDoc.addPage(p);
-    const allBytes = await allDoc.save();
-    if (allBytes.byteLength <= maxBytes) return remaining;
-
-    // Binary search
-    while (lo < hi) {
-      const mid = Math.ceil((lo + hi) / 2);
-      const doc = await PDFDocument.create();
-      const idx = Array.from({ length: mid }, (_, i) => startPage + i);
-      const copied = await doc.copyPages(pdfDoc, idx);
-      for (const p of copied) doc.addPage(p);
-      const bytes = await doc.save();
-      if (bytes.byteLength <= maxBytes) lo = mid;
-      else hi = mid - 1;
-    }
-    return lo;
-  }
-
-  const chunks = [];
-  let page = 0;
-  while (page < totalPages) {
-    const count = await findChunkSize(page);
-    const doc = await PDFDocument.create();
-    const idx = Array.from({ length: count }, (_, i) => page + i);
-    const copied = await doc.copyPages(pdfDoc, idx);
-    for (const p of copied) doc.addPage(p);
-    const bytes = Buffer.from(await doc.save());
-    chunks.push({ buffer: bytes, startPage: page + 1, endPage: page + count, totalPages });
-    console.log(`Chunk: pages ${page + 1}-${page + count} (${(bytes.length / 1024 / 1024).toFixed(1)} MB)`);
-    page += count;
-  }
-  return chunks;
 }
 
 // Compress PDF using pdf.co presigned URL upload (supports up to 100MB)
@@ -6931,6 +6885,9 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
     }
     if (err.message === "terminated" || err.message === "fetch failed") {
       return res.status(502).json({ error: "Connection was interrupted. Please try again." });
+    }
+    if (err.code === "PLAN_PDF_UNSPLITTABLE") {
+      return res.status(413).json({ error: "This plan PDF is too large to analyze automatically. Upload a smaller copy (for example only the site and erosion control sheets)." });
     }
     res.status(500).json({ error: err.message });
   } finally {

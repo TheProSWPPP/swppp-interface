@@ -132,7 +132,7 @@
     {
       "method": "POST",
       "path": "/api/projects/:id/analyze-plans",
-      "sha256": "e625fffaaa1f81cd4812857bb1e2edbeae78d3dfb5723257d97bbaa37cdbcd6a"
+      "sha256": "6093b2303d662c72f0d6dc538873f40e59fed056178c0474ec3da8e10effd97b"
     }
   ],
   "protectedServerDeclarations": [
