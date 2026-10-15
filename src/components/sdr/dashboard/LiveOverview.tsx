@@ -12,10 +12,9 @@ const time = (value: string) => new Date(value).toLocaleTimeString('en-US', { ti
 
 function ActionRow({ action, onNavigate }: { action: LiveOverviewAction; onNavigate: (target: string) => void }) {
   const Icon = action.target === 'leads' ? Target : action.target === 'mailboxes' ? Users : ListChecks;
-  const clearRows = action.id === 'fresh-leads';
   return <button type="button" className="sdr-live-action" onClick={() => onNavigate(action.target)}>
     <span className="sdr-live-action-icon"><Icon size={19} aria-hidden="true" /></span>
-    <span className="sdr-live-action-copy"><strong>{clearRows?'Review clear lead rows':action.title}</strong><span>{clearRows?'CRM status only. Verify each project and contact before outreach.':action.description}</span></span>
+    <span className="sdr-live-action-copy"><strong>{action.title}</strong><span>{action.description}</span></span>
     {action.count !== null && <span className="sdr-live-action-count">{number(action.count)}</span>}
     <ArrowRight size={18} className="sdr-live-action-arrow" aria-hidden="true" />
   </button>;

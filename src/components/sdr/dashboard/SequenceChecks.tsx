@@ -13,7 +13,7 @@ export default function SequenceChecks({refreshKey,onReview}:{refreshKey:number;
  if(!issues.length&&!state.partial) return null;
  return <section className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-950" aria-label="Sequence settings need attention">
   <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Sequence settings need attention</h2><button className="min-h-11 underline" onClick={onReview}>Review sequences</button></div>
-  {state.partial&&<p>Some configuration details could not be verified.</p>}
-  <ul className="mt-2 space-y-2">{issues.map((issue,index)=><li key={`${issue.id}:${index}`}><strong>{issue.name.replaceAll('\u2014',':')}</strong><p>{issue.text}</p></li>)}</ul>
+  {state.partial&&<p>Some settings could not be checked.</p>}
+  <ul className="mt-2 space-y-1">{issues.map((issue,index)=><li key={`${issue.id}:${index}`}><strong>{issue.name.replaceAll('\u2014','-')}</strong>: {issue.text}</li>)}</ul>
  </section>;
 }
