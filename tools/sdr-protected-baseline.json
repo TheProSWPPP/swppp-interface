@@ -22,7 +22,7 @@
     },
     {
       "path": "src/components/ProjectDetail.tsx",
-      "sha256": "65ff09982f2c9c9f9e4140cb546baedc81dafc820569ea9ca0c0045fc85c680a"
+      "sha256": "d944e0a92fe741762f4643bab8b951fd0d1104b518558d20ff113ed4db69d048"
     },
     {
       "path": "src/components/ArchiveList.tsx",
@@ -132,7 +132,7 @@
     {
       "method": "POST",
       "path": "/api/projects/:id/analyze-plans",
-      "sha256": "6093b2303d662c72f0d6dc538873f40e59fed056178c0474ec3da8e10effd97b"
+      "sha256": "52c248706aa944a598581cb1d5d7b68d2142f732d33f675f9fe07340f727fd3f"
     }
   ],
   "protectedServerDeclarations": [
@@ -150,11 +150,11 @@
     },
     {
       "name": "callGemini",
-      "sha256": "dba7e4dba0d2bf774841c7d097459d6d739d3de106d376a8c60148531ee7ddf3"
+      "sha256": "25f91f2f50fa8cf21c9dd234eb3ff14167e02464175c2f1fac5087b5c5898092"
     },
     {
       "name": "callGeminiWithFile",
-      "sha256": "f9e88c1817dd1dd3f5f94b64aba28c556f51a128ac77223f11c866af6491a3a5"
+      "sha256": "b5c8deb76e4aa202d2dbc75677f57f7a514815b60a4dfe81925db3c7f50d5853"
     },
     {
       "name": "memoryProjects",

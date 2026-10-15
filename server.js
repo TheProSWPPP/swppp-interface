@@ -28,6 +28,7 @@ import { fileURLToPath } from "url";
 import pg from "pg";
 import { PDFDocument } from "pdf-lib";
 import { splitPdf } from "./lib/planPdfSplit.js";
+import { scanPlanSet, PLAN_SCAN_MODEL } from "./lib/planScan.js";
 import fs from "fs";
 import os from "os";
 import { execFile } from "child_process";
@@ -121,7 +122,7 @@ const RAILWAY_PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   : `http://localhost:${process.env.PORT || 3000}`;
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = "gemini-3.1-pro-preview";
+const GEMINI_MODEL = PLAN_SCAN_MODEL;
 const GEMINI_PROMPT = `You are an expert civil engineering plan reader specializing in stormwater pollution prevention plans (SWPPP). Analyze these construction/civil drawings thoroughly and extract the following information.
 
 CRITICAL INSTRUCTIONS FOR AREA CALCULATION:
@@ -197,7 +198,7 @@ async function callGemini(contentParts, timeoutMs = 180000) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: contentParts }],
-        generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
+        generationConfig: { maxOutputTokens: 32768, temperature: 0.1 },
       }),
       signal: AbortSignal.timeout(timeoutMs),
     }
@@ -222,7 +223,7 @@ async function callGemini(contentParts, timeoutMs = 180000) {
     console.warn("Gemini response missing key fields:", Object.keys(analysisData));
   }
 
-  // Attach token usage + estimated cost (Gemini 3.1 Pro Preview pricing: $1.25 in / $10.00 out per 1M)
+  // Attach token usage + estimated cost (Gemini 4 Argon pricing: $2.00 in / $10.00 out per 1M)
   const u = json.usageMetadata || {};
   const inputTokens = u.promptTokenCount || 0;
   const outputTokens = u.candidatesTokenCount || 0;
@@ -232,7 +233,7 @@ async function callGemini(contentParts, timeoutMs = 180000) {
     outputTokens,
     thoughtsTokens,
     totalTokens: u.totalTokenCount || 0,
-    estimatedCostUSD: (inputTokens * 1.25 + outputTokens * 10.00) / 1_000_000,
+    estimatedCostUSD: (inputTokens * 2.00 + (outputTokens + thoughtsTokens) * 10.00) / 1_000_000,
   };
   console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
   return analysisData;
@@ -354,7 +355,7 @@ async function callGeminiWithFile(filePath) {
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({
     model: GEMINI_MODEL,
-    generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
+    generationConfig: { maxOutputTokens: 32768, temperature: 0.1 },
   });
 
   console.log("Calling Gemini with file reference...");
@@ -385,7 +386,7 @@ async function callGeminiWithFile(filePath) {
     outputTokens,
     thoughtsTokens,
     totalTokens: u.totalTokenCount || 0,
-    estimatedCostUSD: (inputTokens * 1.25 + outputTokens * 10.00) / 1_000_000,
+    estimatedCostUSD: (inputTokens * 2.00 + (outputTokens + thoughtsTokens) * 10.00) / 1_000_000,
   };
   console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
   return analysisData;
@@ -6692,6 +6693,8 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
 
   try {
     let analysisData;
+    let linkPath = null;
+    let fallbackReason = null;
     const INLINE_LIMIT = 15 * 1024 * 1024; // 15 MB — max for Gemini inline base64
     const PDFLIB_LIMIT = 100 * 1024 * 1024; // 100 MB — max for pdf-lib page count read
     let pdfBuffer;
@@ -6704,10 +6707,9 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       if (!req.file.originalname.toLowerCase().endsWith(".pdf")) {
         return res.status(400).json({ error: "Only PDF files are supported." });
       }
-      pdfBuffer = fs.readFileSync(req.file.path);
 
     } else {
-      // === LINK PATH (max 20 MB download) ===
+      // === LINK PATH (max 300 MB download, streamed to disk) ===
       const { civilDrawingsLink, projectName } = req.body;
       if (!civilDrawingsLink) {
         return res.status(400).json({ error: "No file or civilDrawingsLink provided." });
@@ -6727,20 +6729,37 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
       if ((pdfFetch.headers.get("content-type") || "").includes("text/html")) {
         return res.status(400).json({ error: "Link returned an HTML page, not a PDF. Use a direct file link or upload directly." });
       }
-      const MAX_DOWNLOAD = 20 * 1024 * 1024;
-      const chunks = [];
+      const MAX_DOWNLOAD = 300 * 1024 * 1024;
+      linkPath = path.join(os.tmpdir(), `swppp-link-${Date.now()}.pdf`);
+      tempFiles.push(linkPath);
+      const out = fs.createWriteStream(linkPath);
       let totalSize = 0;
       for await (const chunk of pdfFetch.body) {
         totalSize += chunk.length;
-        if (totalSize > MAX_DOWNLOAD) return res.status(400).json({ error: "PDF exceeds 20 MB via link. Upload the file directly for larger files (up to 300 MB)." });
-        chunks.push(chunk);
+        if (totalSize > MAX_DOWNLOAD) {
+          out.destroy();
+          return res.status(400).json({ error: "PDF exceeds 300 MB via link. Upload only the plan sheets instead." });
+        }
+        if (!out.write(chunk)) await new Promise((r) => out.once("drain", r));
       }
-      pdfBuffer = Buffer.concat(chunks);
-      console.log(`Downloaded ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`);
+      await new Promise((resolve, reject) => out.end((err) => (err ? reject(err) : resolve())));
+      console.log(`Downloaded ${(totalSize / 1024 / 1024).toFixed(1)} MB`);
     }
 
-    let pdfPages = null;
+    // Read the plans sheet by sheet (any size). Fall back to the older whole-PDF path only if this fails.
+    const planFile = req.file?.path || linkPath;
+    try {
+      analysisData = await scanPlanSet(planFile, { apiKey: GEMINI_API_KEY, basePrompt: GEMINI_PROMPT, tmpDir: os.tmpdir(), log: (m) => console.log(m) });
+    } catch (scanErr) {
+      if (scanErr.name === "TimeoutError") throw scanErr;
+      console.warn("Sheet-by-sheet plan scan failed, using whole-PDF analysis:", scanErr.message);
+      fallbackReason = scanErr.message;
+      pdfBuffer = fs.readFileSync(planFile);
+    }
+
+    let pdfPages = analysisData?._usage?.pdfPages ?? null;
     const FILE_API_LIMIT = 50 * 1024 * 1024; // 50 MB — Gemini generateContent file limit
+    if (!analysisData) { // Older whole-PDF path, only used when the sheet-by-sheet scan fails.
 
     // Get page count (only for files small enough for pdf-lib)
     if (pdfBuffer.length <= PDFLIB_LIMIT) {
@@ -6838,7 +6857,7 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({
           model: GEMINI_MODEL,
-          generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
+          generationConfig: { maxOutputTokens: 32768, temperature: 0.1 },
         });
         const parts = [];
         for (const chunk of uploadedChunks) {
@@ -6860,12 +6879,15 @@ app.post("/api/projects/:id/analyze-plans", upload.single("file"), async (req, r
         analysisData._usage = {
           inputTokens, outputTokens, thoughtsTokens,
           totalTokens: u.totalTokenCount || 0,
-          estimatedCostUSD: (inputTokens * 1.25 + outputTokens * 10.00) / 1_000_000,
+          estimatedCostUSD: (inputTokens * 2.00 + (outputTokens + thoughtsTokens) * 10.00) / 1_000_000,
           chunks: uploadedChunks.length,
         };
         console.log(`Gemini tokens — in: ${inputTokens}, out: ${outputTokens}, thinking: ${thoughtsTokens}, chunks: ${uploadedChunks.length} (~$${analysisData._usage.estimatedCostUSD.toFixed(4)})`);
       }
     }
+
+    } // end older whole-PDF path
+    if (fallbackReason && analysisData._usage) analysisData._usage.fallbackReason = fallbackReason.slice(0, 200);
 
     if (analysisData._usage && pdfPages !== null) {
       analysisData._usage.pdfPages = pdfPages;
