@@ -77,7 +77,7 @@ import { dailyCap, rampDay, bounceStepPenalty, mailboxBounceHealth } from "./lib
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
 import * as apolloBudget from "./lib/apolloMessageSearchBudget.js";
 import { resolveEventPolicy } from "./lib/engagementSideEffectPolicy.js";
-import { pollInboxReplies, classifyInbound, createReplyActionClients } from "./lib/inboxReplyWatch.js";
+import { pollInboxReplies, relinkHeldReplies, classifyInbound, createReplyActionClients } from "./lib/inboxReplyWatch.js";
 import { hasRecentReply } from "./lib/recentReply.js";
 import { withJobRun } from "./lib/sdrJobRuns.js";
 import { crmLifecycleEnabled, verifyCrmLead } from "./lib/sdrCrmGuard.js";
@@ -1453,9 +1453,17 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
       .catch((e) => console.error("[inbox-reply-watch] failed:", e.message));
   const runReplyActions = () => {
     if (process.env.SDR_REPLY_ACTIONS_ENABLED !== "true") return;
-    void trackSdrJob("reply_actions", () => drainReplyActions(pool, {
-      clients:createReplyActionClients({pool,getToken:accessTokenForMailbox,appBase}),
-    })).catch(()=>console.error("[reply-actions] action run failed; see run health"));
+    void trackSdrJob("reply_actions", async () => {
+      // Recent replies held for project review get another link attempt first, so any
+      // actions they gain are drained in this same run. A relink failure never blocks it.
+      try {
+        const relink = await relinkHeldReplies(pool, { getToken: accessTokenForMailbox });
+        if (relink.relinked || relink.unavailable) console.log("[reply-relink]", JSON.stringify(relink));
+      } catch { console.error("[reply-relink] relink run failed"); }
+      return drainReplyActions(pool, {
+        clients:createReplyActionClients({pool,getToken:accessTokenForMailbox,appBase}),
+      });
+    }).catch(()=>console.error("[reply-actions] action run failed; see run health"));
   };
   const runOpenAlerts = () => {
     if (process.env.SDR_OPEN_ALERTS_ENABLED !== "true") return;
