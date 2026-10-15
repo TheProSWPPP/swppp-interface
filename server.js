@@ -4557,10 +4557,14 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     }
 
     // Pre-send email verification: block enroll on a confident-bad address so we stop burning
-    // sends + sender reputation on dead mailboxes / typo domains. Fail-open (no key or API error
-    // → proceeds). catch-all / unknown are allowed through. Admin can force via override:true.
-    if (emailVerify.verifyEnabled() && req.body?.skip_verify !== true) {
-      const adminForcing = req.body?.override === true && req.sdrUser?.role === "admin";
+    // sends + sender reputation on dead mailboxes / typo domains. Fail-open for people (no key or
+    // API error → proceeds; catch-all / unknown allowed). Admin can force via override:true.
+    // The automation is stricter: it never forces, and it only sends to an address confirmed
+    // valid. Unconfirmed addresses (catch-all, unknown, no answer) bounced at 8.3% against 3.4%
+    // for valid ones and got SWPPP - PB and LBA auto-paused by Apollo (2026-09-16, 2026-10-10).
+    if (emailVerify.verifyEnabled() && (req.body?.skip_verify !== true || req.sdrUser?.machine)) {
+      const adminForcing = req.body?.override === true && req.sdrUser?.role === "admin" && !req.sdrUser?.machine;
+      let verdict = "skipped";
       const targetEmail = draft.contact_email_snapshot;
 
       // Prefer a fresh cached verdict for this exact address (set by the refresh pass) — no API spend.
@@ -4576,7 +4580,8 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         // confident-bad verdicts (spamtrap/abuse/do_not_mail), letting a cached hard-fail
         // through. canonicalVerdict() normalizes any of the three providers' vocabularies (and
         // is idempotent on values already canonical) — see lib/emailVerify.js.
-        if (emailVerify.canonicalVerdict(cache.email_verify_status) === "hard_fail") {
+        verdict = emailVerify.canonicalVerdict(cache.email_verify_status);
+        if (verdict === "hard_fail") {
           blocked = { status: cache.email_verify_status, sub_status: null, suggestion: null };
         }
       } else {
@@ -4592,6 +4597,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           }).catch((e) => console.error("send-gate cache write failed:", e.message));
         }
         if (!v.ok) blocked = { status: v.status, sub_status: v.sub_status, suggestion: v.suggestion };
+        verdict = !v || v.skipped ? "skipped" : !v.ok ? "hard_fail" : v.soft ? "soft" : "valid";
       }
 
       if (blocked && !adminForcing) {
@@ -4609,6 +4615,12 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         return res.status(422).json({
           code: "email_unverified", status: blocked.status, sub_status: blocked.sub_status, suggestion: blocked.suggestion,
           message: `Email ${targetEmail} failed verification (${blocked.status}) — not enrolled.${blocked.suggestion ? ` Suggested: ${blocked.suggestion}` : ""}`,
+        });
+      }
+      if (req.sdrUser?.machine && verdict !== "valid") {
+        return res.status(409).json({
+          code: "email_unconfirmed", status: verdict,
+          message: `Not sending automatically: ${targetEmail} could not be confirmed (${verdict}). A rep can review and send it.`,
         });
       }
     }
