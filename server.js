@@ -78,6 +78,7 @@ import { pollEngagement } from "./lib/apolloEngagementPoll.js";
 import * as apolloBudget from "./lib/apolloMessageSearchBudget.js";
 import { resolveEventPolicy } from "./lib/engagementSideEffectPolicy.js";
 import { pollInboxReplies, classifyInbound, createReplyActionClients } from "./lib/inboxReplyWatch.js";
+import { hasRecentReply } from "./lib/recentReply.js";
 import { withJobRun } from "./lib/sdrJobRuns.js";
 import { crmLifecycleEnabled, verifyCrmLead } from "./lib/sdrCrmGuard.js";
 import { enrollmentRetryEnabled, beginEnrollmentAttempt, recordEnrollmentAttempt, listDueEnrollmentRetries, renewEnrollmentLease } from "./lib/sdrEnrollmentRetry.js";
@@ -4462,6 +4463,16 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           });
         }
       }
+    }
+
+    // Recent-reply gate: the automation never sends cold outreach to someone who wrote back
+    // in the last six months, on any project; that person is left to staff. People are not
+    // affected: a rep can still send this draft by hand. See lib/recentReply.js.
+    if (req.sdrUser?.machine && await hasRecentReply(pool, draft.contact_email_snapshot)) {
+      return res.status(409).json({
+        code: "recent_reply",
+        message: "Not sending automatically: this person replied to us in the last six months. A rep can send it by hand.",
+      });
     }
 
     // Dedup guard: never silently re-email an already-contacted lead. Live re-check
