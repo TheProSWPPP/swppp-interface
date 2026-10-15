@@ -1,7 +1,15 @@
 import type {Metric, MetricsResponse} from '../../lib/sdrMetricsApi';
-import type {SalesMonth} from '../sdr/dashboard/salesMonths';
+import {monthlySales,type SalesMonth} from '../sdr/dashboard/salesMonths';
 
 export type SalesMeasure = 'sales' | 'revenue' | 'average';
+export type TrendMonth = SalesMonth & {inProgress?:boolean};
+
+// Complete months from the selected period, then the current month to date when it directly follows them.
+export function trendMonths(data:MetricsResponse, inProgress?:MetricsResponse):TrendMonth[] {
+  const rows:TrendMonth[] = monthlySales(data.activity,data.window);
+  if (!inProgress || inProgress.window.from!==data.window.to) return rows;
+  return [...rows,...monthlySales(inProgress.activity,inProgress.window).filter(row=>!rows.some(item=>item.month===row.month)).map(row=>({...row,inProgress:true}))];
+}
 const keys = {sales:'company_won_deals', revenue:'company_won_booked_value', average:'company_average_won_deal_value'} as const;
 
 export function monthMetric(data:MetricsResponse|undefined, row:SalesMonth|undefined, measure:SalesMeasure):Metric {
