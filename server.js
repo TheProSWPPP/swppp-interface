@@ -93,7 +93,7 @@ import { registerSdrOperationsRoutes } from "./lib/sdrOperationsRoutes.js";
 import { registerSdrImportAuditRoutes } from "./lib/sdrImportAuditRoutes.js";
 import { registerSdrOrderReconciliationRoutes } from "./lib/sdrOrderReconciliationRoutes.js";
 import { registerSdrConversationRoutes } from "./lib/sdrConversationRoutes.js";
-import { runAutoOutreach, pruneStaleQueuedDrafts, expireStaleQueuedDrafts } from "./lib/autoOutreach.js";
+import { runAutoOutreach, pruneStaleQueuedDrafts, expireStaleQueuedDrafts, adoptPendingAutomaticDrafts } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
 const { Pool } = pg;
@@ -1387,7 +1387,11 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
     trackSdrJob("enrollment", async () => {
       const mode=(await pool.query("SELECT auto_outreach_enabled,auto_outreach_mode FROM sdr_settings WHERE id=1")).rows[0];
       const recovered={enrolled:0,skipped:0};
+      let adopted=0;
       if (mode?.auto_outreach_enabled && mode?.auto_outreach_mode === "send") {
+        // Give still-sendable pending automatic drafts without a receipt one (idempotent).
+        try { adopted=(await adoptPendingAutomaticDrafts(pool)).adopted||0; }
+        catch (e) { console.error("[auto-outreach] pending-draft adoption failed:", e.message); }
         for (let attempt=0;attempt<5;attempt++) {
           const due=await listDueEnrollmentRetries(pool,{limit:1});
           if (!due.length) break;
@@ -1399,7 +1403,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
       const fresh = r?.mode === "send" && Array.isArray(r.createdDrafts) ? await enrollAutoDrafts(r.createdDrafts) : {enrolled:0,skipped:0};
       if (r?.skipped) return r;
       return {coverage:r?.errors?.length||r?.scanLimitReached||recovered.skipped||fresh.skipped ? "partial" : "complete",
-        counts:{created:r?.created||0,capacity:r?.capacity||0,selected:r?.eligible||0,scanned:r?.scanned||0,refused:r?.refused||0,scanLimitReached:r?.scanLimitReached?1:0,enrolled:recovered.enrolled+fresh.enrolled,deferred:recovered.skipped+fresh.skipped}};
+        counts:{created:r?.created||0,capacity:r?.capacity||0,selected:r?.eligible||0,scanned:r?.scanned||0,refused:r?.refused||0,scanLimitReached:r?.scanLimitReached?1:0,enrolled:recovered.enrolled+fresh.enrolled,deferred:recovered.skipped+fresh.skipped,adopted}};
     })
       .catch((e) => console.error("[auto-outreach] run failed:", e.message));
   };
