@@ -79,6 +79,7 @@ import * as apolloBudget from "./lib/apolloMessageSearchBudget.js";
 import { resolveEventPolicy } from "./lib/engagementSideEffectPolicy.js";
 import { pollInboxReplies, relinkHeldReplies, classifyInbound, createReplyActionClients } from "./lib/inboxReplyWatch.js";
 import { hasRecentReply } from "./lib/recentReply.js";
+import { sequencePaused } from "./lib/apolloSequenceState.js";
 import { withJobRun } from "./lib/sdrJobRuns.js";
 import { crmLifecycleEnabled, verifyCrmLead } from "./lib/sdrCrmGuard.js";
 import { enrollmentRetryEnabled, beginEnrollmentAttempt, recordEnrollmentAttempt, listDueEnrollmentRetries, renewEnrollmentLease } from "./lib/sdrEnrollmentRetry.js";
@@ -4629,6 +4630,14 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     // holding any valid draft id + mailbox id pair could send from an inactive mailbox.
     if (!mailbox.active) {
       return res.status(409).json({ code: "mailbox_inactive", mailbox: mailbox.email, error: `Mailbox ${mailbox.email} is not active — cannot send.` });
+    }
+
+    // A paused Apollo sequence holds new contacts and sends nothing (lib/apolloSequenceState.js).
+    {
+      const paused = await sequencePaused(draft.apollo_sequence_id);
+      if (paused) {
+        return res.status(409).json({ code: "sequence_paused", reason: paused.reason, error: `This Apollo sequence is paused (${paused.reason}), so nothing would be sent. Resume it in Apollo first.` });
+      }
     }
 
     // Warmup ramp: enforce the per-mailbox daily send cap (gradual climb to 40, held back
