@@ -867,7 +867,7 @@ export default function ProjectDetail({
                         {isAnalyzing ? (
                           <>
                             <Loader2 className="h-4 w-4 animate-spin" />
-                            Analyzing... (may take ~30s)
+                            Analyzing... (1-3 min for large plan sets)
                           </>
                         ) : (
                           <>
@@ -900,6 +900,7 @@ export default function ProjectDetail({
                                 {([
                                   {
                                     label: "Disturbed Area",
+                                    key: "estimatedDisturbedArea",
                                     val: formData.planAnalysisRaw.estimatedDisturbedArea?.value ? `${formData.planAnalysisRaw.estimatedDisturbedArea.value} ac` : null,
                                     sub: formData.planAnalysisRaw.estimatedDisturbedArea?.method === "explicit_label"
                                       ? null
@@ -907,33 +908,57 @@ export default function ProjectDetail({
                                   },
                                   {
                                     label: "Total Project Area",
+                                    key: "totalProjectArea",
                                     val: formData.planAnalysisRaw.totalProjectArea?.value ? `${formData.planAnalysisRaw.totalProjectArea.value} ac` : null,
                                     sub: formData.planAnalysisRaw.totalProjectArea?.method === "explicit_label"
                                       ? null
                                       : formData.planAnalysisRaw.totalProjectArea?.details || null,
                                   },
-                                  { label: "Owner", val: formData.planAnalysisRaw.ownerName },
-                                  { label: "Site Address", val: formData.planAnalysisRaw.siteAddress },
-                                  { label: "Phone", val: formData.planAnalysisRaw.ownerPhone },
-                                  { label: "Contact", val: formData.planAnalysisRaw.contactPerson },
-                                  { label: "Email", val: formData.planAnalysisRaw.ownerEmail },
-                                  { label: "Start Date", val: formData.planAnalysisRaw.projectStartDate },
-                                  { label: "Finish Date", val: formData.planAnalysisRaw.projectFinishDate },
-                                  { label: "Waterway", val: formData.planAnalysisRaw.nearestWaterbody },
-                                ] as { label: string; val: string | null; sub?: string | null }[]).map(({ label, val, sub }) => {
+                                  { label: "Owner", val: formData.planAnalysisRaw.ownerName, key: "ownerName" },
+                                  { label: "Site Address", val: formData.planAnalysisRaw.siteAddress, key: "siteAddress" },
+                                  { label: "Phone", val: formData.planAnalysisRaw.ownerPhone, key: "ownerPhone" },
+                                  { label: "Contact", val: formData.planAnalysisRaw.contactPerson, key: "contactPerson" },
+                                  { label: "Email", val: formData.planAnalysisRaw.ownerEmail, key: "ownerEmail" },
+                                  { label: "Start Date", val: formData.planAnalysisRaw.projectStartDate, key: "projectStartDate" },
+                                  { label: "Finish Date", val: formData.planAnalysisRaw.projectFinishDate, key: "projectFinishDate" },
+                                  { label: "Waterway", val: formData.planAnalysisRaw.nearestWaterbody, key: "nearestWaterbody" },
+                                ] as { label: string; val: string | null; sub?: string | null; key?: string }[]).map(({ label, val, sub, key }) => {
                                   const found = val && val !== "N/A" && val !== "null";
+                                  const ev = key ? formData.planAnalysisRaw?.evidence?.[key] : null;
+                                  const estimated = found && (ev ? ev.confidence === "low" : !!sub);
                                   return (
-                                    <div key={label} className="flex items-baseline gap-1 text-[11px]">
-                                      <span className={found ? "text-emerald-500" : "text-slate-300"}>{found ? "✓" : "✗"}</span>
-                                      <span className="text-slate-400 shrink-0">{label}:</span>
-                                      <span className={cn("truncate", found ? "text-slate-700" : "text-slate-300")}>{found ? val : "not found"}</span>
-                                      {found && sub && (
-                                        <span className="text-amber-500 shrink-0" title={sub}>⚠ estimated</span>
+                                    <div key={label} className="text-[11px] min-w-0">
+                                      <div className="flex items-baseline gap-1">
+                                        <span className={found ? "text-emerald-500" : "text-slate-300"}>{found ? "✓" : "✗"}</span>
+                                        <span className="text-slate-400 shrink-0">{label}:</span>
+                                        <span className={cn("truncate", found ? "text-slate-700" : "text-slate-300")}>{found ? val : "not found"}</span>
+                                        {estimated && (
+                                          <span className="text-amber-500 shrink-0" title={sub || ev?.quote || ""}>⚠ estimated</span>
+                                        )}
+                                      </div>
+                                      {found && ev?.quote && (
+                                        <div className="pl-3 text-[10px] text-slate-400 truncate" title={`Page ${ev.page}${ev.sheet ? `, sheet ${ev.sheet}` : ""}: "${ev.quote}"`}>
+                                          {ev.sheet ? `Sheet ${ev.sheet}` : `Page ${ev.page}`}: "{ev.quote}"
+                                          {ev.verified === "text" && <span className="text-emerald-500"> · matches PDF text</span>}
+                                          {ev.verified === "not_in_text" && <span className="text-amber-500"> · check sheet</span>}
+                                        </div>
                                       )}
                                     </div>
                                   );
                                 })}
                               </div>
+                              {formData.planAnalysisRaw.exhibitSheets && (
+                                <div className="text-[11px] text-slate-500">
+                                  <span className="text-slate-400">Exhibit sheets:</span>{" "}
+                                  {[
+                                    ["Site map", formData.planAnalysisRaw.exhibitSheets.siteMap],
+                                    ["Erosion control", formData.planAnalysisRaw.exhibitSheets.erosionControl],
+                                  ]
+                                    .filter(([, v]) => Array.isArray(v) && v.length)
+                                    .map(([k, v]) => `${k} ${(v as string[]).join(", ")}`)
+                                    .join(" · ") || "not found"}
+                                </div>
+                              )}
                               {/* Long text fields — show actual content */}
                               {[
                                 { label: "Soil Data", val: formData.planAnalysisRaw.soilComposition },
