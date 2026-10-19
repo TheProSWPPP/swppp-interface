@@ -3,7 +3,7 @@ export interface LinkedinCandidate {id:string;source:string;source_id:string;pro
 export const canOpenLinkedinProfile=(candidate:LinkedinCandidate)=>Boolean(candidate.person_id&&/^https:\/\/www\.linkedin\.com\/in\/[A-Za-z0-9_-]+\/?$/.test(candidate.profile_url));
 export interface LinkedinReviewData {mode:string;candidates:LinkedinCandidate[];account?:{product?:string;status:string;status_observed_at?:string|null;mode:string;coverage?:Record<string,unknown>}|null}
 export interface LinkedinDraft {id:string;candidate_id:string;revision:number;context_hash:string;body:string;state:string;updated_at:string}
-export interface LinkedinMetrics {counts:{staged:number;confirmedInvites:number;verifiedRelations:number;confirmedDms:number;inbound:number;interested:number;quotes:number;orders:number};coverage:string}
+export interface LinkedinMetrics {counts:Record<string,number|null>;coverage:string;availability?:Record<string,string>}
 export const sdrLinkedinApi={
  review:()=>sdrFetch<LinkedinReviewData>('/api/sdr/linkedin/review'),
  metrics:()=>sdrFetch<LinkedinMetrics>('/api/sdr/linkedin/metrics'),
