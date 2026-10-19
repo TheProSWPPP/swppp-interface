@@ -1,8 +1,8 @@
 import { useEffect,useRef,useState,type ReactNode } from 'react';
-import { BarChart3,Target,Inbox,Flame,Mail,ListChecks,FileSearch,Users,Send,Layers,Contact,RefreshCw,Menu,X,LogOut,CalendarClock } from 'lucide-react';
+import { BarChart3,Target,Inbox,Flame,Mail,ListChecks,FileSearch,Users,Send,Layers,Contact,RefreshCw,Menu,X,LogOut,CalendarClock,Linkedin } from 'lucide-react';
 import type { SdrUser } from '../../../lib/sdrApi';
 import './dashboard.css';
-const coldItems=[{id:'dashboard',label:'Dashboard',icon:BarChart3},{id:'leads',label:'Leads',icon:Target},{id:'queue',label:'Queue',icon:Send},{id:'engaged',label:'Priority',icon:Flame},{id:'inbox',label:'Inbox',icon:Inbox},{id:'followups',label:'Follow-ups',icon:CalendarClock},{id:'mailboxes',label:'Mailboxes',icon:Mail},{id:'templates',label:'Templates',icon:ListChecks},{id:'permits',label:'Permits',icon:FileSearch},{id:'team',label:'Team',icon:Users}];
+const coldItems=[{id:'dashboard',label:'Dashboard',icon:BarChart3},{id:'leads',label:'Leads',icon:Target},{id:'queue',label:'Queue',icon:Send},{id:'engaged',label:'Priority',icon:Flame},{id:'inbox',label:'Inbox',icon:Inbox},{id:'followups',label:'Follow-ups',icon:CalendarClock},{id:'linkedin',label:'LinkedIn',icon:Linkedin},{id:'mailboxes',label:'Mailboxes',icon:Mail},{id:'templates',label:'Templates',icon:ListChecks},{id:'permits',label:'Permits',icon:FileSearch},{id:'team',label:'Team',icon:Users}];
 const nurtureItems=[{id:'campaigns',label:'Campaigns',icon:Send},{id:'lists',label:'Lists',icon:Layers},{id:'contacts',label:'Contacts',icon:Contact},{id:'automations',label:'Automations',icon:RefreshCw}];
 export default function SdrWorkspace({user,lane,active,onLaneChange,onNavigate,onSignOut,notifications,badges={},children}:{user:SdrUser;lane:'cold'|'nurture';active:string;onLaneChange:(lane:'cold'|'nurture')=>void;onNavigate:(tab:string)=>void;onSignOut:()=>void;notifications?:ReactNode;badges?:Record<string,number>;children:ReactNode}) {
   const [menuOpen,setMenuOpen]=useState(false);
