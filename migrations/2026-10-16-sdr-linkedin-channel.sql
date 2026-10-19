@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS sdr_linkedin_accounts (
  company_id text NOT NULL, account_id text NOT NULL, product text NOT NULL DEFAULT 'classic',
  sender_provider_id text, sender_profile_url text, status text NOT NULL DEFAULT 'unverified',
  status_observed_at timestamptz, mode text NOT NULL DEFAULT 'disabled', coverage jsonb NOT NULL DEFAULT '{}'::jsonb,
+ read_budget integer NOT NULL DEFAULT 0 CHECK(read_budget>=0),read_timezone text,
  sync_cursor jsonb NOT NULL DEFAULT '{}'::jsonb, PRIMARY KEY(company_id,account_id));
 CREATE TABLE IF NOT EXISTS sdr_linkedin_hosted_sessions (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), company_id text NOT NULL, account_id text NOT NULL,
@@ -33,14 +34,14 @@ CREATE TABLE IF NOT EXISTS sdr_linkedin_events (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),company_id text NOT NULL,account_id text NOT NULL,candidate_id uuid,
  person_id text,kind text NOT NULL,source text NOT NULL,source_event_id text,source_message_id text,provider_id text,
  chat_id text,direction text,source_at timestamptz,observed_at timestamptz NOT NULL DEFAULT now(),
- coverage text NOT NULL DEFAULT 'unknown',processed_at timestamptz,payload_hash text NOT NULL,safe_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+ coverage text NOT NULL DEFAULT 'unknown',processed_at timestamptz,next_attempt_at timestamptz,attempt_count integer NOT NULL DEFAULT 0,payload_hash text NOT NULL,safe_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
  UNIQUE(company_id,account_id,payload_hash));
 CREATE UNIQUE INDEX IF NOT EXISTS sdr_linkedin_message_once ON sdr_linkedin_events(company_id,account_id,source_message_id) WHERE source_message_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS sdr_linkedin_actions (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),company_id text NOT NULL,account_id text NOT NULL,candidate_id uuid NOT NULL,
  person_id text NOT NULL,campaign_id uuid NOT NULL,campaign_revision integer NOT NULL,step text NOT NULL,
  operation_key text NOT NULL,due_at timestamptz NOT NULL,context_hash text NOT NULL,body text,
- state text NOT NULL DEFAULT 'pending',fence integer NOT NULL DEFAULT 0,network_started_at timestamptz,
+ state text NOT NULL DEFAULT 'pending',hold_reason text,fence integer NOT NULL DEFAULT 0,network_started_at timestamptz,
  request_hash text,provider_id text,provider_chat_id text,provider_receipt jsonb,
  reserved_at timestamptz,confirmed_at timestamptz,created_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(company_id,account_id,person_id,step),UNIQUE(company_id,account_id,operation_key));

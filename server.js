@@ -98,6 +98,7 @@ import {createLinkedinClient} from "./lib/sdrLinkedinClient.js";
 import {startLinkedinRuntime} from "./lib/sdrLinkedinRuntime.js";
 import {createLinkedinFreshContext} from "./lib/sdrLinkedinFreshContext.js";
 import {createLinkedinInboundHandler} from "./lib/sdrLinkedinInbound.js";
+import {chargeLinkedinRead} from "./lib/sdrLinkedinReadBudget.js";
 import { runAutoOutreach, pruneStaleQueuedDrafts, expireStaleQueuedDrafts, adoptPendingAutomaticDrafts } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
@@ -7154,12 +7155,12 @@ const linkedinMode=['observe','dry_run','live'].includes(process.env.SDR_LINKEDI
 const linkedinAccountId=process.env.SDR_LINKEDIN_ACCOUNT_ID||null;
 const linkedinHostedEnabled=process.env.SDR_LINKEDIN_HOSTED_AUTH_ENABLED==='true';
 const linkedinConfigured=linkedinAccountId&&process.env.SDR_LINKEDIN_API_KEY&&process.env.SDR_LINKEDIN_DSN&&process.env.SDR_CRM_COMPANY_ID==='13105180';
-const linkedinClient=linkedinConfigured&&(linkedinMode!=='disabled'||linkedinHostedEnabled)?createLinkedinClient({baseUrl:process.env.SDR_LINKEDIN_DSN,apiKey:process.env.SDR_LINKEDIN_API_KEY,accountId:linkedinAccountId,allowWrites:linkedinMode==='live'&&process.env.SDR_LINKEDIN_ALLOW_WRITES==='true',allowHostedAuth:linkedinHostedEnabled}):null;
+const linkedinClient=linkedinConfigured&&(linkedinMode!=='disabled'||linkedinHostedEnabled)?createLinkedinClient({baseUrl:process.env.SDR_LINKEDIN_DSN,apiKey:process.env.SDR_LINKEDIN_API_KEY,accountId:linkedinAccountId,allowWrites:linkedinMode==='live'&&process.env.SDR_LINKEDIN_ALLOW_WRITES==='true',allowHostedAuth:linkedinHostedEnabled,onRead:()=>chargeLinkedinRead({pool,companyId:'13105180',accountId:linkedinAccountId})}):null;
 registerSdrLinkedinRoutes(app,{pool,companyId:'13105180',accountId:linkedinAccountId,mode:linkedinMode,webhookSecret:process.env.SDR_LINKEDIN_WEBHOOK_SECRET,client:linkedinClient,hostedAuthEnabled:linkedinHostedEnabled&&Boolean(linkedinConfigured),hostedNotifyUrl:process.env.SDR_LINKEDIN_HOSTED_NOTIFY_URL});
 if(linkedinMode!=='disabled'&&linkedinClient){
  const customerLookup=async leadId=>{const lead=await pipedriveClient.getLead(leadId);if(!lead)throw new Error('lead_unavailable');const orgId=lead.organization_id??lead.org_id;if(!orgId)throw new Error('organization_unavailable');const org=await pipedriveClient.getOrganization(orgId);if(!org?.name)throw new Error('organization_unavailable');const index=await refreshCustomerIndex({force:true});return customerMatch({label_ids:lead.label_ids,org_id:orgId,org_name:org.name},index)!==null};
  const readFreshContext=createLinkedinFreshContext({pool,client:linkedinClient,crm:pipedriveClient,apollo:apolloClient,customerLookup});
- startLinkedinRuntime({pool,client:linkedinClient,companyId:'13105180',accountId:linkedinAccountId,mode:linkedinMode,readFreshContext,onInbound:createLinkedinInboundHandler({pool,client:linkedinClient,apollo:apolloClient,mode:linkedinMode})});
+ startLinkedinRuntime({pool,client:linkedinClient,companyId:'13105180',accountId:linkedinAccountId,mode:linkedinMode,readFreshContext,onInbound:createLinkedinInboundHandler({pool,client:linkedinClient,crm:pipedriveClient,apollo:apolloClient,mode:linkedinMode})});
 }
 
 if (process.env.SDR_CONVERSATION_HISTORY_ENABLED === "true") {
