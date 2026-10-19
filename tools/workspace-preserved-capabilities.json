@@ -1,5 +1,5 @@
 {
-  "scope": "October 7 Follow-ups local revision: staff document mutation handlers preserved. Follow-ups navigation now available to SDR staff with existing lead visibility enforced server-side. No outbound action changes.",
+  "scope": "October 19 LinkedIn navigation addition; staff document mutation handlers and the approved SDR workspace layout remain pinned.",
   "handlers": {
     "handleUpdateProject": "c0e7e1fa32181f552dc7a59f32dff500b2accc9c631bbd7274f42d44d488f870",
     "handleDeleteProject": "c15e427af3b275459793eb6935e6b8becc4365e02788833cadc1e60f524872cb",
@@ -12,7 +12,7 @@
     },
     {
       "path": "src/components/sdr/dashboard/SdrWorkspace.tsx",
-      "sha256": "c32c4d4be31c2644fd7860c741cada0761142c9480ed8a4cc4be80559c59089f"
+      "sha256": "50b12c9c397335cfe6250d52328ca4edb42923056c3a141813ef0e2e5a368ddb"
     }
   ]
 }
