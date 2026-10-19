@@ -12,7 +12,7 @@ export default function LinkedinReview(){
   return()=>{current=false;clearTimeout(timeout);requestVersion.current++}
  },[refresh]);
  const open=async(candidate:LinkedinCandidate)=>{
-  if(draft&&body!==draft.body&&selected?.id!==candidate.id){setDraftError('Save or discard your changes before switching candidates.');return}
+  if(draft&&body!==draft.body){setDraftError('Save or discard your changes before switching candidates.');return}
   const version=++selectionVersion.current;setSelected(candidate);setDraft(null);setBody('');setSaved(false);setDraftError('');setDraftLoading(true);setSaving(false);
   try{const result=await sdrLinkedinApi.draft(candidate.id);if(selectionVersion.current===version&&result.candidate_id===candidate.id){setDraft(result);setBody(result.body)}}
   catch{if(selectionVersion.current===version)setDraftError('No accessible private draft is available. Select the candidate again to retry.')}
