@@ -42,7 +42,7 @@
     },
     {
       "path": "src/components/LeadUpload.tsx",
-      "sha256": "c3920f3b5a409b47d4511e3ea9d7305638c89e0326cc63fea8b30b6ba86b56b3"
+      "sha256": "8e616a80be8f57ffc462c110df40b2dcbfdbeb55a2f0b8518acc5e0d4fbb3694"
     },
     {
       "path": "src/components/LeadImportPreview.tsx",

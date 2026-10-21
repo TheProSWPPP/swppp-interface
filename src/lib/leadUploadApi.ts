@@ -6,9 +6,13 @@ export type LeadImportStatus =
   | "done"
   | "error";
 
+/** Which upload button created a job. null/absent = created before the two buttons existed. */
+export type LeadUploadKind = "bid_sheet" | "project_list";
+
 export interface LeadImportJob {
   id: string;
   filename: string;
+  kind?: LeadUploadKind | null;
   status: LeadImportStatus;
   total_rows: number | null;
   cleaned_rows: number;
@@ -21,6 +25,7 @@ export interface LeadImportJob {
 export interface UploadResult {
   job_id: string;
   status: LeadImportStatus;
+  kind?: LeadUploadKind | null;
   /** Which sheet the server read this as. "unknown" means it was passed through untouched. */
   source?: "cmd" | "bid-aggregator" | "unknown";
   /** Columns renamed onto the canonical shape (aggregator sheet only). */
@@ -29,9 +34,10 @@ export interface UploadResult {
   injected?: string[];
 }
 
-export async function uploadLeadsCsv(file: File): Promise<UploadResult> {
+export async function uploadLeadsCsv(file: File, kind?: LeadUploadKind): Promise<UploadResult> {
   const fd = new FormData();
   fd.append("file", file);
+  if (kind) fd.append("kind", kind);
   const res = await fetch("/api/leads/upload", {
     method: "POST",
     credentials: "include",
@@ -46,7 +52,14 @@ export async function uploadLeadsCsv(file: File): Promise<UploadResult> {
     const text = (await res.text().catch(() => "")).trim();
     // Server error pages come back as HTML — don't dump raw markup at the user.
     const isHtml = text.startsWith("<") || /<html|<!doctype/i.test(text);
-    const clean = !text || isHtml ? "" : text;
+    let clean = !text || isHtml ? "" : text;
+    // The server answers refusals as {"error": "..."}; show the sentence, not the JSON.
+    if (clean.startsWith("{")) {
+      try {
+        const msg = (JSON.parse(clean) as { error?: unknown }).error;
+        if (typeof msg === "string" && msg) clean = msg;
+      } catch { /* not JSON after all; show it as is */ }
+    }
     throw new Error(clean || `Upload failed (${res.status}). Please try again.`);
   }
   return res.json();

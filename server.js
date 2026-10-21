@@ -53,6 +53,7 @@ import { readContactSendDaysAgo } from "./lib/apolloCollision.js";
 import { ownerScope, withLeadLock, leadVisibilityScope, leadVisibleTo } from "./lib/sdrAccess.js";
 import { staleDraftBlock } from "./lib/draftFreshness.js";
 import { normalizeLeadCsv } from "./lib/leadCsvNormalize.js";
+import { readUploadKind, checkUploadKind } from "./lib/leadUploadKind.js";
 import { isCustomerLead, refreshCustomerIndex, customerIndexStats, customerMatch } from "./lib/customerSuppression.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import {registerSdrDraftReplacementRoutes} from './lib/sdrDraftReplacement.js';
@@ -623,6 +624,8 @@ async function initDB() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    // Which upload button created the job ('bid_sheet' | 'project_list'); NULL = older client.
+    await pool.query(`ALTER TABLE lead_import_jobs ADD COLUMN IF NOT EXISTS kind TEXT`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_lead_import_jobs_status ON lead_import_jobs(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_lead_import_jobs_created_at ON lead_import_jobs(created_at DESC)`);
     console.log("Table 'lead_import_jobs' verified/created.");
@@ -6354,33 +6357,39 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
     return res.status(503).json({ error: "Database required for lead imports" });
   }
 
-  let jobId;
-  try {
-    const result = await pool.query(
-      `INSERT INTO lead_import_jobs (filename, uploaded_by, status) VALUES ($1, $2, 'uploaded') RETURNING id`,
-      [req.file.originalname, req.body.uploaded_by || null]
-    );
-    jobId = result.rows[0].id;
-  } catch (err) {
-    fs.unlinkSync(req.file.path);
-    return res.status(500).json({ error: `Job creation failed: ${err.message}` });
-  }
-
+  // Read and normalise first so a wrong-sheet upload is refused before a job row exists.
   let csvBase64, normalized;
   try {
     const fileBuffer = fs.readFileSync(req.file.path);
-    // Map Milo's bid-aggregator headers onto the canonical shape BEFORE n8n parses the file,
-    // so one upload button serves both sheets. A file matching neither shape passes through
-    // byte-identical rather than being guessed at. See lib/leadCsvNormalize.js.
+    // Map Milo's bid-aggregator headers onto the canonical shape BEFORE n8n parses the file.
+    // A file matching neither shape passes through byte-identical rather than being guessed at.
+    // See lib/leadCsvNormalize.js.
     normalized = normalizeLeadCsv(fileBuffer.toString("utf8"));
     csvBase64 = Buffer.from(normalized.csv, "utf8").toString("base64");
-    if (normalized.source !== "cmd") {
-      console.log(
-        `[lead-import] job ${jobId}: source=${normalized.source} renamed=[${normalized.renamed}] injected=[${normalized.injected}]`,
-      );
-    }
   } finally {
     try { fs.unlinkSync(req.file.path); } catch {}
+  }
+
+  // The upload screen has one button per sheet and sends `kind`. No `kind` (older clients)
+  // behaves exactly as before. See lib/leadUploadKind.js.
+  const kind = readUploadKind(req.body?.kind);
+  const kindCheck = checkUploadKind(kind, normalized);
+  if (!kindCheck.ok) return res.status(kindCheck.status).json({ error: kindCheck.error });
+
+  let jobId;
+  try {
+    const result = await pool.query(
+      `INSERT INTO lead_import_jobs (filename, uploaded_by, status, kind) VALUES ($1, $2, 'uploaded', $3) RETURNING id`,
+      [req.file.originalname, req.body.uploaded_by || null, kind]
+    );
+    jobId = result.rows[0].id;
+  } catch (err) {
+    return res.status(500).json({ error: `Job creation failed: ${err.message}` });
+  }
+  if (normalized.source !== "cmd") {
+    console.log(
+      `[lead-import] job ${jobId}: kind=${kind || "none"} source=${normalized.source} renamed=[${normalized.renamed}] injected=[${normalized.injected}]`,
+    );
   }
 
   // Fire n8n webhook async — n8n parses, batches, runs AI abbreviations + Pipedrive create,
@@ -6406,6 +6415,7 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
   res.json({
     job_id: jobId,
     status: "uploaded",
+    kind,
     source: normalized.source,
     renamed: normalized.renamed,
     injected: normalized.injected,
@@ -6448,7 +6458,7 @@ app.get("/api/leads/upload/:job_id/status", async (req, res) => {
   try {
     await reapStuckJobs();
     const result = await pool.query(
-      `SELECT id, filename, status, total_rows, cleaned_rows, uploaded_rows, error_message, created_at, updated_at
+      `SELECT id, filename, kind, status, total_rows, cleaned_rows, uploaded_rows, error_message, created_at, updated_at
        FROM lead_import_jobs WHERE id = $1`,
       [req.params.job_id]
     );
@@ -6478,7 +6488,7 @@ app.get("/api/leads/upload", async (req, res) => {
   try {
     await reapStuckJobs();
     const result = await pool.query(
-      `SELECT id, filename, status, total_rows, cleaned_rows, uploaded_rows, error_message, created_at, updated_at
+      `SELECT id, filename, kind, status, total_rows, cleaned_rows, uploaded_rows, error_message, created_at, updated_at
        FROM lead_import_jobs ORDER BY created_at DESC LIMIT 25`
     );
     res.json(result.rows);
