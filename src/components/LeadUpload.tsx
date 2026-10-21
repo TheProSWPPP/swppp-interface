@@ -8,6 +8,7 @@ import {
   deleteJob,
   type LeadImportJob,
   type LeadImportStatus,
+  type LeadUploadKind,
 } from "../lib/leadUploadApi";
 import LeadImportPreview from "./LeadImportPreview";
 import LeadImportHistory from "./LeadImportHistory";
@@ -31,6 +32,24 @@ const STATUS_COLOR: Record<LeadImportStatus, string> = {
   error: "text-red-700 bg-red-50",
 };
 
+const KIND_LABEL: Record<LeadUploadKind, string> = {
+  bid_sheet: "Bid sheet",
+  project_list: "Project list",
+};
+
+const UPLOAD_ZONES: { kind: LeadUploadKind; title: string; hint: string }[] = [
+  {
+    kind: "project_list",
+    title: "Upload project list",
+    hint: "Monthly CMD project list exported as CSV. Drop it here or click to browse.",
+  },
+  {
+    kind: "bid_sheet",
+    title: "Upload bid sheet",
+    hint: "Estimator's bid tracker (BuildingConnected, ConstructConnect, iSQFT tabs exported as CSV). These contacts never get cold emails.",
+  },
+];
+
 function isTerminal(s: LeadImportStatus) {
   return s === "done" || s === "error";
 }
@@ -53,6 +72,7 @@ export function ProgressRow({ job, onDelete, onOpen, onHistory }: { job: LeadImp
             <div className="font-medium text-slate-900 truncate">{job.filename}</div>
             <div className="text-xs text-slate-500 mt-0.5">
               {new Date(job.created_at).toLocaleString()}
+              {job.kind && KIND_LABEL[job.kind] ? ` · ${KIND_LABEL[job.kind]}` : ""}
             </div>
           </div>
         </div>
@@ -126,10 +146,10 @@ export default function LeadUpload() {
   const [selectedHistoryJob, setSelectedHistoryJob] = useState<LeadImportJob | null>(null);
   const [recent, setRecent] = useState<LeadImportJob[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
+  const [dragOver, setDragOver] = useState<LeadUploadKind | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [mapping, setMapping] = useState<UploadResult | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRefs = useRef<Record<LeadUploadKind, HTMLInputElement | null>>({ project_list: null, bid_sheet: null });
 
   // Restore active job from localStorage on mount (survive tab navigation)
   useEffect(() => {
@@ -176,7 +196,7 @@ export default function LeadUpload() {
     return () => clearInterval(t);
   }, [activeJob, refreshRecent]);
 
-  const startUpload = useCallback(async (file: File) => {
+  const startUpload = useCallback(async (file: File, kind: LeadUploadKind) => {
     setError(null);
     if (!file.name.toLowerCase().endsWith(".csv")) {
       setError("Only CSV files accepted");
@@ -184,7 +204,7 @@ export default function LeadUpload() {
     }
     setIsUploading(true);
     try {
-      const result = await uploadLeadsCsv(file);
+      const result = await uploadLeadsCsv(file, kind);
       setMapping(result.source && result.source !== "cmd" ? result : null);
       const job = await getLeadImportStatus(result.job_id);
       setActiveJob(job);
@@ -196,11 +216,11 @@ export default function LeadUpload() {
     }
   }, [refreshRecent]);
 
-  const onDrop = (e: React.DragEvent) => {
+  const onDrop = (e: React.DragEvent, kind: LeadUploadKind) => {
     e.preventDefault();
-    setDragOver(false);
+    setDragOver(null);
     const file = e.dataTransfer.files[0];
-    if (file) startUpload(file);
+    if (file) startUpload(file, kind);
   };
 
   const handleDelete = useCallback(async (jobId: string) => {
@@ -223,29 +243,40 @@ export default function LeadUpload() {
         </p>
       </div>
 
-      <div
-        onDrop={onDrop}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onClick={() => fileInputRef.current?.click()}
-        className={cn(
-          "border-2 border-dashed rounded-2xl p-12 text-center transition cursor-pointer",
-          dragOver ? "border-brand-500 bg-brand-50" : "border-slate-300 hover:border-slate-400 bg-white",
-          isUploading && "pointer-events-none opacity-60",
-        )}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv"
-          onChange={(e) => e.target.files?.[0] && startUpload(e.target.files[0])}
-          className="hidden"
-        />
-        <Upload className="h-10 w-10 text-slate-400 mx-auto mb-3" />
-        <div className="text-base font-medium text-slate-700">
-          {isUploading ? "Uploading..." : "Drop CSV here or click to browse"}
-        </div>
-
+      <div className="grid gap-4 md:grid-cols-2">
+        {UPLOAD_ZONES.map((zone) => (
+          <div
+            key={zone.kind}
+            data-upload-kind={zone.kind}
+            onDrop={(e) => onDrop(e, zone.kind)}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(zone.kind); }}
+            onDragLeave={() => setDragOver(null)}
+            onClick={() => fileInputRefs.current[zone.kind]?.click()}
+            className={cn(
+              "border-2 border-dashed rounded-2xl p-8 text-center transition cursor-pointer",
+              dragOver === zone.kind ? "border-brand-500 bg-brand-50" : "border-slate-300 hover:border-slate-400 bg-white",
+              isUploading && "pointer-events-none opacity-60",
+            )}
+          >
+            <input
+              ref={(el) => { fileInputRefs.current[zone.kind] = el; }}
+              type="file"
+              accept=".csv"
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) startUpload(file, zone.kind);
+              }}
+              className="hidden"
+            />
+            <Upload className="h-10 w-10 text-slate-400 mx-auto mb-3" />
+            <div className="text-base font-medium text-slate-700">
+              {isUploading ? "Uploading..." : zone.title}
+            </div>
+            <div className="text-sm text-slate-500 mt-1">{zone.hint}</div>
+          </div>
+        ))}
       </div>
 
       {error && (
