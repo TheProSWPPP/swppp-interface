@@ -974,6 +974,7 @@ async function initDB() {
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_verify_status TEXT`);
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_verified_value TEXT`);
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS lead_origin TEXT`);
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS resolved_email TEXT`);
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_flag TEXT`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_sdr_lead_state_email_flag ON sdr_lead_state(email_flag)`);
