@@ -73,6 +73,7 @@ import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
+import { runBidFollowUpClock } from "./lib/bidFollowUpClock.js";
 import * as gmailInbox from "./lib/gmailInbox.js";
 import { dailyCap, rampDay, bounceStepPenalty, mailboxBounceHealth } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
@@ -1422,6 +1423,17 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
   };
   setTimeout(runAuto, 90_000);
   setInterval(runAuto, 60 * 60 * 1000);
+}
+
+// Bid follow-up clock: creates the dated "Bid follow-up" activity on bid-sheet leads; the
+// Bid Invite Follow Up automations in Pipedrive send the emails. Off unless switched on.
+if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.BID_FOLLOWUP_ENABLED === "true") {
+  const runBidClock = () =>
+    runBidFollowUpClock(pool, { pd: pipedriveClient })
+      .then((r) => { if (r.created || r.skipped || r.failed) console.log("[bid-followup]", JSON.stringify(r)); })
+      .catch((e) => console.error("[bid-followup] failed:", e.message));
+  setTimeout(runBidClock, 120_000);
+  setInterval(runBidClock, 60 * 60 * 1000);
 }
 
 // Apollo engagement poll: per-lead replies + bounces fed into /api/sdr/events/ingest.
