@@ -1425,8 +1425,8 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
   setInterval(runAuto, 60 * 60 * 1000);
 }
 
-// Bid follow-up clock: creates the dated "Bid follow-up" activity on bid-sheet leads; the
-// Bid Invite Follow Up automations in Pipedrive send the emails. Off unless switched on.
+// Bid follow-up clock: puts dated "Bid follow-up" tasks, with the email written out, on
+// bid-sheet leads for the lead owner to send by hand. Sends nothing. Off unless switched on.
 if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.BID_FOLLOWUP_ENABLED === "true") {
   const runBidClock = () =>
     runBidFollowUpClock(pool, { pd: pipedriveClient })
