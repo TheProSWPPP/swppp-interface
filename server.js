@@ -74,6 +74,7 @@ import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
 import { runBidFollowUpClock } from "./lib/bidFollowUpClock.js";
+import { runQuietConversationClock, createGeminiQuietDrafter } from "./lib/quietConversationClock.js";
 import * as gmailInbox from "./lib/gmailInbox.js";
 import { dailyCap, rampDay, bounceStepPenalty, mailboxBounceHealth } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
@@ -1434,6 +1435,24 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.B
       .catch((e) => console.error("[bid-followup] failed:", e.message));
   setTimeout(runBidClock, 120_000);
   setInterval(runBidClock, 60 * 60 * 1000);
+}
+
+// Quiet-conversation clock: when a buyer conversation stalls after a real reply, puts a task
+// with a ready-to-send email on the lead for its owner. Sends nothing. Off unless switched on.
+if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.QUIET_FOLLOWUP_ENABLED === "true") {
+  const quietDraft = createGeminiQuietDrafter({ apiKey: GEMINI_API_KEY, model: process.env.QUIET_FOLLOWUP_MODEL || GEMINI_MODEL });
+  const runQuietClock = () =>
+    runQuietConversationClock(pool, {
+      pd: pipedriveClient,
+      getThread: async (mailbox, threadId) => gmailInbox.getThread(await accessTokenForMailbox(mailbox), threadId),
+      draft: quietDraft,
+      appBase: process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app",
+      onlyLeads: String(process.env.QUIET_FOLLOWUP_ONLY_LEADS || "").split(",").map((s) => s.trim()).filter(Boolean),
+    })
+      .then((r) => { if (r.created || r.failed) console.log("[quiet-followup]", JSON.stringify(r)); })
+      .catch((e) => console.error("[quiet-followup] failed:", e.message));
+  setTimeout(runQuietClock, 180_000);
+  setInterval(runQuietClock, 2 * 60 * 60 * 1000);
 }
 
 // Apollo engagement poll: per-lead replies + bounces fed into /api/sdr/events/ingest.
