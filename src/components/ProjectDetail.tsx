@@ -1,6 +1,7 @@
 import {changedProjectFields,reconcileProjectSave,preserveDirtyBaseline,type ProjectSaver} from '../projectPersistence';
 import { useState, useEffect, useRef } from "react";
 import type { Project } from "../data";
+import { finishBeforeStart, formatDueDate } from "../documentQueue";
 import { environmentLookupReview, boundedReviewNote } from '../environmentLookupReview';
 import { prepareRetriggerSave, requestProjectRetrigger, type LookupProvenance } from '../projectRetrigger';
 import {
@@ -531,18 +532,18 @@ export default function ProjectDetail({
     )}
     <div className="bg-white shadow-sm rounded-2xl border border-slate-200 overflow-hidden">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="px-4 py-4 sm:px-6 sm:py-5 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
           <button
             onClick={onBack}
             className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <div>
-            <div className="flex items-center gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               {isPending ? (
-                <div className="relative group/title">
+                <div className="relative min-w-0 max-w-full group/title">
                   <input
                     type="text"
                     value={formData.projectName || ""}
@@ -551,13 +552,13 @@ export default function ProjectDetail({
                     }
                     onBlur={() => onUpdate(formData)}
                     onKeyDown={(e) => e.key === "Enter" && onUpdate(formData)}
-                    className="text-xl font-bold text-slate-900 leading-tight bg-transparent border-none p-0 focus:ring-0 focus:outline-none min-w-[200px]"
+                    className="w-full min-w-0 max-w-full text-xl font-bold text-slate-900 leading-tight bg-transparent border-none p-0 focus:ring-0 focus:outline-none sm:min-w-[200px]"
                   />
                   <Edit2 className="h-3 w-3 text-slate-400 absolute -right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover/title:opacity-100 transition-opacity pointer-events-none" />
                   <div className="absolute bottom-0 left-0 w-full h-px bg-slate-200 scale-x-0 group-hover/title:scale-x-100 transition-transform origin-left" />
                 </div>
               ) : (
-                <h3 className="text-xl font-bold text-slate-900 leading-tight">
+                <h3 className="min-w-0 break-words text-xl font-bold text-slate-900 leading-tight">
                   {project.projectName}
                 </h3>
               )}
@@ -644,12 +645,12 @@ export default function ProjectDetail({
                 )}
               </div>
             </div>
-            <p className="text-sm text-slate-500 flex items-center gap-3 mt-1.5">
-              <span>{project.email}</span>
-              <span className="h-1 w-1 rounded-full bg-slate-300" />
+            <p className="text-sm text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
+              <span className="min-w-0 break-all">{project.email}</span>
+              <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:block" />
               <span className="flex items-center gap-1.5">
                 <Calendar className="h-3.5 w-3.5" />
-                Due {project.dueDate}
+                Due {formatDueDate(project.dueDate)}
               </span>
             </p>
           </div>
@@ -791,8 +792,15 @@ export default function ProjectDetail({
                     onBlur={() => onUpdate(formData)}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     disabled={isApproved}
+                    aria-describedby={finishBeforeStart(formData.projectStartDate, formData.projectFinishDate) ? "finish-before-start" : undefined}
                   />
                 </div>
+                {finishBeforeStart(formData.projectStartDate, formData.projectFinishDate) && (
+                  <p id="finish-before-start" role="status" className="md:col-span-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                    The finish date is before the start date. Check both dates against the plans before generating documents.
+                  </p>
+                )}
                 <div className="md:col-span-2 space-y-3">
                   <label className="text-sm font-medium text-slate-700">
                     Civil Drawings Link (from Web Order)

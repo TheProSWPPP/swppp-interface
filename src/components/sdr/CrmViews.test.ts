@@ -4,7 +4,7 @@ import {expect,it} from 'vitest';
 import CrmFollowUps,{FollowupProjectCard} from './CrmFollowUps';
 import {ReviewProjectCard} from './FollowupReview';
 import CrmLeadHistory from './CrmLeadHistory';
-import {crmPlainText,crmReadableEvidence,crmFollowupUnavailableMessage} from './crmViewState';
+import {crmPlainText,crmReadableEvidence,crmFollowupUnavailableMessage,shouldRetryFollowupRead,activitySyncLabel,replyCoverageLabel} from './crmViewState';
 import type {CrmObservations} from '../../lib/sdrCrmApi';
 import type {CrmFollowUp,FollowupReviewProject} from '../../lib/sdrCrmApi';
 it('shows loading and explains observation coverage without claiming an outreach gate',()=>{
@@ -59,4 +59,21 @@ it('renders bounded recent CRM record evidence without inferring manual calls or
  expect(html).toContain('note-2');expect(html).toContain('call-2');
  expect(html).not.toContain('update_time');
  expect(html).not.toMatch(/manual call|called at|quote sent/i);
+});
+
+it('retries only the first follow-up page, only once, and only when the server is busy',()=>{
+ expect(shouldRetryFollowupRead(null,503,false)).toBe(true);
+ expect(shouldRetryFollowupRead(null,503,true)).toBe(false);
+ expect(shouldRetryFollowupRead('v2:abc',503,false)).toBe(false);
+ for(const status of [400,401,403,409,500,undefined])expect(shouldRetryFollowupRead(null,status,false)).toBe(false);
+});
+it('describes Pipedrive task sync and inbox reply coverage in plain words',()=>{
+ expect(activitySyncLabel('complete')).toBe('up to date');
+ expect(activitySyncLabel('partial')).toMatch(/some tasks may be missing/);
+ expect(activitySyncLabel('error')).toMatch(/sync failed/);
+ expect(activitySyncLabel(undefined,true)).toBe('checking…');
+ expect(activitySyncLabel(undefined,false)).toBe('not checked yet');
+ expect(activitySyncLabel('unknown')).not.toContain('unknown');
+ expect(replyCoverageLabel('partial')).toBe('partly checked');
+ expect(replyCoverageLabel('unknown')).toBe('not checked yet');
 });

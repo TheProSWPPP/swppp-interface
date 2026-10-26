@@ -137,9 +137,8 @@ export default function TeamView({ pushToast }: { pushToast: Toast }) {
           </span>
         ) : (
           <span>
-            Password login is <strong>off</strong> (<code className="text-xs">REQUIRE_PASSWORD</code> unset). Anyone who
-            gets past the dashboard wall can pick any name. Set a password for every active person here first, then have
-            Ivan set <code className="text-xs">REQUIRE_PASSWORD=1</code> in Railway.
+            Password login is <strong>off</strong>. Anyone who gets past the site login can pick any name here. Set a
+            password for every active person below, then ask Ivan to switch password login on.
           </span>
         )}
       </div>
@@ -256,7 +255,7 @@ function UserCard({
           </div>
           <div className="mt-0.5 text-xs text-slate-500">
             {user.username} · {user.email}
-            {user.last_login_at && ` · last seen ${new Date(user.last_login_at).toLocaleDateString()}`}
+            {user.last_login_at && ` · last seen ${new Date(user.last_login_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" })}`}
           </div>
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
@@ -395,7 +394,7 @@ function MailboxRow({
       </div>
       <div className="mt-2 flex flex-wrap items-end gap-3">
         <label className="text-xs text-slate-500">
-          <span className="block mb-1">Pipedrive sender id</span>
+          <span className="block mb-1" title="Their Pipedrive user number. Without it, replies to this mailbox are filed under Derek.">Pipedrive user number</span>
           <input
             value={senderId}
             onChange={(e) => setSenderId(e.target.value.replace(/[^0-9]/g, ""))}
@@ -404,7 +403,7 @@ function MailboxRow({
           />
         </label>
         <label className="text-xs text-slate-500">
-          <span className="block mb-1">Permit daily cap</span>
+          <span className="block mb-1" title="Most permit renewal emails this mailbox sends per day">Permit emails per day</span>
           <input
             value={cap}
             onChange={(e) => setCap(e.target.value.replace(/[^0-9]/g, ""))}
@@ -586,7 +585,7 @@ function NewMailboxModal({
             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
           />
         </Field>
-        <Field label="Pipedrive sender id" hint="Their Pipedrive user id — without it, their replies file under Derek">
+        <Field label="Pipedrive user number" hint="Their Pipedrive user number. Without it, their replies are filed under Derek">
           <input
             value={senderId}
             onChange={(e) => setSenderId(e.target.value.replace(/[^0-9]/g, ""))}
@@ -594,7 +593,7 @@ function NewMailboxModal({
             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
           />
         </Field>
-        <Field label="Permit daily cap" hint="Matches the other mailboxes at 20">
+        <Field label="Permit emails per day" hint="Most permit renewal emails this mailbox sends per day. The others use 20">
           <input
             value={cap}
             onChange={(e) => setCap(e.target.value.replace(/[^0-9]/g, ""))}

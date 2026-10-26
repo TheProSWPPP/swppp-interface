@@ -18,7 +18,7 @@ import LivePerformance from './LivePerformance';
 import type { SdrLiveOverview } from '../../../lib/sdrLiveOverviewApi';
 import type {ReplyContext} from '../../../lib/sdrOperationsApi';
 import {runLatestRead} from '../../../lib/sdrReadRequest';
-import { defaultWindow,comparisonWindow,snapshotLabel,cohortMaturity,shiftDate,metricText,metricExplanation,unavailable,type MetricFormat } from './metricDisplay';
+import { defaultWindow,comparisonWindow,snapshotLabel,cohortMaturity,shiftDate,metricText,metricExplanation,unavailable,defaultMonthPeriod,neverCalculated,type MetricFormat } from './metricDisplay';
 
 type Tile={key:MetricKey;label:string;format?:MetricFormat;detail:string;icon?:LucideIcon};
 const primary:Tile[]=[
@@ -60,8 +60,9 @@ function Section({title,children,detailRef}:{title:string;children:ReactNode;det
 export default function SdrDashboard({user,onNavigate,onOpenReplies,mailboxes=[]}:{user:SdrUser;onNavigate:(target:string)=>void;onOpenReplies?:(context:ReplyContext)=>void;mailboxes?:Array<{email:string;display_name:string|null}>}) {
   const reduced=useReducedMotion();
   const tabsId=useId();
-  const [query,setQuery]=useState<MetricsQuery>(()=>monthWindow(defaultWindow().to,3));
-  const [period,setPeriod]=useState('3months');
+  // Opens on this month so far (complete days), so the current month is never left out by default.
+  const [query,setQuery]=useState<MetricsQuery>(()=>defaultMonthPeriod().window);
+  const [period,setPeriod]=useState<string>(()=>defaultMonthPeriod().period);
   const [custom,setCustom]=useState(()=>({from:query.from,through:shiftDate(query.to,-1)}));
   const [compare,setCompare]=useState(false);
   const monthUnavailable=defaultWindow().to.endsWith('-01');
@@ -121,7 +122,7 @@ export default function SdrDashboard({user,onNavigate,onOpenReplies,mailboxes=[]
           if(value.endsWith('months')){update({...query,...monthWindow(current.to,Number(value.replace('months','')))});return;}
           if(value==='lastmonth'){const to=current.to.slice(0,8)+'01';const from=shiftDate(to,-1).slice(0,8)+'01';update({...query,from,to});return;}
           update({...query,from:value==='month'?current.to.slice(0,8)+'01':shiftDate(current.to,-Number(value)),to:current.to});
-        }}><option value="30">Last 30 complete days</option><option value="7">Last 7 complete days</option><option value="month" disabled={monthUnavailable}>{monthUnavailable?'This month: no complete days yet':'This month, complete days'}</option><option value="lastmonth">Last month</option><option value="3months">Last 3 complete months</option><option value="custom">Custom dates</option></select></label>
+        }}><option value="month" disabled={monthUnavailable}>{monthUnavailable?'This month: no full days yet':'This month (through yesterday)'}</option><option value="30">Last 30 complete days</option><option value="7">Last 7 complete days</option><option value="lastmonth">Last month</option><option value="3months">Last 3 complete months</option><option value="custom">Custom dates</option></select></label>
         <label className="text-xs font-medium text-slate-600">Sender<select className={field} value={query.mailbox||''} onChange={event=>update({...query,mailbox:event.target.value||undefined})}>
           <option value="">{user.role==='admin'?'All senders':'My senders'}</option>{senderOptions.map(mailbox=><option key={mailbox} value={mailbox}>{names[mailbox]||mailbox} ({mailbox})</option>)}
         </select></label>
@@ -158,13 +159,13 @@ export default function SdrDashboard({user,onNavigate,onOpenReplies,mailboxes=[]
     {workspace && <Section title="Sequence activity and setup"><LivePerformance workspaceOnly data={workspace} metrics={data} metricWindow={snapshot?.query||query} metricsStale={hasStaleValues} metricsError={error} onRefresh={refresh} onViewPerformance={()=>filtersRef.current?.scrollIntoView({block:'start',behavior:'auto'})}/></Section>}
     {data && <>
       <Section title="SDR-linked sales"><p className="sdr-timeline-note">Deals linked to outreach by recorded project evidence. A link does not establish that outreach caused the sale. Company-wide totals are in Sales.</p><div className="sdr-linked-metrics">{tiles(pipeline.filter(tile=>data.metrics[tile.key]?.state!=='unavailable'))}</div>{data.metrics.won_deals.state!=='available'&&<p className="sdr-timeline-note">Sales attribution is incomplete.</p>}</Section>
-      <Section title="Contacted projects and payments"><div className="grid gap-4 p-4 sm:grid-cols-2">{tiles([{key:'contact_to_win_rate',label:'Contacted projects won',format:'rate',detail:'Verified won projects / contacted projects, with 60 days to mature.'},{key:'collected_value',label:'Collected payments',format:'currency',detail:'Requires verified accounting records.'}])}</div></Section>
+      <Section title="Contacted projects and payments"><div className="grid gap-4 p-4 sm:grid-cols-2">{tiles(([{key:'contact_to_win_rate',label:'Contacted projects won',format:'rate',detail:'Verified won projects / contacted projects, with 60 days to mature.'},{key:'collected_value',label:'Collected payments',format:'currency',detail:'Requires verified accounting records.'}] as Tile[]).filter(tile=>!neverCalculated(data.metrics[tile.key])))}</div></Section>
       <Section title="Sending and reply details"><OutreachActivity data={data} onNavigate={onNavigate}/></Section>
 
       <Section title="Data details" detailRef={reportingRef}><div className="space-y-3 p-4 text-sm text-slate-600">
         <p>Last collected: {data.freshness.last_observed_at?new Date(data.freshness.last_observed_at).toLocaleString('en-US',{timeZone:'America/Chicago'})+' CT':'Unknown'}. Full collection: {data.freshness.last_complete_at||'Incomplete'}.</p>
         {data.test_data&&<p>{data.test_data.excluded_messages} marked test emails excluded. {data.test_data.unreviewed_messages} emails have no individual test review.</p>}
-        <dl className="sdr-sales-evidence">{[...primary.slice(1),...operations.slice(3),...delivery].filter(tile=>data.metrics[tile.key]?.state!=='available').map(tile=><div key={tile.key}><dt>{tile.label}</dt><dd>{data.metrics[tile.key]?.value!=null&&<strong>{metricText(data.metrics[tile.key],tile.format||'count')} · {data.metrics[tile.key].state==='partial'?'Partial data':''}. </strong>}{metricExplanation(data.metrics[tile.key])}</dd></div>)}</dl>
+        <dl className="sdr-sales-evidence">{[...primary.slice(1),...operations.slice(3),...delivery].filter(tile=>data.metrics[tile.key]?.state!=='available'&&!neverCalculated(data.metrics[tile.key])).map(tile=><div key={tile.key}><dt>{tile.label}</dt><dd>{data.metrics[tile.key]?.value!=null&&<strong>{metricText(data.metrics[tile.key],tile.format||'count')} · {data.metrics[tile.key].state==='partial'?'Partial data':''}. </strong>}{metricExplanation(data.metrics[tile.key])}</dd></div>)}</dl>
         <dl className="sdr-sales-evidence">{[{key:'won_booked_value',label:'SDR-linked revenue',format:'currency'},...pipeline.filter(tile=>tile.key!=='won_booked_value'&&data.metrics[tile.key]?.state==='unavailable')].map(tile=><div key={tile.key}><dt>{tile.label}</dt><dd>{metricText(data.metrics[tile.key as MetricKey],(tile.format||'count') as MetricFormat)}. {metricExplanation(data.metrics[tile.key as MetricKey])}</dd></div>)}</dl>
         {Object.entries(data.coverage).map(([key,metric])=><p key={key}><strong className="font-medium text-slate-900">{{provider_messages:'Message history',project_links:'Project links',deal_links:'Linked deal values',reply_links:'Reply links'}[key]}: {metricText(metric,'rate')}</strong><br/>{metricExplanation(metric)}</p>)}
         <p>Unknown source stays unknown. Sales and reply links need message, thread or project evidence. Existing leads and inbox records can be reviewed below; unresolved links are not counted as confirmed sales.</p>

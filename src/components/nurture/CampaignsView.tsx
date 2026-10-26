@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Send } from "lucide-react";
-import { brevoUrl, campaignOpenRate, campaignRate, formatNurtureDate, isAdmin, nurtureApi, type NurtureAccount, type NurtureCampaign, type NurtureList } from "../../lib/nurtureApi";
+import { brevoUrl, campaignOpenRate, campaignRate, formatNurtureDate, isAdmin, readableSubject, nurtureApi, type NurtureAccount, type NurtureCampaign, type NurtureList } from "../../lib/nurtureApi";
 import { cn } from "../../utils";
 
 type Toast = (kind: "success" | "error", text: string) => void;
@@ -101,7 +101,7 @@ function CampaignRow({ c, admin, lists, busy, expanded, onToggle, setBusy, reloa
         <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full", STATUS_COLORS[c.status] || "bg-slate-100 text-slate-600")}>{c.status}</span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-slate-900 truncate">{c.name}</div>
-          <div className="text-xs text-slate-500 truncate">{c.subject || "(no subject)"} · {c.status === "sent" ? `sent ${formatNurtureDate(c.sentDate)}` : c.scheduledAt ? `scheduled ${formatNurtureDate(c.scheduledAt)}` : "draft"}</div>
+          <div className="text-xs text-slate-500 truncate" title={c.subject || undefined}>{readableSubject(c.subject) || "(no subject)"} · {c.status === "sent" ? `sent ${formatNurtureDate(c.sentDate)}` : c.scheduledAt ? `scheduled ${formatNurtureDate(c.scheduledAt)}` : "draft"}</div>
         </div>
         {c.status === "sent" && (
           <div className="hidden sm:flex items-center gap-4 text-xs text-slate-600">

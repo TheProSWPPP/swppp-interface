@@ -16,8 +16,10 @@ import {
   AlertTriangle,
   Map,
   Sparkles,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "../utils";
+import { websiteCheckMessage } from "./aiContentSync";
 
 interface Stats {
   queued: number;
@@ -71,14 +73,12 @@ export default function AIContent() {
     }
   }, [selectedItem]);
 
+  // Opening the page only reads. Checking the website writes to the library, so it runs
+  // only when someone presses "Check website for changes" (it used to run on every open
+  // and every 5 minutes while the page was open).
   useEffect(() => {
-    fetchData().then(() => {
-      // Sync from WP on load — catches new publishes, status changes, trashed posts
-      handleImportWP();
-    });
-    // Re-sync every 5 minutes to catch WP changes
-    const syncInterval = setInterval(handleImportWP, 5 * 60 * 1000);
-    return () => clearInterval(syncInterval);
+    fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -88,12 +88,20 @@ export default function AIContent() {
     return () => clearInterval(interval);
   }, [items, fetchData]);
 
+  const [syncing, setSyncing] = useState(false);
   const handleImportWP = async () => {
+    setSyncing(true);
     try {
-      await fetch("/api/ai-content/import-wp", { method: "POST", credentials: "include" });
+      const res = await fetch("/api/ai-content/import-wp", { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = (await res.json().catch(() => null)) as { imported?: number; trashed?: number } | null;
       await fetchData();
+      push("success", websiteCheckMessage(result));
     } catch (err) {
       console.error("WP sync failed:", err);
+      push("error", "Couldn't check the website right now. Please try again.");
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -324,7 +332,7 @@ export default function AIContent() {
       </div>
 
       {/* View Toggle + Actions */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
           <button
             onClick={() => { setViewMode("states"); setStatusFilter(""); }}
@@ -359,6 +367,15 @@ export default function AIContent() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleImportWP}
+            disabled={syncing}
+            title="Looks for articles published, changed or removed on proswppp.com and updates this list"
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+          >
+            <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
+            {syncing ? "Checking website…" : "Check website for changes"}
+          </button>
           {statusFilter && (
             <button
               onClick={() => setStatusFilter("")}

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { X, Phone, Mail } from "lucide-react";
 import {
   getOperatorDetail,
+  permitDate,
   logOutreach,
   type OperatorDetail,
   type OperatorRow,
@@ -279,7 +280,7 @@ export default function OperatorDrawer({ operatorKey, onClose, onChanged, pushTo
                       </span>
                       <div className="flex items-center gap-2 text-slate-500">
                         <span>{p.status}</span>
-                        <span>{p.expiration_date || "—"}</span>
+                        <span>{permitDate(p.expiration_date)}</span>
                       </div>
                     </div>
                   ))}

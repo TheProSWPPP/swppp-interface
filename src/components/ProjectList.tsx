@@ -1,4 +1,16 @@
 import { useState } from "react";
+import {
+  DOCUMENT_GROUPS,
+  DOCUMENT_PAGE_SIZE,
+  countDocumentGroups,
+  documentGroup,
+  documentStatusLabel,
+  dueState,
+  formatDay,
+  formatDueDate,
+  visibleSlice,
+  type DocumentGroup,
+} from "../documentQueue";
 import type { Project } from "../data";
 import {
   Calendar,
@@ -15,8 +27,9 @@ import {
   Search,
   X,
   Inbox,
+  CheckCircle2,
 } from "lucide-react";
-import { cn, formatDate } from "../utils";
+import { cn } from "../utils";
 import { getTemplateName } from "../templates";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -27,15 +40,18 @@ interface ProjectListProps {
   onBulkDeleteProjects: (projectIds: string[]) => void;
 }
 
-const statusColors: Record<string, string> = {
-  Processing: "bg-blue-50 text-blue-700 border-blue-200",
-  "Pending Review": "bg-amber-50 text-amber-700 border-amber-200",
-  Complete: "bg-green-50 text-green-700 border-green-200",
-  "Approved for Generation": "bg-brand-50 text-brand-700 border-brand-200",
-  Ready: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  New: "bg-slate-100 text-slate-700 border-slate-200",
-  "Manual Processing": "bg-orange-50 text-orange-700 border-orange-200",
-  "": "bg-slate-50 text-slate-600 border-slate-200",
+const groupColors: Record<DocumentGroup, string> = {
+  new: "bg-slate-100 text-slate-700 border-slate-200",
+  review: "bg-amber-50 text-amber-700 border-amber-200",
+  progress: "bg-blue-50 text-blue-700 border-blue-200",
+  ready: "bg-emerald-50 text-emerald-700 border-emerald-200",
+};
+
+const groupTiles: Record<DocumentGroup, { icon: typeof Inbox; tone: string }> = {
+  new: { icon: Inbox, tone: "bg-blue-50 text-blue-600" },
+  review: { icon: AlertCircle, tone: "bg-amber-50 text-amber-600" },
+  progress: { icon: Clock, tone: "bg-brand-50 text-brand-600" },
+  ready: { icon: CheckCircle2, tone: "bg-green-50 text-green-600" },
 };
 
 export default function ProjectList({
@@ -46,7 +62,13 @@ export default function ProjectList({
 }: ProjectListProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilterState] = useState<"all" | DocumentGroup>("all");
+  const [shown, setShown] = useState(DOCUMENT_PAGE_SIZE);
+  const setStatusFilter = (value: "all" | DocumentGroup) => {
+    setStatusFilterState(value);
+    setShown(DOCUMENT_PAGE_SIZE);
+  };
+  const groupCounts = countDocumentGroups(projects);
   const [pendingDelete, setPendingDelete] = useState<
     | { kind: "single"; id: string; label: string }
     | { kind: "bulk"; count: number }
@@ -72,9 +94,11 @@ export default function ProjectList({
       p.email.toLowerCase().includes(q) ||
       (p.companyName || "").toLowerCase().includes(q) ||
       (p.projectAddress || "").toLowerCase().includes(q);
-    const matchesStatus = statusFilter === "all" || p.status === statusFilter;
+    const matchesStatus = statusFilter === "all" || documentGroup(p.status) === statusFilter;
     return matchesSearch && matchesStatus;
   });
+  // Render one page at a time: rendering all ~600 cards made the page 136,000px tall.
+  const page = visibleSlice(filtered, shown);
 
   const toggleSelect = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -89,7 +113,32 @@ export default function ProjectList({
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="workspace-status-strip grid grid-cols-2 gap-4 lg:grid-cols-4" role="group" aria-label="Filter projects by status">
+        {DOCUMENT_GROUPS.map(({ key, label }) => {
+          const { icon: Icon, tone } = groupTiles[key];
+          const active = statusFilter === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setStatusFilter(active ? "all" : key)}
+              title={active ? "Show all projects" : `Show only: ${label.toLowerCase()}`}
+              className="min-w-0 bg-white overflow-hidden rounded-xl border border-gray-200 shadow-sm p-5 flex items-center gap-4 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
+            >
+              <div className={cn("h-12 w-12 flex-shrink-0 rounded-lg flex items-center justify-center", tone)}>
+                <Icon className="h-6 w-6" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-500">{label}</p>
+                <p className="text-2xl font-semibold text-gray-900">{groupCounts[key]}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-2xl font-bold text-slate-900 tracking-tight">
             Project Queue
@@ -128,14 +177,14 @@ export default function ProjectList({
       </div>
 
       {/* Search + Filter bar */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
           <input
             type="text"
             placeholder="Search by name, email, company, address…"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => { setSearchQuery(e.target.value); setShown(DOCUMENT_PAGE_SIZE); }}
             className="w-full pl-10 pr-9 py-2.5 text-sm bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent placeholder:text-slate-400"
           />
           {searchQuery && (
@@ -150,17 +199,16 @@ export default function ProjectList({
         </div>
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => setStatusFilter(e.target.value as "all" | DocumentGroup)}
+          aria-label="Filter projects by status"
           className="text-sm bg-white border border-slate-200 rounded-xl px-3 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-700 font-medium"
         >
-          <option value="all">All Statuses</option>
-          <option value="New">New</option>
-          <option value="Pending Review">Pending Review</option>
-          <option value="Processing">Processing</option>
-          <option value="Manual Processing">Manual Processing</option>
-          <option value="Approved for Generation">Approved for Generation</option>
-          <option value="Complete">Complete</option>
-          <option value="Ready">Ready</option>
+          <option value="all">All statuses ({projects.length})</option>
+          {DOCUMENT_GROUPS.map(({ key, label }) => (
+            <option key={key} value={key}>
+              {label} ({groupCounts[key]})
+            </option>
+          ))}
         </select>
         {(searchQuery || statusFilter !== "all") && (
           <span className="text-sm text-slate-500 whitespace-nowrap">
@@ -196,9 +244,8 @@ export default function ProjectList({
 
       <div className="grid grid-cols-1 gap-4">
         <AnimatePresence mode="popLayout">
-          {filtered.map((project) => (
+          {page.items.map((project) => (
             <motion.div
-              layout
               key={project.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -211,9 +258,9 @@ export default function ProjectList({
                   : "border-slate-200 shadow-sm hover:shadow-xl hover:shadow-brand-500/5 hover:-translate-y-0.5"
               )}
             >
-              <div className="bg-white rounded-[1.4rem] p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-5">
+              <div className="bg-white rounded-[1.4rem] p-4 sm:p-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3 sm:gap-5">
                     <div className="flex-shrink-0 relative group/check">
                       <div
                         onClick={(e) => toggleSelect(project.id, e)}
@@ -226,13 +273,13 @@ export default function ProjectList({
                       >
                         <CheckCircle className="h-3.5 w-3.5" />
                       </div>
-                      <div className="h-14 w-14 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-600 font-black text-lg border border-slate-100 group-hover:bg-brand-600 group-hover:text-white group-hover:border-brand-600 transition-all duration-300 shadow-inner">
+                      <div className="h-11 w-11 sm:h-14 sm:w-14 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-600 font-black text-lg border border-slate-100 group-hover:bg-brand-600 group-hover:text-white group-hover:border-brand-600 transition-all duration-300 shadow-inner">
                         {project.projectName.substring(0, 2).toUpperCase()}
                       </div>
                     </div>
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <h4 className="text-lg font-bold text-slate-900 group-hover:text-brand-600 transition-colors leading-snug">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                        <h4 className="min-w-0 break-words text-lg font-bold text-slate-900 group-hover:text-brand-600 transition-colors leading-snug">
                           {project.projectName}
                         </h4>
                         {project["24hrTurnaround"] === "yes" && (
@@ -260,20 +307,20 @@ export default function ProjectList({
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-3 mt-2">
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-2">
                         <span
                           className={cn(
                             "inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wider border",
-                            statusColors[project.status] || statusColors[""]
+                            groupColors[documentGroup(project.status)]
                           )}
                         >
-                          {project.status || "Draft"}
+                          {documentStatusLabel(project.status)}
                         </span>
                         {new Date().getTime() -
                           new Date(project.dateReceived).getTime() <
                           24 * 60 * 60 * 1000 && (
                           <span className="inline-flex items-center rounded-full bg-blue-600 px-2.5 py-0.5 text-[10px] font-black text-white uppercase tracking-widest shadow-sm shadow-blue-200">
-                            New
+                            Received today
                           </span>
                         )}
                         {(project.stateTemplateId ||
@@ -290,7 +337,7 @@ export default function ProjectList({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -305,19 +352,19 @@ export default function ProjectList({
                     >
                       <Trash2 className="h-5 w-5" />
                     </button>
-                    <div className="p-2 text-slate-300 group-hover:text-brand-500 transition-colors">
+                    <div className="hidden p-2 text-slate-300 group-hover:text-brand-500 transition-colors sm:block">
                       <ChevronRight className="h-6 w-6" />
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-8 pt-6 border-t border-slate-50 flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-8">
-                    <div className="flex items-center gap-2.5 text-slate-500 group-hover:text-slate-700 transition-colors">
+                <div className="mt-5 pt-4 sm:mt-8 sm:pt-6 border-t border-slate-50 flex flex-wrap items-center justify-between gap-3 text-sm">
+                  <div className="flex min-w-0 items-center gap-8">
+                    <div className="flex min-w-0 items-center gap-2.5 text-slate-500 group-hover:text-slate-700 transition-colors">
                       <div className="p-1.5 rounded-lg bg-slate-50 border border-slate-100 group-hover:bg-white transition-colors">
                         <AlertCircle className="h-4 w-4" />
                       </div>
-                      <span className="font-medium tracking-tight">
+                      <span className="min-w-0 break-all font-medium tracking-tight">
                         {project.email}
                       </span>
                     </div>
@@ -327,16 +374,13 @@ export default function ProjectList({
                         <Calendar className="h-4 w-4" />
                       </div>
                       <span className="font-medium tracking-tight">
-                        {formatDate(project.dateReceived)}
+                        Received {formatDay(project.dateReceived)}
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    {new Date(project.dueDate).toDateString() ===
-                      new Date(
-                        new Date().getTime() + 24 * 60 * 60 * 1000
-                      ).toDateString() && (
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                    {dueState(project.dueDate) === "tomorrow" && (
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-[11px] font-black text-red-700 border border-red-200 uppercase tracking-tighter shadow-sm animate-pulse">
                         <Clock className="h-3 w-3" />
                         Tomorrow
@@ -345,14 +389,14 @@ export default function ProjectList({
                     <div
                       className={cn(
                         "p-2 rounded-2xl border transition-all duration-300 flex items-center gap-2.5 px-4",
-                        new Date(project.dueDate) < new Date()
+                        dueState(project.dueDate) === "overdue"
                           ? "bg-red-50 border-red-100 text-red-700 shadow-sm shadow-red-100"
                           : "bg-slate-50 border-slate-100 text-slate-600"
                       )}
                     >
                       <Clock className="h-4 w-4" />
-                      <span className="font-bold tracking-tight text-xs uppercase">
-                        Due {project.dueDate}
+                      <span className="font-bold tracking-tight text-xs">
+                        Due {formatDueDate(project.dueDate)}
                       </span>
                     </div>
                   </div>
@@ -362,6 +406,21 @@ export default function ProjectList({
           ))}
         </AnimatePresence>
       </div>
+
+      {page.remaining > 0 && (
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-sm text-slate-500">
+            Showing {page.items.length} of {filtered.length} projects
+          </p>
+          <button
+            type="button"
+            onClick={() => setShown((n) => n + DOCUMENT_PAGE_SIZE)}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+          >
+            Show {Math.min(DOCUMENT_PAGE_SIZE, page.remaining)} more
+          </button>
+        </div>
+      )}
 
       <AnimatePresence>
         {pendingDelete && (

@@ -156,3 +156,12 @@ export async function deleteJob(jobId: string): Promise<{ ok: boolean }> {
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
   return res.json();
 }
+
+// "1425 / 1454" on a finished import needs a reason next to it: the gap is rows that were
+// left out (rejected while cleaning or not approved), which the recorded-rows view lists.
+export function notUploadedNote(job: Pick<LeadImportJob, "status" | "total_rows" | "uploaded_rows">): string | null {
+  if (job.status !== "done" || job.total_rows == null) return null;
+  const missing = job.total_rows - job.uploaded_rows;
+  if (missing <= 0) return null;
+  return `${missing.toLocaleString("en-US")} ${missing === 1 ? "row was" : "rows were"} left out and not sent to Pipedrive. Open “View recorded rows” and choose Rejected to see which.`;
+}

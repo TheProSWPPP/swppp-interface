@@ -61,6 +61,24 @@ export function defaultWindow(now=new Date()):{from:string;to:string} {
   return {from:shiftDate(to,-30),to};
 }
 
+// This month's complete days (1st through yesterday, Chicago). Null on the 1st, when no day is complete yet.
+export function monthToDateWindow(today=defaultWindow().to):{from:string;to:string}|null {
+  const from=today.slice(0,8)+'01';
+  return from<today?{from,to:today}:null;
+}
+// Default reporting period: the current month whenever it has a complete day, otherwise last month.
+export function defaultMonthPeriod(today=defaultWindow().to):{period:'month'|'lastmonth';window:{from:string;to:string}} {
+  const month=monthToDateWindow(today);
+  if(month) return {period:'month',window:month};
+  return {period:'lastmonth',window:{from:shiftDate(today,-1).slice(0,8)+'01',to:today.slice(0,8)+'01'}};
+}
+// Metrics the reporting service never calculates today (no tracking, accounting or review source is
+// connected). They always come back unavailable, so the dashboard hides them instead of showing blanks.
+export const NEVER_CALCULATED_REASONS=new Set(['open_tracking_unverified','spam_placement_unverified','due_step_receipts_missing','duplicate_review_missing','accounting_not_connected','crm_reconciliation_needed']);
+export function neverCalculated(metric:Metric|undefined):boolean {
+  return !!metric&&metric.state==='unavailable'&&NEVER_CALCULATED_REASONS.has(metric.reason||'');
+}
+
 export function snapshotLabel(query:MetricsQuery,sequenceName?:string):string {
   return `${query.from} through ${shiftDate(query.to,-1)} • ${query.mailbox||'All visible senders'} • ${query.source||'All sources'} • ${query.sequence?(sequenceName||'Selected sequence'):'All sequences'} • Chicago time`;
 }

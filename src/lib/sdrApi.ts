@@ -38,7 +38,11 @@ export interface SdrMailbox {
   signature_html: string | null;
   created_at: string;
   updated_at: string;
+  // New contacts the app started in a sequence today (what the daily cap limits).
   sent_today: number;
+  // Emails Apollo delivered from this mailbox today / in 14 days, same source as the Dashboard feed.
+  delivered_today?: number;
+  delivered_14d?: number;
   daily_cap: number;
   warmup_day: number;
   // Trailing 14-day bounce health. A mailbox over 4% is held a rung back on the ramp.
@@ -410,6 +414,10 @@ export function clearSession(): void {
   window.dispatchEvent(new Event("sdr-session-changed"));
 }
 
+// Per-mailbox read state. "stale" = Google rate-limited the read and the last good copy is shown.
+export type InboxMailboxCoverage = { mailbox: string; status: "complete" | "limited" | "stale" | "error" | "disconnected" | string; checkedAt?: string | null; issue?: "google_limit" | "read_failed" | null; retryAt?: string | null };
+export type InboxCoverage = { complete: boolean; mailboxes: InboxMailboxCoverage[] };
+
 export async function sdrFetch<T>(path: string, opts: RequestInit & { auth?: boolean } = {}): Promise<T> {
   const { auth = true, headers, ...rest } = opts;
   const h: Record<string, string> = {
@@ -531,11 +539,12 @@ export const sdrApi = {
     if (mailbox) p.set("mailbox", mailbox);
     if (q) p.set("q", q);
     const qs = p.toString();
-    return sdrFetch<{ mailbox: string | null; threads: SdrInboxThread[]; note?: string; coverage?: {complete: boolean; mailboxes: {mailbox: string; status: string}[]} }>(
+    return sdrFetch<{ mailbox: string | null; threads: SdrInboxThread[]; note?: string; coverage?: InboxCoverage }>(
       `/api/sdr/inbox/threads${qs ? `?${qs}` : ""}`,
     );
   },
-  getInboxOverview: () =>
+  // fresh=true (the Refresh button) skips the server's 30-second shared copy; it never skips a Google rate-limit pause.
+  getInboxOverview: (fresh = false) =>
     sdrFetch<{
       threads: (SdrInboxThread & {
         mailbox: string;
@@ -548,8 +557,8 @@ export const sdrApi = {
         permit?: { operator_key: string; contact_name: string | null };
       })[];
       mailboxes: string[];
-      coverage: {complete: boolean; mailboxes: {mailbox: string; status: string}[]};
-    }>("/api/sdr/inbox/overview"),
+      coverage: InboxCoverage;
+    }>(`/api/sdr/inbox/overview${fresh ? "?fresh=1" : ""}`),
   getInboxThread: (id: string, mailbox?: string) =>
     sdrFetch<{ mailbox: string; id: string; messages: SdrInboxMessage[] }>(
       `/api/sdr/inbox/threads/${id}${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ""}`,
