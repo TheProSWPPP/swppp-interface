@@ -76,6 +76,7 @@ import { syncLeadState } from "./lib/pipedriveSync.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
 import { runBidFollowUpClock } from "./lib/bidFollowUpClock.js";
 import { runQuietConversationClock, createGeminiQuietDrafter } from "./lib/quietConversationClock.js";
+import { readFollowupOutcomes } from "./lib/followupOutcomeReadout.js";
 import * as gmailInbox from "./lib/gmailInbox.js";
 import { dailyCap, rampDay, bounceStepPenalty, mailboxBounceHealth } from "./lib/sendRamp.js";
 import { pollEngagement } from "./lib/apolloEngagementPoll.js";
@@ -2984,9 +2985,21 @@ app.post("/api/sdr/inbox/threads/:id/compose", express.json({ limit: "4mb" }), a
   }
 });
 
-// Resolve a lead to its inbox thread by searching the lead's sending mailbox for the
-// contact's address. The lead drawer's "View reply" uses this so it works for ANY reply,
-// not only ones still in the recent-inbox window the overview scans.
+// Weekly outcomes of the quiet-conversation and bid follow-up tasks. Read-only, admin only.
+app.get("/api/sdr/followups/outcomes", async (req, res) => {
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  res.set("Cache-Control", "no-store");
+  try {
+    res.json(await readFollowupOutcomes(pool, { weeks: req.query.weeks }));
+  } catch (e) {
+    console.error("[followup-outcomes] failed:", e.message);
+    res.status(503).json({ error: "Follow-up outcomes unavailable" });
+  }
+});
+
+// Resolve a lead to its inbox thread: a thread verified as this project's first (a task link
+// can pin one), else a search of the sending mailbox for the contact's address when that
+// address belongs to no other project. The lead drawer's "View reply" uses this too.
 app.get("/api/sdr/leads/:leadId/thread", async (req, res) => {
   try {
     const { leadId } = req.params;
@@ -3008,6 +3021,35 @@ app.get("/api/sdr/leads/:leadId/thread", async (req, res) => {
     const connected = (await visibleMailboxes(req.sdrUser)).filter((v) => v.connected).map((v) => v.email);
     if (!connected.length) return res.json({ mailbox: null, threadId: null });
     const allowed = new Set(connected.map((email) => email.toLowerCase()));
+    const mailboxOf = new Map(connected.map((email) => [email.toLowerCase(), email]));
+
+    // Threads proven to be this project's (verified reply or message records), never one also
+    // linked to another project. A thread pinned by the link wins when it is one of them.
+    const { rows: own } = await pool.query(
+      `WITH evidence AS (
+         SELECT thread_id, lower(mailbox_email) mailbox, pipedrive_lead_id, received_at at FROM sdr_reply_messages
+          WHERE link_status = 'verified' AND thread_id IS NOT NULL
+         UNION ALL
+         SELECT thread_id, lower(mailbox_email), pipedrive_lead_id, occurred_at FROM sdr_message_facts
+          WHERE provider = 'gmail' AND link_status = 'verified' AND NOT is_test AND thread_id IS NOT NULL)
+       SELECT e.mailbox, e.thread_id, MAX(e.at) last FROM evidence e
+        WHERE e.pipedrive_lead_id = $1 AND NOT EXISTS (SELECT 1 FROM evidence o
+          WHERE o.thread_id = e.thread_id AND o.mailbox = e.mailbox AND o.pipedrive_lead_id IS DISTINCT FROM $1)
+        GROUP BY e.mailbox, e.thread_id ORDER BY last DESC NULLS LAST`,
+      [leadId],
+    );
+    const proven = own.filter((r) => allowed.has(r.mailbox));
+    const pinned = typeof req.query?.thread === "string" && typeof req.query?.mailbox === "string"
+      ? proven.find((r) => r.thread_id === req.query.thread && r.mailbox === req.query.mailbox.toLowerCase())
+      : null;
+    const exact = pinned || proven[0];
+    if (exact) return res.json({ mailbox: mailboxOf.get(exact.mailbox), threadId: exact.thread_id });
+    // The address alone can't tell one project's thread from another's when the buyer is on several.
+    const { rowCount: shared } = await pool.query(
+      `SELECT 1 FROM sdr_lead_state WHERE lower(person_email) = $1 AND crm_company_id = $2 AND pipedrive_lead_id <> $3 LIMIT 1`,
+      [contactEmail, companyId, leadId],
+    );
+    if (shared) return res.json({ mailbox: null, threadId: null });
 
     // Prefer the mailbox(es) we actually outreached from; fall back to any connected mailbox.
     const { rows: sendMb } = await pool.query(

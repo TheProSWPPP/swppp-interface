@@ -166,3 +166,5 @@
 .fu-handoff-receipt .fu-source{margin-left:16px}
 .fu-handoff:focus-visible,.fu-handoff-preview:focus-visible{outline:3px solid #4a87b1;outline-offset:3px}
 @media(max-width:600px){.fu-handoff{padding:14px}.fu-handoff-preview{padding:12px}.fu-handoff-receipt .fu-source{margin-left:0;display:flex}}
+.fu-outcomes{border-collapse:collapse;font-size:12px;width:100%;display:block;overflow-x:auto}
+.fu-outcomes th,.fu-outcomes td{padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:left;white-space:nowrap}

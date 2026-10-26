@@ -17,6 +17,8 @@ export type FollowupProjectContextData = {
  recentRecords:{status:string;reason:string|null;note:CrmRecentRecord|null;completedCall:CrmRecentRecord|null};
  coverage:{partial:true;asOf:string;scopes:CrmHealth['scopes'];quoteStatus:'unknown';orderStatus:'unknown';emailStatus:'unavailable'};
 };
+export type FollowupOutcomeRow = {kind:'quiet'|'bid';week:string;created:number;done:number|null;open:number|null;statusUnknown:number|null;emailedAfter:number|null;replyAfter:number|null;quoteAfter:number|null;wonAfter:number|null};
+export type FollowupOutcomes = {since:string;weeks:number;salesCheckedAt:string|null;activitiesCheckedAt:string|null;orders:'unavailable';rows:FollowupOutcomeRow[]};
 const leadPath=(id:string)=>`/api/sdr/crm/leads/${encodeURIComponent(id)}`;
 export const sdrCrmApi={
   followupContext:(id:string,signal?:AbortSignal)=>sdrReadRequest<FollowupProjectContextData>(`${leadPath(id)}/followup-context`,signal),
@@ -24,4 +26,5 @@ export const sdrCrmApi={
   users:()=>sdrFetch<{users:Array<{id:string;name:string}>;checkedAt:string}>('/api/sdr/crm/users'),
   followups:(query='')=>sdrFetch<{items:CrmFollowUp[];owners?:Array<{id:string;name:string|null}>;nextCursor:string|null;freshness:CrmHealth;unavailable?:string|null;authorization?:string;replyCoverage?:{status:'partial'|'unknown';eligibleMailboxes:number;visibleMailboxes:number;lastCollectedAt:string|null}}>(`/api/sdr/crm/followups${query}`),
   observations:(id:string)=>sdrFetch<CrmObservations>(`${leadPath(id)}/observations`),
+  followupOutcomes:(weeks=8)=>sdrFetch<FollowupOutcomes>(`/api/sdr/followups/outcomes?weeks=${weeks}`),
 };
