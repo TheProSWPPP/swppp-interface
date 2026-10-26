@@ -1425,8 +1425,9 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
     })
       .catch((e) => console.error("[auto-outreach] run failed:", e.message));
   };
-  setTimeout(runAuto, 90_000);
-  setInterval(runAuto, 60 * 60 * 1000);
+  // Half past the hour relative to boot, so it never starts with the 6-hourly lead sync (whose
+  // Pipedrive reads it would compete with for the shared rate window).
+  setTimeout(() => { runAuto(); setInterval(runAuto, 60 * 60 * 1000); }, 30 * 60 * 1000);
 }
 
 // Bid follow-up clock: puts dated "Bid follow-up" tasks, with the email written out, on
@@ -1455,8 +1456,9 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.Q
       // Every run logs its counts, so a quiet run is distinguishable from a dead job.
       .then((r) => console.log("[quiet-followup]", JSON.stringify(r)))
       .catch((e) => console.error("[quiet-followup] failed:", e.message));
-  setTimeout(runQuietClock, 180_000);
-  setInterval(runQuietClock, 2 * 60 * 60 * 1000);
+  // Odd hours after boot: the 6-hourly lead sync, sent-folder sweep and verification pass run on
+  // even hours, and all of them read Pipedrive on the same token (429 bursts at 05:44/11:44Z).
+  setTimeout(() => { runQuietClock(); setInterval(runQuietClock, 2 * 60 * 60 * 1000); }, 63 * 60 * 1000);
 }
 
 // Apollo engagement poll: per-lead replies + bounces fed into /api/sdr/events/ingest.
@@ -1566,14 +1568,16 @@ if (process.env.DATABASE_URL && process.env.PERMIT_REFRESH_ENABLED === "true") {
 }
 
 // Permit auto-outreach: send the MSGP renewal email to email-able operators, capped at each
-// mailbox's 20% daily share (Pipedrive/SDR keeps the rest). Gated by the master switch
-// (permit_engine_settings.active = OFF by default), so this is inert until turned on.
+// mailbox's 20% daily share (Pipedrive/SDR keeps the rest). Needs the master switch AND the
+// auto-send switch (permit_engine_settings.active + auto_send_enabled, both OFF by default).
 if (process.env.DATABASE_URL) {
   const tickPermitAuto = async () => {
     try {
       const r = await runPermitAutoOutreach(pool);
       if (r.sent) console.log(`[permit-auto] sent=${r.sent} skippedBad=${r.skippedBad || 0} candidates=${r.candidates}`);
-      else if (r.skipped && r.skipped !== "off") console.log(`[permit-auto] skipped: ${r.skipped}`);
+      else if (r.skipped && !["off", "auto_send_off"].includes(r.skipped)) console.log(`[permit-auto] skipped: ${r.skipped}`);
+      // Refusals and Apollo errors used to vanish; log codes and operators (no copy, no addresses).
+      if (r.errorCount) console.error(`[permit-auto] ${r.errorCount} send error(s):`, JSON.stringify((r.errors || []).map((e) => ({ op: e.op, code: e.code }))));
     } catch (e) { console.error("[permit-auto] failed:", e.message); }
   };
   setInterval(tickPermitAuto, 2 * 60 * 60 * 1000); // every 2h; the 20%/mailbox/day budget caps volume
@@ -1708,6 +1712,23 @@ app.get("/api/sdr/auth/me", (req, res) => {
   res.json({ user: req.sdrUser });
 });
 
+// Apollo's own daily limit per mailbox (email_daily_threshold), read at most every 10 minutes so
+// the Mailboxes page can show where it differs from the app's limit. Read only: neither side is
+// changed. null when Apollo is not configured or has never answered.
+let apolloDailyLimitCache = { at: 0, byId: null };
+async function apolloDailyLimits() {
+  if (!process.env.APOLLO_API_KEY) return null;
+  if (Date.now() - apolloDailyLimitCache.at < 10 * 60 * 1000) return apolloDailyLimitCache.byId;
+  try {
+    const accounts = await apolloClient.listEmailAccounts();
+    apolloDailyLimitCache = { at: Date.now(), byId: new Map(accounts.map((a) => [String(a.id), Number.isFinite(a.email_daily_threshold) ? a.email_daily_threshold : null])) };
+  } catch (e) {
+    console.warn("[mailboxes] Apollo daily limits unavailable:", e.message);
+    apolloDailyLimitCache = { at: Date.now(), byId: apolloDailyLimitCache.byId };
+  }
+  return apolloDailyLimitCache.byId;
+}
+
 // SDR mailboxes — list (owner-scoped; admin sees all)
 app.get("/api/sdr/mailboxes", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
@@ -1746,10 +1767,12 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
     // bounce_rate rides along so a mailbox that has been held back shows WHY, rather than
     // looking like the ramp arbitrarily stalled.
     const health = await mailboxBounceHealth(pool);
+    const apolloLimits = await apolloDailyLimits();
     const mailboxes = rows.map((m) => {
       const h = health.get(m.id);
       return {
         ...m,
+        apollo_daily_limit: apolloLimits?.get(String(m.apollo_mailbox_id)) ?? null,
         daily_cap: dailyCap(m.warmup_started_at, { target: m.daily_send_limit, health: h }),
         warmup_day: rampDay(m.warmup_started_at),
         bounce_sent: h?.sent ?? 0,
@@ -4578,7 +4601,14 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     // lib/customerSuppression.js. Cold .co outreach only; the permit engine is untouched.
     // Admin override, because a customer on a genuinely new project may still want the email.
     {
-      const cust = await isCustomerLead(draft.pipedrive_lead_id);
+      // Fail-closed: an unreadable Pipedrive throws 503 crm_unverified (the send waits and the
+      // enrollment retry tries again). Only a person who is an admin may send through that.
+      let cust;
+      try { cust = await isCustomerLead(draft.pipedrive_lead_id); }
+      catch (e) {
+        if (e.code !== "crm_unverified" || !(req.body?.override === true && req.sdrUser?.role === "admin" && !req.sdrUser?.machine)) throw e;
+        console.log(`[customer-suppression] admin override by ${req.sdrUser?.username || req.sdrUser?.sub} — lead ${draft.pipedrive_lead_id} (check unavailable)`);
+      }
       if (cust) {
         if (req.body?.override === true && req.sdrUser?.role === "admin" && !req.sdrUser?.machine) {
           console.log(
@@ -4617,6 +4647,10 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       let personName = null;
       let daysAgo = null;
       let signal = "Pipedrive";
+      // Fail-closed (2026-10-26): if either contact-history read fails we cannot tell whether this
+      // person was just emailed, so the send waits (503 crm_unverified, retried) unless an admin
+      // person overrides. It used to allow the send.
+      let historyUnverified = null;
       // 1. Live Pipedrive person field. UNRELIABLE: a rep's manual Pipedrive email often does
       //    NOT stamp last_outgoing_mail_time on the person (seen live — a lead emailed June 5
       //    still had null here), so this alone is not enough.
@@ -4626,7 +4660,8 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           lastOut = person?.last_outgoing_mail_time || null;
           personName = person?.name || null;
         } catch (e) {
-          console.warn("approve-and-send dedup precheck failed (allowing send):", e.message);
+          console.warn("approve-and-send dedup precheck failed (holding send):", e.message);
+          historyUnverified = "Pipedrive contact history";
         }
         if (lastOut) {
           // Offset-aware parse — appending a bare "Z" to a timestamp that already carries Z/offset
@@ -4652,7 +4687,18 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           }
         }
       } catch (e) {
-        console.warn("approve-and-send outreach-log precheck failed (allowing):", e.message);
+        console.warn("approve-and-send outreach-log precheck failed (holding send):", e.message);
+        historyUnverified = "outreach ledger";
+      }
+      if (historyUnverified) {
+        if (req.body?.override === true && req.sdrUser?.role === "admin" && !req.sdrUser?.machine) {
+          console.log(`[dedup] admin override by ${req.sdrUser?.username || req.sdrUser?.sub}: ${historyUnverified} unreadable — lead ${draft.pipedrive_lead_id}`);
+        } else {
+          return res.status(503).json({
+            code: "crm_unverified",
+            message: `Not sending yet: the ${historyUnverified} could not be read, so we cannot tell whether this person was just emailed. It will be tried again.`,
+          });
+        }
       }
       // Block RECENT contact within the cooldown window — same setting the generate gate uses.
       // Cross-project guard: a shared contact emailed for another lead still blocks. Admin override.
@@ -4821,6 +4867,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     let enrolled = false;
     let apolloContactId = null;
     let enrollResponse = null;
+    let machineApproval = null;
 
     // A fresh coherent review is required even for machine callers and admin overrides.
     await assertSendSafety(pool,draft,{companyId:process.env.SDR_CRM_COMPANY_ID,actionKey:`draft:${draft.id}:${draft.revision}`,phase:'pre_match'});
@@ -4847,7 +4894,10 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           if (block) throw Object.assign(new Error("Enrollment outcome or ownership requires review"),{status:409,code:block,preserveDraft:true});
         };
         await assertCurrentEnrollment();
-        if(req.sdrUser?.machine)await recordDraftApproval(client,current,req.sdrUser);
+        // An automatic send records its approval receipt only once Apollo accepted the contact
+        // (below). Written here, a refused attempt left a receipt that kept the draft out of
+        // expiry, pruning and retry for good.
+        if(req.sdrUser?.machine)machineApproval=current;
         const safetyContext=await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID,actionKey:`draft:${draft.id}:${draft.revision}`,phase:'locked_preflight'});
         const contactDays=await readContactSendDaysAgo(client,{apolloContactId:String(apolloContactId),recipientEmail:draft.contact_email_snapshot});
         if(contactDays!==null&&contactDays<=await contactCooldownDays())throw draftConflict('contact_cooldown');
@@ -4941,6 +4991,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         // Only local finalization is transactional. The reservation survives crashes.
         await client.query('BEGIN');
         try {
+        if(machineApproval)await recordDraftApproval(client,machineApproval,req.sdrUser);
         // Mark draft sent
         const { rows: updRows } = await client.query(
           `UPDATE sdr_drafts SET status = 'sent', sent_at = NOW(), approved_at = NOW(),
@@ -4979,6 +5030,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       // the draft can't be re-approved, surface the warning instead of erroring.
       console.error("approve-and-send: Apollo enrolled but DB write failed:", txErr);
       const warn = `Apollo enrolled OK but local bookkeeping failed: ${String(txErr.message).slice(0, 500)}`;
+      if (machineApproval) await recordDraftApproval(pool, machineApproval, req.sdrUser).catch(() => {});
       const { rows: updRows } = await pool.query(
         `UPDATE sdr_drafts SET status = 'sent', sent_at = NOW(), approved_at = NOW(),
                                 approved_by = $2, error_message = $3, updated_at = NOW()

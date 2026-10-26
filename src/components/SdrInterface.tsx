@@ -4172,6 +4172,11 @@ function MailboxesView({ user }: { user: SdrUser }) {
               <dl className="text-xs text-slate-500 space-y-0.5">
                 <div className="flex justify-between"><dt>Today's cap (ramp)</dt><dd className="font-mono text-slate-700">{m.daily_cap ?? "—"}/day</dd></div>
                 <div className="flex justify-between"><dt>Warmup target</dt><dd className="font-mono text-slate-700">{m.daily_send_limit}/day</dd></div>
+                {m.apollo_daily_limit != null && m.apollo_daily_limit !== m.daily_send_limit && (
+                  <div className="text-[11px] font-medium text-amber-600">
+                    Apollo's limit for this mailbox is {m.apollo_daily_limit}/day, the app's is {m.daily_send_limit}/day. Apollo sends at most its own limit.
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <dt>Bounce rate (14d)</dt>
                   <dd className={cn("font-mono", m.bounce_rate != null && m.bounce_rate >= BOUNCE_WARN_RATE ? "text-rose-600" : "text-slate-700")}>
