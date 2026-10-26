@@ -1564,7 +1564,22 @@ if (process.env.DATABASE_URL && process.env.PERMIT_REFRESH_ENABLED === "true") {
       }
     } catch (e) { console.error("[permit-refresh] failed:", e.message); }
   };
-  setInterval(runPermitRefresh, 30 * 24 * 60 * 60 * 1000); // ~monthly
+  // A 30-day setInterval is longer than Node's timer limit (~24.8 days): Node clamps it to
+  // 1 ms, so it would run back to back. It also restarted the 30 days on every deploy, so it
+  // never ran at all. Instead check once a day and run when the last refresh is 30+ days old
+  // (stamped in permit_engine_settings, so deploys don't reset it).
+  const PERMIT_REFRESH_EVERY_DAYS = 30;
+  const checkPermitRefresh = async () => {
+    try {
+      await pool.query(`ALTER TABLE permit_engine_settings ADD COLUMN IF NOT EXISTS last_refresh_at TIMESTAMPTZ`);
+      const claim = await pool.query(`UPDATE permit_engine_settings SET last_refresh_at = NOW()
+        WHERE id = 1 AND active AND (last_refresh_at IS NULL OR last_refresh_at < NOW() - make_interval(days => $1::int))
+        RETURNING id`, [PERMIT_REFRESH_EVERY_DAYS]);
+      if (claim.rowCount) await runPermitRefresh();
+    } catch (e) { console.error("[permit-refresh] schedule check failed:", e.message); }
+  };
+  setTimeout(checkPermitRefresh, 5 * 60 * 1000);
+  setInterval(checkPermitRefresh, 24 * 60 * 60 * 1000);
 }
 
 // Permit auto-outreach: send the MSGP renewal email to email-able operators, capped at each
