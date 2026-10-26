@@ -44,6 +44,7 @@ import {setOutreachControl} from './lib/sdrOutreachControls.js';
 import {configureCrmWriteProtection} from './lib/sdrCrmWriteProtection.js';
 import {registerSdrOutreachControlRoutes} from './lib/sdrOutreachControlRoutes.js';
 import {assertSendSafety} from './lib/sdrSendSafety.js';
+import {bidInviteLeadFor,BID_INVITE_MESSAGE} from './lib/bidInviteGuard.js';
 import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
 import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
@@ -4440,6 +4441,9 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     if (!draft) return res.status(404).json({ error: "Draft not found" });
     const viewed = checkViewedDraft({draft,expectedRevision:req.body?.expectedRevision,expectedContextHash:req.body?.expectedContextHash});
     if (!viewed.allowed) return res.status(409).json({code:viewed.code,error:'Draft changed. Reload and review before sending.'});
+    // Refused before anything is approved; assertSendSafety repeats the check at every send phase.
+    if (await bidInviteLeadFor(pool,{leadId:draft.pipedrive_lead_id,personId:draft.contact_id_snapshot,emails:[draft.contact_email_snapshot]}))
+      return res.status(409).json({code:'bid_invite_warm_lead',error:BID_INVITE_MESSAGE,message:BID_INVITE_MESSAGE});
     const schedule=checkDraftSchedule(draft);
     if(!schedule.allowed)return res.status(409).json({code:schedule.code,error:'This draft is scheduled for a future time. Change its schedule and review the new revision before sending.'});
     if(req.sdrUser?.machine) {
