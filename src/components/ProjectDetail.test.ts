@@ -251,3 +251,17 @@ describe('generation result visibility',()=>{
  it('shows current individual SWPPP output without claiming delivery or all documents generated',()=>{const html=render({generation,generationState:'current'});expect(html).toContain('Provider file recorded');expect(html).toContain('https://www.dropbox.com/scl/fi/abc/swppp.pdf?dl=1');expect(html).not.toContain('Delivered to customer');});
  it('keeps stale results historical and marks review reasons',()=>{expect(render({generation,generationState:'stale'})).toContain('Earlier inputs');const html=render({generation:{...generation,outputs:{swppp:{documentKey:'swppp',outcome:'review_required',reasonCode:'template',reason:'Template needs review'}}},generationState:'current'});expect(html).toContain('Template needs review');});
 });
+
+describe("project dates", () => {
+  it("warns in plain words when the finish date is before the start date", () => {
+    const html = render({ projectStartDate: "10/26/26", projectFinishDate: "02/16/26" });
+    expect(html).toContain("The finish date is before the start date.");
+    expect(render({ projectStartDate: "02/16/26", projectFinishDate: "10/26/26" })).not.toContain("finish date is before");
+  });
+
+  it("shows the due date in plain form, not the stored stamp", () => {
+    const html = render({ dueDate: "2026-10-29 10:29:00" });
+    expect(html).toContain("Oct 29, 2026, 10:29 AM");
+    expect(html).not.toContain("2026-10-29 10:29:00");
+  });
+});

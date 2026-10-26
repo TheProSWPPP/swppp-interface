@@ -59,8 +59,14 @@ import {
   type SdrInboxAccount,
   type SdrInboxThread,
   type SdrInboxMessage,
+  type InboxCoverage,
 } from "../lib/sdrApi";
 import { cn } from "../utils";
+import { inboxCoverageSummary } from "./sdr/inboxReadStatus";
+import { displayTitle } from "../lib/displayText";
+import { autoSendQueueNote } from "./sdr/queueNotes";
+import { mailboxStatus, healthScoreText } from "./sdr/mailboxDisplay";
+import { failureSupersededByLaterEmail } from "./sdr/leadBadges";
 
 // Mirrors the gate in lib/sendRamp.js. Not imported from there: that module is server-side
 // JS with no types, and `tsc -b` fails the build on it (TS7016). Keep the two in step.
@@ -489,14 +495,14 @@ function NotificationBell({
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        title="Replies + priority leads"
+        title={`${threads.length} ${threads.length === 1 ? "reply" : "replies"} waiting · ${hotLeads.length} priority ${hotLeads.length === 1 ? "lead" : "leads"}`}
         aria-label={`Notifications${count ? `: ${count}` : ""}`}
         className="sdr-notification-button"
       >
         <Bell className="h-4 w-4" />
         {count > 0 && (
           <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-cta-500 px-1 text-[10px] font-bold text-white">
-            {count > 9 ? "9+" : count}
+            {count > 99 ? "99+" : count}
           </span>
         )}
       </button>
@@ -701,9 +707,11 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
             return;
           }
           setInboxLinkNotice("No available inbox thread was found for this project. Check Pipedrive and other conversations.");
-        } catch {
+        } catch (e) {
           if (request !== generation) return;
-          setInboxLinkNotice("Inbox search is unavailable. Check the project in Pipedrive.");
+          setInboxLinkNotice((e as { status?: number }).status === 503
+            ? "Inbox search is busy right now. Open the link again in a minute, or check the project in Pipedrive."
+            : "Inbox search is unavailable. Check the project in Pipedrive.");
         }
         if (request === generation) setDeepLeadId(inboxLead);
       })();
@@ -2007,7 +2015,11 @@ function LeadRow({
       {/* Contact status (+ sequence stage when enrolled via our system) */}
       <td className="px-4 py-3.5 align-top">
         <OutreachBadge status={lead.outreach_status} days={lead.days_since_outgoing} sendStatus={lead.send_status} />
-        {stageLabel && (
+        {stageLabel && failureSupersededByLaterEmail(lead) ? (
+          <div className="mt-1 text-xs text-slate-500">
+            Earlier app send failed{lead.send_sent_at ? ` · ${formatRelative(lead.send_sent_at)}` : ""}
+          </div>
+        ) : stageLabel && (
           <div className="mt-1 text-xs font-medium text-brand-700">
             {seqLabel ? `${seqLabel} · ` : ""}
             {typeof lead.send_current_step === "number" && lead.send_total_steps
@@ -2194,6 +2206,8 @@ function QueueView({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"open" | "all" | "failed">(initialFilter);
+  const [queueSettings, setQueueSettings] = useState<SdrSettings | null>(null);
+  useEffect(() => { sdrApi.getSettings().then((d) => setQueueSettings(d.settings)).catch(() => {}); }, []);
 
   const load = useCallback(async () => {
     const epoch=++readEpoch.current;
@@ -2360,6 +2374,9 @@ function QueueView({
           <StatTile label="Enrolled drafts" value={counts.sent} icon={<Send className="h-4 w-4" />} tone="emerald" />
           <StatTile label="Failed" value={counts.failed} icon={<XCircle className="h-4 w-4" />} tone="rose" />
         </div>
+      )}
+      {drafts && statusFilter !== "failed" && autoSendQueueNote(queueSettings, counts.pending) && (
+        <p className="-mt-3 mb-6 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{autoSendQueueNote(queueSettings, counts.pending)}</p>
       )}
 
       {drafts && statusFilter === "failed" && <p className="mb-4 inline-flex rounded-lg bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-800">{drafts.length} matching failed drafts</p>}
@@ -3243,11 +3260,14 @@ function InboxView({
   const [mailbox, setMailbox] = useState<string | null>(null);
   const [needsOnly, setNeedsOnly] = useState(false);
   const [threads, setThreads] = useState<OverviewThread[] | null>(null);
-  const [coverage, setCoverage] = useState<{complete: boolean; mailboxes: {mailbox: string; status: string}[]} | null>(null);
+  const [coverage, setCoverage] = useState<InboxCoverage | null>(null);
   const [loading, setLoading] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [openMailbox, setOpenMailbox] = useState<string | null>(null);
   const [thread, setThread] = useState<SdrInboxMessage[] | null>(null);
+  // A failed thread read used to leave "Loading…" up forever behind an error toast.
+  const [threadError, setThreadError] = useState<string | null>(null);
+  const openRequest = useRef(0);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   // Gmail-style composer: null = collapsed (show Reply/Reply all/Forward buttons).
@@ -3269,13 +3289,13 @@ function InboxView({
       .catch((e) => pushToast("error", e.message));
   }, [pushToast]);
 
-  const loadList = useCallback(() => {
+  // Reloading the list keeps the open conversation: a second accounts read (or a refresh) used to
+  // clear a thread opened from a follow-up link, leaving an unrelated list and no conversation.
+  const loadList = useCallback((fresh = false) => {
     setLoading(true);
-    setOpenId(null);
-    setThread(null);
     const p =
       view === "outreach"
-        ? sdrApi.getInboxOverview().then((d) => { setCoverage(d.coverage); return d.threads as OverviewThread[]; })
+        ? sdrApi.getInboxOverview(fresh).then((d) => { setCoverage(d.coverage); return d.threads as OverviewThread[]; })
         : mailbox
           ? sdrApi.getInboxThreads(mailbox).then((d) => { setCoverage(d.coverage || null); return (d.threads as OverviewThread[]).map((t) => ({ ...t, mailbox: mailbox })); })
           : Promise.resolve([] as OverviewThread[]);
@@ -3300,17 +3320,23 @@ function InboxView({
   };
 
   const openThread = (id: string, mb: string) => {
+    const request = ++openRequest.current;
     setOpenId(id);
     setOpenMailbox(mb);
     setThread(null);
+    setThreadError(null);
     resetComposer();
     sdrApi
       .getInboxThread(id, mb)
       .then((d) => {
+        if (request !== openRequest.current) return;
         setThread(d.messages);
-        setThreads((prev) => prev?.map((t) => (t.id === id ? { ...t, unread: false } : t)) ?? prev);
+        setThreads((prev) => prev?.map((t) => (t.id === id && t.mailbox === mb ? { ...t, unread: false } : t)) ?? prev);
       })
-      .catch((e) => pushToast("error", e.message));
+      .catch((e: Error & { status?: number }) => {
+        if (request !== openRequest.current) return;
+        setThreadError(e.status === 429 ? e.message : "This conversation could not be loaded. Try again, or open the project in Pipedrive.");
+      });
   };
 
   // Mark a thread handled / not-needing-reply (or undo). Optimistic local flag for instant
@@ -3431,6 +3457,8 @@ function InboxView({
   };
 
   if (!accounts) return <div className="p-8 text-sm text-slate-400">Loading inbox…</div>;
+  const coverageSummary = inboxCoverageSummary(coverage);
+  const openInList = !!openId && (threads || []).some((t) => t.id === openId && t.mailbox === openMailbox);
   const connected = accounts.filter((a) => a.connected);
   const unconnected = accounts.filter((a) => !a.connected);
   const needCount = (threads || []).filter(needsReply).length;
@@ -3470,8 +3498,9 @@ function InboxView({
           </select>
         )}
         <button
-          onClick={() => loadList()}
+          onClick={() => loadList(true)}
           title="Refresh"
+          aria-label="Refresh inbox"
           className="rounded-lg border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-50"
         >
           <RefreshCw className="h-4 w-4" />
@@ -3518,11 +3547,13 @@ function InboxView({
           : "Everything in this mailbox's inbox."}
       </p>
 
-      {coverage && !coverage.complete && (
-        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          Inbox coverage is incomplete. Needs reply counts cover loaded threads only.
-          {coverage.mailboxes.filter(box => box.status !== "complete").map(box => ` ${box.mailbox}: ${box.status === "limited" ? "more inbox pages available" : box.status === "disconnected" ? "not connected" : "mailbox read failed"}.`).join("")}
-        </p>
+      {coverageSummary && (
+        <div role="status" className={cn("rounded-lg border px-3 py-2 text-sm", coverageSummary.tone === "warning" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-slate-200 bg-slate-50 text-slate-600")}>
+          <p>{coverageSummary.headline}</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+            {coverageSummary.notes.map((note) => <li key={note} className="break-words">{note}</li>)}
+          </ul>
+        </div>
       )}
       {connected.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
@@ -3546,7 +3577,7 @@ function InboxView({
                   className={cn(
                     "block w-full px-3 py-2.5 text-left",
                     t.openable === false ? "cursor-default" : "hover:bg-slate-50",
-                    openId === t.id && "bg-brand-50",
+                    openId === t.id && openMailbox === t.mailbox && "bg-brand-50",
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -3561,7 +3592,7 @@ function InboxView({
                   <div className={cn("truncate text-sm text-slate-600", t.unread && "font-medium text-slate-800")}>
                     {t.subject || "(no subject)"}
                   </div>
-                  <div className="truncate text-xs text-slate-400">{t.snippet}</div>
+                  <div className="truncate text-xs text-slate-400">{displayTitle(t.snippet || "")}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-1">
                     {needsReply(t) && (
                       <span className="inline-block rounded bg-cta-100 px-1.5 py-0.5 text-[11px] font-semibold text-cta-700">
@@ -3620,10 +3651,26 @@ function InboxView({
           <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 p-4">
             {!openId ? (
               <div className="text-sm text-slate-400">Select a conversation to read and reply.</div>
+            ) : threadError ? (
+              <div role="alert" className="space-y-3 text-sm text-slate-700">
+                <p className="font-medium text-slate-900">Couldn't load this project's conversation.</p>
+                <p>{threadError}</p>
+                <button
+                  onClick={() => openMailbox && openThread(openId, openMailbox)}
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <RefreshCw className="h-4 w-4" /> Try again
+                </button>
+              </div>
             ) : !thread ? (
-              <div className="text-sm text-slate-400">Loading…</div>
+              <div className="text-sm text-slate-400">Loading this conversation…</div>
             ) : (
               <div className="space-y-3">
+                {!loading && threads && !openInList && (
+                  <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Opened from a link. This conversation ({openMailbox}) is not in the list on the left.
+                  </p>
+                )}
                 {thread.map((m) => {
                   const mine = !!openMailbox && emailFromHeader(m.from) === openMailbox;
                   return (
@@ -4062,18 +4109,20 @@ function MailboxesView({ user }: { user: SdrUser }) {
                       Disabled
                     </span>
                   )}
-                  <span
-                    className={cn(
-                      "text-xs font-semibold px-2 py-0.5 rounded-full",
-                      m.warmup_status === "warming"
-                        ? "bg-amber-100 text-amber-700"
-                        : m.warmup_status === "ready"
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-slate-100 text-slate-600",
-                    )}
-                  >
-                    {m.warmup_status}
-                  </span>
+                  {m.active && (
+                    <span
+                      className={cn(
+                        "text-xs font-semibold px-2 py-0.5 rounded-full",
+                        mailboxStatus(m).tone === "amber"
+                          ? "bg-amber-100 text-amber-700"
+                          : mailboxStatus(m).tone === "emerald"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-slate-100 text-slate-600",
+                      )}
+                    >
+                      {mailboxStatus(m).label}
+                    </span>
+                  )}
                   {user.role === "admin" && (
                     <button
                       onClick={() => toggleActive(m)}
@@ -4090,10 +4139,15 @@ function MailboxesView({ user }: { user: SdrUser }) {
                   )}
                 </div>
               </div>
-              {/* Today's send usage vs the warmup-ramped cap */}
+              {/* Emails delivered today (same count as the Dashboard), then new starts vs the warmup-ramped cap */}
               <div className="mb-2 rounded-lg bg-slate-50 px-3 py-2">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-600">Today's sends</span>
+                  <span className="font-semibold text-slate-600">Emails sent today</span>
+                  <span className="font-mono font-semibold text-slate-800">{m.delivered_today ?? "—"}</span>
+                </div>
+                <div className="mb-2 text-[11px] text-slate-500">All steps sent by Apollo from this mailbox, same as the Dashboard.</div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-600">New contacts started today</span>
                   <span className={cn("font-mono font-semibold", (m.sent_today ?? 0) >= (m.daily_cap ?? 0) ? "text-rose-600" : "text-slate-800")}>
                     {m.sent_today ?? 0} / {m.daily_cap ?? 0}
                   </span>
@@ -4124,7 +4178,7 @@ function MailboxesView({ user }: { user: SdrUser }) {
                     {m.bounce_rate == null ? "—" : `${(m.bounce_rate * 100).toFixed(1)}%`}
                   </dd>
                 </div>
-                <div className="flex justify-between"><dt>Last synced Apollo health score</dt><dd className="font-mono text-slate-700">{m.deliverability_score ?? "—"}</dd></div>
+                <div className="flex justify-between gap-2"><dt>Apollo health score</dt><dd className="text-right font-mono text-slate-700">{healthScoreText(m)}</dd></div>
                 <div className="flex justify-between"><dt>Apollo ID</dt><dd className="font-mono text-slate-700 truncate ml-2">{m.apollo_mailbox_id?.slice(0, 12) || "(unlinked)"}</dd></div>
               </dl>
               <p className="mt-2 text-xs text-slate-500">The health score does not measure inbox or spam-folder placement.</p>

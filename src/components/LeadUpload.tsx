@@ -6,6 +6,7 @@ import {
   getLeadImportStatus,
   listRecentLeadImports,
   deleteJob,
+  notUploadedNote,
   type LeadImportJob,
   type LeadImportStatus,
   type LeadUploadKind,
@@ -128,6 +129,7 @@ export function ProgressRow({ job, onDelete, onOpen, onHistory }: { job: LeadImp
               <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pctUploaded}%` }} />
             </div>
           </div>
+          {notUploadedNote(job) && <p className="text-xs text-slate-600">{notUploadedNote(job)}</p>}
         </div>
       )}
       {job.error_message && (

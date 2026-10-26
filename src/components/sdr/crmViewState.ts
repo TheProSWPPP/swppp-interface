@@ -31,3 +31,23 @@ export function groupCrmNotes(notes:Record<string,unknown>[]) {
   }
   return groups;
 }
+
+// Retry the first page once when the server answers "busy" (503); later pages keep their own retry button.
+export function shouldRetryFollowupRead(cursor:string|null,status:number|undefined,retried:boolean) {
+  return cursor===null&&!retried&&status===503;
+}
+
+// Plain words for the Pipedrive task sync state shown above the follow-up list.
+export function activitySyncLabel(status:string|null|undefined,loading=false) {
+  switch(status){
+    case 'complete':return 'up to date';
+    case 'partial':return 'partly synced, some tasks may be missing';
+    case 'error':return 'sync failed, check Pipedrive';
+    case 'running':return 'updating';
+    default:return loading?'checking…':'not checked yet';
+  }
+}
+
+export function replyCoverageLabel(status:string|null|undefined) {
+  return status==='partial'?'partly checked':'not checked yet';
+}

@@ -6,19 +6,22 @@ import SalesTrend from './SalesTrend';
 import DateRangeFilter from './DateRangeFilter';
 import {changeTone,salesAmount} from './salesChartData';
 import './sales.css';
-import {defaultWindow,shiftDate} from '../sdr/dashboard/metricDisplay';
+import {defaultWindow,shiftDate,defaultMonthPeriod,comparisonWindow as monthComparisonWindow} from '../sdr/dashboard/metricDisplay';
 import {monthWindow} from '../sdr/dashboard/salesMonths';
 import '../sdr/dashboard/dashboard.css';
 import {useWorkspaceMetrics} from './useWorkspaceMetrics';
 import {comparisonWindow,changeText} from '../../lib/salesComparison';
 export default function SalesPage({user,onOpenSdr}:{user:SdrUser|null;onOpenSdr:()=>void}){
- const [query,setQuery]=useState<MetricsQuery>(()=>monthWindow(defaultWindow().to,12));
- const [period,setPeriod]=useState('12');
+ // Opens on this month so far (complete days through yesterday), or last month on the 1st,
+ // so the current month is included by default instead of only finished months.
+ const [query,setQuery]=useState<MetricsQuery>(()=>defaultMonthPeriod().window);
+ const [period,setPeriod]=useState<string>(()=>defaultMonthPeriod().period==='month'?'month':'1');
  const [custom,setCustom]=useState({from:query.from,through:shiftDate(query.to,-1)});
  const [dateError,setDateError]=useState('');
  const {data,history,error,loading,refresh:refreshCurrent}=useWorkspaceMetrics(query,user?.role==='admin');
  const previousQuery=useMemo(()=>{
   if(period.startsWith('year:')){const year=Number(query.from.slice(0,4))-1;return {from:String(year)+query.from.slice(4),to:String(Number(query.to.slice(0,4))-1)+query.to.slice(4)};}
+  if(period==='month')return monthComparisonWindow(query,'month');
   return comparisonWindow(query);
  },[query,period]);
  const previous=useWorkspaceMetrics(previousQuery,user?.role==='admin');
@@ -38,10 +41,12 @@ export default function SalesPage({user,onOpenSdr}:{user:SdrUser|null;onOpenSdr:
  const hasCompleteMonth=!defaultWindow().to.startsWith(`${thisYear}-01`);
  const latestMonthLabel=new Date(shiftDate(monthWindow(defaultWindow().to,1).to,-1)+'T12:00:00Z').toLocaleDateString('en-US',{month:'short'});
  const years=Array.from({length:Math.max(1,thisYear-firstYear+1)},(_,index)=>thisYear-index);
- const comparisonLabel=period.startsWith('year:')?'same months last year':'previous period';
+ const comparisonLabel=period.startsWith('year:')?'same months last year':period==='month'?'same days last month':'previous period';
+ const monthToDate=defaultMonthPeriod().period==='month'?defaultMonthPeriod().window:null;
  const applyMonth=(from:string,to:string)=>{setQuery({from,to});setCustom({from,through:shiftDate(to,-1)});setPeriod('custom');setDateError('');};
  const selectPeriod=(value:string)=>{
   setPeriod(value);setDateError('');if(value==='custom')return;
+  if(value==='month'){if(!monthToDate){setDateError('No full days this month yet. Try Last month.');return;}setQuery(monthToDate);setCustom({from:monthToDate.from,through:shiftDate(monthToDate.to,-1)});return;}
   const window=value.startsWith('year:')?{from:Number(value.slice(5))===firstYear&&history?.history_from?history.history_from:value.slice(5)+'-01-01',to:Number(value.slice(5))===thisYear?monthWindow(defaultWindow().to,1).to:String(Number(value.slice(5))+1)+'-01-01'}:monthWindow(defaultWindow().to,Number(value));if(window.from>=window.to){setDateError('No complete months are available for this year yet.');return;}setQuery(window);setCustom({from:window.from,through:shiftDate(window.to,-1)});
  };
  const applyCustom=()=>{
@@ -52,7 +57,7 @@ export default function SalesPage({user,onOpenSdr}:{user:SdrUser|null;onOpenSdr:
   setDateError('');setPeriod('custom');setQuery({from:custom.from,to});
  };
  const labelDate=(date:string)=>new Date(date+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'America/Chicago'});
- const rangeLabel=`${labelDate(query.from)} – ${labelDate(shiftDate(query.to,-1))}`;
+ const rangeLabel=`${labelDate(query.from)} – ${labelDate(shiftDate(query.to,-1))}${period==='month'?' · this month, through yesterday':''}`;
  const cards=[{key:'company_won_deals',label:'Sales won',currency:false,detail:'Each won Pipedrive deal counted once.'},{key:'company_won_booked_value',label:'Booked revenue',currency:true,detail:'Known USD value of won deals, before payment collection.'},{key:'company_average_won_deal_value',label:'Average sale',currency:true,detail:'Known USD revenue divided by sales with a known USD value.'}] as const;
  const warnings=data?.company_sales?.date_warnings||[];
  const held=data?.company_sales?.date_review;
@@ -60,7 +65,7 @@ export default function SalesPage({user,onOpenSdr}:{user:SdrUser|null;onOpenSdr:
  return <div className="workspace-sales sales-page">
   <div className="sales-page-heading"><div><h1>Sales</h1><p>{rangeLabel}</p></div><div className="sales-heading-actions">{freshness&&<span className={`sales-freshness is-${freshness.state}`}>{freshness.state==='fresh'?'Updated':freshness.state==='stale'?'Stale data':'Freshness unknown'}{freshness.last_complete_at&&` ${new Date(freshness.last_complete_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Chicago'})} CT`}</span>}<button className="workspace-button sales-refresh" onClick={refresh} disabled={!user||user.role!=='admin'||loading}><RefreshCw size={16}/>{loading?'Refreshing…':'Refresh'}</button></div></div>
   {user?.role!=='admin'?<div className="workspace-notice"><div><h2>{user?'Company sales require administrator access':'Sign in to view company sales'}</h2><p>{user?'Your outreach reporting is available in SDR.':'Choose your SDR account to continue.'}</p></div><button className="workspace-button workspace-button-primary" onClick={onOpenSdr}>Open SDR<ArrowRight size={17}/></button></div>:<>
-   <section className="sales-period-panel" aria-label="Reporting dates"><div className="sales-filter-bar"><div className="sales-period-shortcuts" role="group" aria-label="Reporting period">{[{value:'1',label:'Last month'},{value:'3',label:'3 months'},{value:'12',label:'12 months'}].map(item=><button key={item.value} aria-pressed={period===item.value} onClick={()=>selectPeriod(item.value)}>{item.label}</button>)}</div><label className="sales-year-select"><CalendarDays size={16} aria-hidden="true"/><span className="sr-only">Year or custom dates</span><select value={period.startsWith('year:')||period==='custom'?period:''} onChange={event=>selectPeriod(event.target.value)}><option value="" disabled>Year / custom</option>{years.map(year=><option key={year} value={`year:${year}`} disabled={year===thisYear&&!hasCompleteMonth}>{year}{year===thisYear?hasCompleteMonth?` through ${latestMonthLabel}`:' · no complete months':''}</option>)}<option value="custom">Custom dates</option></select></label><span className="sales-currency-note">USD · Chicago time</span></div>
+   <section className="sales-period-panel" aria-label="Reporting dates"><div className="sales-filter-bar"><div className="sales-period-shortcuts" role="group" aria-label="Reporting period">{[...(monthToDate?[{value:'month',label:'This month'}]:[]),{value:'1',label:'Last month'},{value:'3',label:'3 months'},{value:'12',label:'12 months'}].map(item=><button key={item.value} aria-pressed={period===item.value} onClick={()=>selectPeriod(item.value)}>{item.label}</button>)}</div><label className="sales-year-select"><CalendarDays size={16} aria-hidden="true"/><span className="sr-only">Year or custom dates</span><select value={period.startsWith('year:')||period==='custom'?period:''} onChange={event=>selectPeriod(event.target.value)}><option value="" disabled>Year / custom</option>{years.map(year=><option key={year} value={`year:${year}`} disabled={year===thisYear&&!hasCompleteMonth}>{year}{year===thisYear?hasCompleteMonth?` through ${latestMonthLabel}`:' · no complete months':''}</option>)}<option value="custom">Custom dates</option></select></label><span className="sales-currency-note">USD · Chicago time</span></div>
    <details className="sales-date-adjustment" key={period} open={period==='custom'}><summary>Adjust dates<ChevronDown size={16} aria-hidden="true"/></summary><DateRangeFilter value={custom} onChange={setCustom} onApply={applyCustom} latest={shiftDate(defaultWindow().to,-1)} earliest={history?.history_from||undefined}/></details></section>
 
    {dateError&&<p className="workspace-error" role="alert">{dateError}</p>}

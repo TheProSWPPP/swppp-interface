@@ -14,15 +14,15 @@
     },
     {
       "path": "src/components/Dashboard.tsx",
-      "sha256": "f548bd125277dd5a8f49278fc3ea32d79c85e5aebb2795edcbbe867c8c414f04"
+      "sha256": "7e90a904c10d6c28fdf010a26280fa9a8732ef2def96618054c7bb8a4dcc1a96"
     },
     {
       "path": "src/components/ProjectList.tsx",
-      "sha256": "e6ba83cc9bc9d3f2f1d3a39c393b6291cafa8ea1a21534177087a22650b00a00"
+      "sha256": "1ce260c734cb6347cf81cf7ad9ecafe7895a316f317de08929ec04574d409504"
     },
     {
       "path": "src/components/ProjectDetail.tsx",
-      "sha256": "d944e0a92fe741762f4643bab8b951fd0d1104b518558d20ff113ed4db69d048"
+      "sha256": "e6763c1380d8f107e01d3e568a29e3d770efcc84c6d00361c7cf4391376f99c1"
     },
     {
       "path": "src/components/ArchiveList.tsx",
@@ -34,7 +34,7 @@
     },
     {
       "path": "src/components/AIContent.tsx",
-      "sha256": "9f3d4462c22b9f23586ebc75e35b166387e7bb11425e3ddb15cd05c05f45f1ff"
+      "sha256": "1150c52d8e5b744a934e1f7737985a139fc64fc4f8f21d108da83842d4d369d2"
     },
     {
       "path": "src/components/AIContentDetail.tsx",
@@ -42,7 +42,7 @@
     },
     {
       "path": "src/components/LeadUpload.tsx",
-      "sha256": "8e616a80be8f57ffc462c110df40b2dcbfdbeb55a2f0b8518acc5e0d4fbb3694"
+      "sha256": "a7214ef93ce4adf180444b455b317cffd02248b6bda07b7df7f25edc35713522"
     },
     {
       "path": "src/components/LeadImportPreview.tsx",

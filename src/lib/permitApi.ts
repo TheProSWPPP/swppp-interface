@@ -331,3 +331,27 @@ export const permitApi = {
     return j<EnrichedResponse>(`/api/permits/enriched?${q.toString()}`);
   },
 };
+
+// Permit dates arrive as "2026-08-13" or "2026-08-13T00:00:00.000Z" (a calendar date, no real time).
+// Show them the way staff read dates: "Aug 13, 2026".
+export function permitDate(value: string | null | undefined): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
+  if (!match) return value ? String(value) : "—";
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12));
+  if (!Number.isFinite(date.getTime())) return String(value);
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+// How old the EPA compliance data is, in plain words, and whether staff should be warned.
+export function complianceFreshness(refreshed: string | null | undefined, now = new Date()): { text: string; stale: boolean } | null {
+  if (!refreshed) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(refreshed);
+  if (!match) return null;
+  const days = Math.floor((now.getTime() - Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))) / 86400000);
+  const stale = days > 30;
+  const age = days < 1 ? "today" : days === 1 ? "yesterday" : days < 60 ? `${days} days ago` : `${Math.floor(days / 30)} months ago`;
+  return {
+    stale,
+    text: `EPA compliance data last updated ${permitDate(refreshed)} (${age}).${stale ? " Violation details may be out of date; check the EPA record before quoting them." : ""}`,
+  };
+}

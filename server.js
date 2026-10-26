@@ -3,7 +3,7 @@ import {createApprovalObservationRecorder} from './lib/sdrApprovalObservations.j
 import {registerApprovalObservationHealth} from './lib/sdrApprovalObservationHealth.js';
 import {registerSdrPreparationEvidenceRoutes} from './lib/sdrPreparationEvidenceRoutes.js';
 import {registerSdrOperationsSnapshotRoutes} from './lib/sdrOperationsSnapshotRoutes.js';
-import { readInboxPages, inboxLeadEvidence, applyInboxHandled } from './lib/sdrInboxOverview.js';
+import { readInboxPages, inboxLeadEvidence, applyInboxHandled, sharedInboxReadCache, isGmailQuotaError, invalidateInboxMailbox, inboxReadHealth } from './lib/sdrInboxOverview.js';
 import { buildEngagementSummary } from './lib/sdrEngagementSummary.js';
 // BEGIN OBSERVATION ADDITION
 import { registerWorkspaceOverviewRoutes } from './lib/workspaceOverviewRoutes.js';
@@ -1721,7 +1721,18 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
                       (SELECT count(*)::int FROM sdr_sends s
                          WHERE s.mailbox_id = sdr_mailboxes.id
                            AND (s.sent_at AT TIME ZONE 'America/Chicago')::date
-                               = (now() AT TIME ZONE 'America/Chicago')::date) AS sent_today
+                               = (now() AT TIME ZONE 'America/Chicago')::date) AS sent_today,
+                      -- Emails Apollo actually delivered, counted the same way as the Dashboard's
+                      -- Latest activity feed (lib/sdrActivityFeed.js), so both screens agree.
+                      (SELECT count(*)::int FROM sdr_reporting_messages f
+                         WHERE f.mailbox_email = lower(sdr_mailboxes.email) AND f.direction = 'out'
+                           AND f.provider = 'apollo' AND f.provider_status = 'completed' AND f.campaign_id IS NOT NULL
+                           AND f.outreach_classification IN ('unknown','sales_outreach')
+                           AND f.occurred_at >= (date_trunc('day', now() AT TIME ZONE 'America/Chicago') AT TIME ZONE 'America/Chicago')) AS delivered_today,
+                      (SELECT count(*)::int FROM sdr_reporting_messages f
+                         WHERE f.mailbox_email = lower(sdr_mailboxes.email) AND f.direction = 'out'
+                           AND f.provider = 'apollo' AND f.provider_status = 'completed' AND f.campaign_id IS NOT NULL
+                           AND f.occurred_at >= now() - interval '14 days') AS delivered_14d
                FROM sdr_mailboxes`;
     if (scope.requires) {
       params.push(scope.value);
@@ -2830,7 +2841,7 @@ app.get("/api/sdr/inbox/threads", async (req, res) => {
     if (!mailbox) return res.json({ mailbox: null, threads: [], note: "No connected mailbox" });
     const token = await accessTokenForMailbox(mailbox);
     const q = req.query.q ? String(req.query.q) : "in:inbox";
-    const page = await gmailInbox.listThreadPage(token, { query: q, maxResults: 25 });
+    const page = await gmailInbox.listThreadPage(token, { query: q, maxResults: 25, metadataCache: sharedInboxReadCache.box(mailbox).metadata, concurrency: 5 });
     const threads = page.threads.map(t => ({...t,mailbox}));
     const evidence = await inboxLeadEvidence(pool, threads, req.sdrUser, process.env.SDR_CRM_COMPANY_ID);
     for (const t of threads) {
@@ -2840,6 +2851,7 @@ app.get("/api/sdr/inbox/threads", async (req, res) => {
     }
     res.json({ mailbox, threads, coverage: {complete:!page.nextPageToken,mailboxes:[{mailbox,status:page.nextPageToken?"limited":"complete"}]} });
   } catch (e) {
+    if (isGmailQuotaError(e)) return res.status(429).json({ error: "Google is limiting how fast this mailbox can be read. Try again in a minute." });
     res.status(e.status || 500).json({ error: e.message });
   }
 });
@@ -2854,6 +2866,7 @@ app.get("/api/sdr/inbox/threads/:id", async (req, res) => {
     gmailInbox.markThreadRead(token, req.params.id).catch(() => {});
     res.json({ mailbox, ...thread });
   } catch (e) {
+    if (isGmailQuotaError(e)) return res.status(429).json({ error: "Google is limiting how fast this mailbox can be read. Try again in a minute." });
     res.status(e.status || 500).json({ error: e.message });
   }
 });
@@ -2926,6 +2939,7 @@ app.post("/api/sdr/inbox/threads/:id/reply", express.json(), async (req, res) =>
       inReplyTo,
       references,
     });
+    invalidateInboxMailbox(mailbox);
     res.json({ ok: true, id: r.id });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
@@ -2985,6 +2999,7 @@ app.post("/api/sdr/inbox/threads/:id/compose", express.json({ limit: "4mb" }), a
         references: [last.references, last.messageId].filter(Boolean).join(" ").trim() || undefined,
       });
     }
+    invalidateInboxMailbox(mailbox);
     res.json({ ok: true, id: r.id });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
@@ -3068,6 +3083,7 @@ app.get("/api/sdr/leads/:leadId/thread", async (req, res) => {
       candidates = connected;
     }
 
+    let searchLimited = false;
     for (const mb of candidates) {
       let token;
       try {
@@ -3081,7 +3097,9 @@ app.get("/api/sdr/leads/:leadId/thread", async (req, res) => {
           q: `(from:${contactEmail} OR to:${contactEmail})`,
           maxResults: 5,
         });
-      } catch {
+      } catch (e) {
+        // A rate-limited search is "couldn't look", not "nothing there".
+        if (e?.status === 429 || e?.status === 403) searchLimited = true;
         continue;
       }
       if (threads.length) {
@@ -3089,6 +3107,7 @@ app.get("/api/sdr/leads/:leadId/thread", async (req, res) => {
         return res.json({ mailbox: mb, threadId: t.id });
       }
     }
+    if (searchLimited) return res.status(503).json({ error: "Inbox search is busy right now. Try again in a minute." });
     res.json({ mailbox: null, threadId: null });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
@@ -3109,7 +3128,7 @@ app.get("/api/sdr/inbox/overview", async (req, res) => {
     //    in:sent — the mailboxes run Apollo warmup, which floods Sent with fake emails;
     //    real sends come from our own records below.)
     // Read all mailboxes in PARALLEL (was sequential — the main source of the slow load).
-    const pageResult = await readInboxPages(boxes, { accessTokenForMailbox, gmailInbox });
+    const pageResult = await readInboxPages(boxes, { accessTokenForMailbox, gmailInbox }, { force: req.query?.fresh === "1" });
     const all = pageResult.threads;
     for (const box of vis.filter(v => !v.connected)) pageResult.coverage.mailboxes.push({mailbox:box.email,status:"disconnected"});
     if (vis.some(v => !v.connected)) pageResult.coverage.complete=false;
@@ -7239,6 +7258,7 @@ registerApprovalObservationHealth(app,{pool,companyId:process.env.SDR_CRM_COMPAN
 registerSdrHealthRoutes(app, {
   pool,
   resolveVisibleMailboxes: async (user) => (await visibleMailboxes(user)).map(mailbox => mailbox.email),
+  inboxReads: (mailboxes) => inboxReadHealth(mailboxes),
 });
 registerSdrOperationsRoutes(app, {
   pool,

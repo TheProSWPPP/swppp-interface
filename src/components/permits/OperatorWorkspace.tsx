@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Search, Phone, Mail, Home, Download, UserCheck } from "lucide-react";
 import {
   getOperatorsList,
+  complianceFreshness,
+  permitDate,
   logOutreach,
   type OperatorRow,
   type OperatorsListResponse,
@@ -116,11 +118,7 @@ export default function OperatorWorkspace({
   const operators = data?.operators ?? [];
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const complianceRefreshed = data?.compliance_last_refreshed ?? null;
-  const complianceFreshnessClass = (() => {
-    if (!complianceRefreshed) return null;
-    const diffMs = Date.now() - new Date(complianceRefreshed).getTime();
-    return diffMs > 30 * 24 * 60 * 60 * 1000 ? "text-amber-500" : "text-slate-500";
-  })();
+  const freshness = complianceFreshness(complianceRefreshed);
 
   const stageChip = (key: Stage, label: string, count: number) => (
     <button
@@ -160,11 +158,8 @@ export default function OperatorWorkspace({
         </a>
       </div>
 
-      {complianceRefreshed && (
-        <p className={`text-xs ${complianceFreshnessClass}`}>
-          Compliance data refreshed: {complianceRefreshed}
-          {complianceFreshnessClass === "text-amber-500" && " (may be stale — run a refresh)"}
-        </p>
+      {freshness && (
+        <p className={`text-xs ${freshness.stale ? "text-amber-700" : "text-slate-500"}`}>{freshness.text}</p>
       )}
 
       {/* Filters */}
@@ -267,7 +262,7 @@ export default function OperatorWorkspace({
                 <td className="p-2"><ComplianceBadge tier={row.compliance_tier} /></td>
                 <td className="p-2"><ChannelIcons row={row} /></td>
                 <td className="p-2 text-slate-600 whitespace-nowrap">{row.phone || <span className="text-slate-300">—</span>}</td>
-                <td className="p-2 text-right text-slate-500">{row.earliest_expiry || "—"}</td>
+                <td className="p-2 text-right text-slate-500">{permitDate(row.earliest_expiry)}</td>
                 <td className="p-2">
                   {row.contacted
                     ? <span className="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Contacted</span>

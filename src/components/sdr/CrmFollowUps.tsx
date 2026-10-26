@@ -2,7 +2,7 @@ import FollowupProjectContext from './FollowupProjectContext';
 import FollowupDraftEditor from './FollowupDraftEditor';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {ArrowRight,CalendarClock,ExternalLink,RefreshCw,ShieldAlert} from 'lucide-react';
-import {crmPlainText,crmFollowupUnavailableMessage} from './crmViewState';
+import {crmPlainText,crmFollowupUnavailableMessage,shouldRetryFollowupRead,activitySyncLabel,replyCoverageLabel} from './crmViewState';
 import {sdrCrmApi,type CrmFollowUp,type CrmHealth,type CrmRecentRecord} from '../../lib/sdrCrmApi';
 import {groupFollowups,followupNextAction,followupDue,chicagoDay} from './followupView';
 import FollowupReview from './FollowupReview';
@@ -68,7 +68,7 @@ export default function CrmFollowUps({onOpenLead,isAdmin=false}:{onOpenLead:(lea
  const [nextCursor,setNextCursor]=useState<string|null>(null);
  const [replyCoverage,setReplyCoverage]=useState<'partial'|'unknown'>('unknown');
  const [lastCollectedAt,setLastCollectedAt]=useState<string|null>(null);
- const load=useCallback(async(cursor:string|null=null)=>{
+ const load=useCallback(async(cursor:string|null=null,retried=false)=>{
   const generation=++requestGeneration.current;
   setLoading(true);setError(null);setPageError(null);
   if(!cursor){loaded.current=[];authorization.current=null;setItems(null);setNextCursor(null);setUnavailable(null);setOwnerOptions([]);setHealth(null);setReplyCoverage('unknown');setLastCollectedAt(null);}
@@ -97,9 +97,11 @@ export default function CrmFollowUps({onOpenLead,isAdmin=false}:{onOpenLead:(lea
   }catch(cause){
    if(generation!==requestGeneration.current)return;
    const failure=cause as Error&{status?:number};
+   // A busy server can answer the first read with 503; one quiet retry spares staff a red error.
+   if(shouldRetryFollowupRead(cursor,failure.status,retried)){await new Promise(resolve=>setTimeout(resolve,1500));if(generation===requestGeneration.current)void load(null,true);return;}
    if(cursor&&(failure.status===409||failure.status===400||failure.status===401||failure.status===403)){loaded.current=[];authorization.current=null;setItems(null);setHealth(null);setOwnerOptions([]);setNextCursor(null);setReplyCoverage('unknown');setLastCollectedAt(null);void load();return;}
    if(cursor&&failure.status!==401&&failure.status!==403)setPageError({message:failure.message,cursor});
-   else{loaded.current=[];authorization.current=null;setItems(null);setHealth(null);setOwnerOptions([]);setNextCursor(null);setReplyCoverage('unknown');setLastCollectedAt(null);setError(failure.message);}
+   else{loaded.current=[];authorization.current=null;setItems(null);setHealth(null);setOwnerOptions([]);setNextCursor(null);setReplyCoverage('unknown');setLastCollectedAt(null);setError(failure.status===503?'The server was busy. Press Retry in a moment.':failure.message);}
   }finally{if(generation===requestGeneration.current)setLoading(false);}
  },[dueView,lifecycle,owner,activityType]);
  useEffect(()=>{const generation=requestGeneration;if(pane==='tasks')void load();else{generation.current++;loaded.current=[];authorization.current=null;setItems(null);setNextCursor(null);setLoading(false);}return ()=>{generation.current++;};},[load,pane]);
@@ -118,7 +120,7 @@ export default function CrmFollowUps({onOpenLead,isAdmin=false}:{onOpenLead:(lea
    <label>Activity<select value={activityType} onChange={e=>setActivityType(e.target.value)}><option value="non_linkedin">Except LinkedIn</option><option value="linkedin_reminder">LinkedIn reminders</option><option value="all">All types</option><option value="call">Calls</option><option value="task">Tasks</option><option value="email">Email activities</option></select></label>
    <label>Project status<select value={lifecycle} onChange={e=>setLifecycle(e.target.value)}><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select></label>
   </div>
-  </div><details className="fu-coverage-details"><summary><span><span className={coverage?.status==='error'?'fu-sync-error':undefined}>Activity sync: {coverage?.status||'unknown'}</span> · Reply coverage {replyCoverage}{health?.scopes.some(s=>s.errorCategory)&&<strong className="fu-coverage-gap"> · Collection gaps. Check Pipedrive before treating missing records as missing work.</strong>}</span><span>Coverage details</span></summary><div className="fu-coverage"><span>{dueView==='current'?'Recent replies may bring older dated tasks here. Otherwise: today, previous 14 days and next 7 days. Chicago time.':dueView==='backlog'?'Tasks overdue by more than 14 days. A recent reply may also bring one into Current.':dueView==='later'?'Tasks due beyond the next 7 days, plus tasks without a date.':'All observed open tasks for these filters.'}</span><span>Activity sync: {coverage?.status||'unknown'} · Checked {when(coverage?.checkedAt)}{coverage?.status==='partial'?' · Some activities may be missing.':''} · Reply coverage {replyCoverage}{lastCollectedAt?` · Oldest eligible inbox collection ${when(lastCollectedAt)}; history may be incomplete.`:''}</span>{health?.scopes.some(s=>s.errorCategory)&&<span>CRM collection has gaps. Check the source before treating absent records as missing work.</span>}</div></details>
+  </div><details className="fu-coverage-details"><summary><span><span className={coverage?.status==='error'?'fu-sync-error':undefined}>Pipedrive tasks: {activitySyncLabel(coverage?.status,loading)}</span> · Inbox replies: {replyCoverageLabel(replyCoverage)}{health?.scopes.some(s=>s.errorCategory)&&<strong className="fu-coverage-gap"> · Collection gaps. Check Pipedrive before treating missing records as missing work.</strong>}</span><span>Coverage details</span></summary><div className="fu-coverage"><span>{dueView==='current'?'Recent replies may bring older dated tasks here. Otherwise: today, previous 14 days and next 7 days. Chicago time.':dueView==='backlog'?'Tasks overdue by more than 14 days. A recent reply may also bring one into Current.':dueView==='later'?'Tasks due beyond the next 7 days, plus tasks without a date.':'All observed open tasks for these filters.'}</span><span>Pipedrive tasks: {activitySyncLabel(coverage?.status,loading)} · Checked {when(coverage?.checkedAt)} · Inbox replies: {replyCoverageLabel(replyCoverage)}{lastCollectedAt?` · Oldest eligible inbox collection ${when(lastCollectedAt)}; history may be incomplete.`:''}</span>{health?.scopes.some(s=>s.errorCategory)&&<span>CRM collection has gaps. Check the source before treating absent records as missing work.</span>}</div></details>
   {activityType==='linkedin_reminder'&&<p className="fu-state">CRM reminders only. This view does not send LinkedIn invitations or messages.</p>}
   {loading&&!items&&<p role="status" className="fu-state">Loading follow-ups…</p>}
   {error&&<div role="alert" className="fu-state fu-warning">Could not load follow-ups. {error}<button type="button" onClick={()=>void load()} className="fu-button">Retry</button></div>}

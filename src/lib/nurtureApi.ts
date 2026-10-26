@@ -149,3 +149,15 @@ export const nurtureApi = {
   contactDelete: (id: string) =>
     sdrFetch(`/api/sdr/nurture/contacts/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
+
+// Brevo personalisation tags ("{{ contact.FIRSTNAME | default: \"there\" }}") are filled in per
+// recipient when the email goes out. In the app, show a plain placeholder instead of the code.
+const FIELD_NAMES: Record<string, string> = { FIRSTNAME: "first name", LASTNAME: "last name", EMAIL: "email" };
+export function readableSubject(subject: string | null | undefined): string {
+  if (!subject) return "";
+  return subject.replace(/\{\{\s*([^}|]+?)\s*(?:\|[^}]*)?\}\}/g, (_, path: string) => {
+    const key = path.trim().split(".").pop() || "";
+    const name = FIELD_NAMES[key.toUpperCase()] || key.replace(/_/g, " ").toLowerCase();
+    return `[${name}]`;
+  });
+}
