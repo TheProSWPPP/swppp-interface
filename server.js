@@ -90,7 +90,8 @@ import { crmLifecycleEnabled, verifyCrmLead } from "./lib/sdrCrmGuard.js";
 import { enrollmentRetryEnabled, beginEnrollmentAttempt, recordEnrollmentAttempt, listDueEnrollmentRetries, renewEnrollmentLease } from "./lib/sdrEnrollmentRetry.js";
 import { refreshRetryDraft } from "./lib/sdrRetryDraftRefresh.js";
 import { enrollmentSendBlock } from "./lib/sdrEnrollmentSendGuard.js";
-import { drainReplyActions } from "./lib/sdrReplyActions.js";
+import { drainReplyActions, storedReplyIntent, NO_ACTION_LABELS } from "./lib/sdrReplyActions.js";
+import { collectPipedriveReplies } from "./lib/sdrPipedriveReplyIntake.js";
 import { enqueueOpenAlert, drainOpenAlerts, createOpenAlertClients, checkOpenAlertContext } from "./lib/sdrOpenAlerts.js";
 import { registerSdrReplyActionBacklogRoutes } from "./lib/sdrReplyActionBacklogRoutes.js";
 import { registerSdrHealthRoutes } from "./lib/sdrHealthRoutes.js";
@@ -1512,6 +1513,11 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
         const relink = await relinkHeldReplies(pool, { getToken: accessTokenForMailbox });
         if (relink.relinked || relink.unavailable) console.log("[reply-relink]", JSON.stringify(relink));
       } catch { console.error("[reply-relink] relink run failed"); }
+      // Replies to a rep's proswppp.com inbox exist only as Pipedrive's mail copy.
+      try {
+        const copied = await collectPipedriveReplies(pool);
+        if (copied.counts?.detected || copied.counts?.unreadable) console.log("[pipedrive-reply-intake]", JSON.stringify(copied.counts));
+      } catch { console.error("[pipedrive-reply-intake] intake run failed"); }
       return drainReplyActions(pool, {
         clients:createReplyActionClients({pool,getToken:accessTokenForMailbox,appBase}),
       });
@@ -3894,7 +3900,8 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
               eventAt:String(apolloEventId).startsWith('poll:')?null:occurredAt,
               source:{kind:'apollo',eventId:apolloEventId},result:{status:'observed',summary:'Reply detected; read its content and existing restrictions before deciding the next action.'},
               nextAction:`Review in the SDR interface: ${appBase}/#/sdr?inboxLead=${leadId}`}});
-            if (!dupe.length) {
+            // A stored no-action classification (in-house, unsubscribe...) never becomes a task.
+            if (!dupe.length && !NO_ACTION_LABELS.has(await storedReplyIntent(pool, { leadId, email: contactEmail }))) {
               // Also create a follow-up Activity assigned to the rep who sent the outreach
               // (dc/jg/mh/th → their Pipedrive user; falls back to Derek if unmapped).
               let pdSenderId = null;
