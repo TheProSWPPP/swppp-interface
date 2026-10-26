@@ -29,6 +29,8 @@ export interface SdrMailbox {
   apollo_mailbox_id: string | null;
   owner_user_id: string | null;
   daily_send_limit: number;
+  // Apollo's own daily limit for this mailbox (read only); null when unknown.
+  apollo_daily_limit?: number | null;
   warmup_status: "pending" | "warming" | "ready" | "paused" | "disabled";
   warmup_current_cap: number;
   warmup_started_at: string | null;
