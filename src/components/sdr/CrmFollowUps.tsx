@@ -6,6 +6,7 @@ import {crmPlainText,crmFollowupUnavailableMessage} from './crmViewState';
 import {sdrCrmApi,type CrmFollowUp,type CrmHealth,type CrmRecentRecord} from '../../lib/sdrCrmApi';
 import {groupFollowups,followupNextAction,followupDue,chicagoDay} from './followupView';
 import FollowupReview from './FollowupReview';
+import FollowupOutcomes from './FollowupOutcomes';
 import {leadInboxHref,parentCrmUrl} from './followupNavigation';
 import './followups.css';
 
@@ -110,6 +111,7 @@ export default function CrmFollowUps({onOpenLead,isAdmin=false}:{onOpenLead:(lea
   <header className="fu-heading"><div><h1>Follow-ups</h1></div>{pane==='tasks'&&<button type="button" onClick={()=>void load()} disabled={loading} className="fu-button"><RefreshCw size={16} aria-hidden="true"/>Refresh</button>}</header>
   <div className="fu-views fu-tabs" role="group" aria-label="Follow-up view"><button type="button" aria-pressed={pane==='tasks'} onClick={()=>setPane('tasks')}>Open tasks</button><button type="button" aria-pressed={pane==='review'} onClick={()=>setPane('review')}>Review next steps</button></div>
   {pane==='review'?<FollowupReview onOpenLead={onOpenLead}/>:<>
+  {isAdmin&&<FollowupOutcomes/>}
   <div className="fu-filter-panel"><div className="fu-views" role="group" aria-label="Follow-up period">{views.map(([value,label])=><button type="button" key={value} aria-pressed={dueView===value} onClick={()=>setDueView(value)}>{label}</button>)}</div>
   <div className="fu-filters">
    <label>Task owner<select value={owner} onChange={e=>setOwner(e.target.value)}><option value="all">All owners</option>{ownerOptions.map(({id,name})=><option key={id} value={id}>{ownerName(id,name)}</option>)}</select></label>

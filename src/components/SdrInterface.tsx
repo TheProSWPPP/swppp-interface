@@ -683,14 +683,17 @@ function SdrSignedIn({ user, onSignOut }: { user: SdrUser; onSignOut: () => void
     const openInboxLink = () => {
       const hash = window.location.hash;
       const qi = hash.indexOf("?");
-      const inboxLead = qi === -1 ? null : new URLSearchParams(hash.slice(qi + 1)).get("inboxLead");
+      const params = new URLSearchParams(qi === -1 ? "" : hash.slice(qi + 1));
+      const inboxLead = params.get("inboxLead");
       if (!inboxLead) { generation++; setInboxLinkNotice(null); return; }
+      const thread = params.get("thread"), mailbox = params.get("mailbox");
+      const pin = thread && mailbox ? { thread, mailbox } : null;
       const request = ++generation;
       setInboxLinkNotice(null);
       window.history.replaceState(null, "", hash.slice(0, qi));
       (async () => {
         try {
-          const r = await sdrApi.findLeadThread(inboxLead);
+          const r = await sdrApi.findLeadThread(inboxLead, pin);
           if (request !== generation) return;
           if (r?.threadId && r?.mailbox) {
             setInboxLinkNotice(null);

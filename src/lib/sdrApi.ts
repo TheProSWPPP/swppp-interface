@@ -554,9 +554,11 @@ export const sdrApi = {
     sdrFetch<{ mailbox: string; id: string; messages: SdrInboxMessage[] }>(
       `/api/sdr/inbox/threads/${id}${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ""}`,
     ),
-  // Resolve a lead to its inbox thread (searches the sending mailbox by contact address).
-  findLeadThread: (leadId: string) =>
-    sdrFetch<{ mailbox: string | null; threadId: string | null }>(`/api/sdr/leads/${leadId}/thread`),
+  // Resolve a lead to its own inbox thread; a pinned thread from a task link wins when it is the lead's.
+  findLeadThread: (leadId: string, pin?: { thread: string; mailbox: string } | null) =>
+    sdrFetch<{ mailbox: string | null; threadId: string | null }>(
+      `/api/sdr/leads/${leadId}/thread${pin ? `?thread=${encodeURIComponent(pin.thread)}&mailbox=${encodeURIComponent(pin.mailbox)}` : ""}`,
+    ),
   replyInboxThread: (
     id: string,
     payload: { mailbox?: string; to: string; subject?: string; body: string; inReplyTo?: string | null; references?: string | null },
