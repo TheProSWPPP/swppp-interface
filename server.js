@@ -1449,7 +1449,8 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.Q
       appBase: process.env.PUBLIC_BASE_URL || "https://swppp-interface-production.up.railway.app",
       onlyLeads: String(process.env.QUIET_FOLLOWUP_ONLY_LEADS || "").split(",").map((s) => s.trim()).filter(Boolean),
     })
-      .then((r) => { if (r.created || r.failed) console.log("[quiet-followup]", JSON.stringify(r)); })
+      // Every run logs its counts, so a quiet run is distinguishable from a dead job.
+      .then((r) => console.log("[quiet-followup]", JSON.stringify(r)))
       .catch((e) => console.error("[quiet-followup] failed:", e.message));
   setTimeout(runQuietClock, 180_000);
   setInterval(runQuietClock, 2 * 60 * 60 * 1000);
