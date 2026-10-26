@@ -4193,11 +4193,7 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
   if (req.sdrUser && !(await leadVisibleTo(pool, req.sdrUser, pipedrive_lead_id))) {
     return res.status(404).json({ error: "Lead not found" });
   }
-  const bidInvite = { code: "bid_invite_warm_lead", error: BID_INVITE_MESSAGE, message: BID_INVITE_MESSAGE };
   try {
-    // Bid-sheet contacts (the lead, or its person on an open Bid Invite lead) never get a cold
-    // sequence draft; checked before generation and again on the live contact it returns.
-    if (await bidInviteLeadFor(pool, { leadId: pipedrive_lead_id })) return res.status(409).json(bidInvite);
     const creation=await prepareDraftCreation(pool,{leadId:pipedrive_lead_id,companyId:process.env.SDR_CRM_COMPANY_ID});
     const origin=draftCreationOrigin({user:req.sdrUser,callbackAuthenticated});
     const payload = await buildDraftFromLead({
@@ -4207,9 +4203,6 @@ app.post("/api/sdr/drafts/generate", async (req, res) => {
       assignedUserId: assigned_user_id || null,
       apolloSequenceId: apollo_sequence_id || null,
     });
-    if (await bidInviteLeadFor(pool, { leadId: payload.pipedrive_lead_id, personId: payload.contact_id_snapshot, emails: [payload.contact_email_snapshot] })) {
-      return res.status(409).json(bidInvite);
-    }
 
     // Live freshness re-check at the moment of outreach. buildDraftFromLead just
     // fetched the person, so `person_last_outgoing` is live (no extra API call).
@@ -4340,10 +4333,6 @@ app.post("/api/sdr/drafts", async (req, res) => {
     // from. Both are closed by checking visibility before either.
     if (!(await leadVisibleTo(pool, req.sdrUser, pipedrive_lead_id))) {
       return res.status(404).json({ error: "Lead not found" });
-    }
-    // Bid-sheet contacts never get a cold sequence draft (lib/bidInviteGuard.js).
-    if (await bidInviteLeadFor(pool, { leadId: pipedrive_lead_id, personId: contact_id_snapshot, emails: [contact_email_snapshot] })) {
-      return res.status(409).json({ code: "bid_invite_warm_lead", error: BID_INVITE_MESSAGE, message: BID_INVITE_MESSAGE });
     }
     const creation=await prepareDraftCreation(pool,{leadId:pipedrive_lead_id,companyId:process.env.SDR_CRM_COMPANY_ID,recipientEmail:contact_email_snapshot});
     const origin=draftCreationOrigin({user:req.sdrUser});
