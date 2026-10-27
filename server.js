@@ -45,7 +45,9 @@ import {configureCrmWriteProtection} from './lib/sdrCrmWriteProtection.js';
 import {registerSdrOutreachControlRoutes} from './lib/sdrOutreachControlRoutes.js';
 import {assertSendSafety} from './lib/sdrSendSafety.js';
 import {bidInviteLeadFor,BID_INVITE_MESSAGE} from './lib/bidInviteGuard.js';
-import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
+import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,recordProviderSkip,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
+import {JOB_CHANGE_SKIP} from './lib/outreachHistory.js';
+import {reconcileStuckSends} from './lib/sdrSendReconcile.js';
 import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
 import { sdrDraftVerifyEnabled, checkDraftEmail } from "./lib/sdrDraftVerify.js";
@@ -105,7 +107,7 @@ import {startLinkedinRuntime} from "./lib/sdrLinkedinRuntime.js";
 import {createLinkedinFreshContext} from "./lib/sdrLinkedinFreshContext.js";
 import {createLinkedinInboundHandler} from "./lib/sdrLinkedinInbound.js";
 import {chargeLinkedinRead} from "./lib/sdrLinkedinReadBudget.js";
-import { runAutoOutreach, pruneStaleQueuedDrafts, expireStaleQueuedDrafts, adoptPendingAutomaticDrafts } from "./lib/autoOutreach.js";
+import { runAutoOutreach, pruneStaleQueuedDrafts, expireStaleQueuedDrafts, adoptPendingAutomaticDrafts, emailConfirmedValid } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
 const { Pool } = pg;
@@ -1254,7 +1256,7 @@ async function initDB() {
     }
     console.log("Table 'automation_tasks' verified/created.");
     // Install additive protection before any route/worker can mutate outreach.
-    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-10-sdr-enrollment-phases.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql','2026-10-07-sdr-open-alerts.sql','2026-10-08-sdr-followup-drafts.sql','2026-10-10-sdr-followup-handoffs.sql']) {
+    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-10-sdr-enrollment-phases.sql','2026-10-27-sdr-provider-skipped.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql','2026-10-07-sdr-open-alerts.sql','2026-10-08-sdr-followup-drafts.sql','2026-10-10-sdr-followup-handoffs.sql']) {
       await pool.query(fs.readFileSync(new URL('./migrations/'+migration,import.meta.url),'utf8'));
     }
   } catch (err) {
@@ -1430,6 +1432,20 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
   // Half past the hour relative to boot, so it never starts with the 6-hourly lead sync (whose
   // Pipedrive reads it would compete with for the shared rate window).
   setTimeout(() => { runAuto(); setInterval(runAuto, 60 * 60 * 1000); }, 30 * 60 * 1000);
+}
+
+// Stuck-enrollment reconciler (lib/sdrSendReconcile.js): once a day, rows still "enrolled" with
+// no email two days on get Apollo's own status for that membership (removed, refused, bounced,
+// finished). Reads Apollo contacts only (bounded); raises a rep task for a false invalid-MX refusal.
+if (process.env.DATABASE_URL && process.env.APOLLO_API_KEY) {
+  const runReconcile = () =>
+    trackSdrJob("send_reconcile", () => reconcileStuckSends(pool, {
+      apollo: apolloClient,
+      addActivity: process.env.PIPEDRIVE_API_TOKEN ? (args) => pipedriveClient.addActivity(args) : null,
+    }))
+      .then((r) => console.log("[send-reconcile]", JSON.stringify(r)))
+      .catch((e) => console.error("[send-reconcile] failed:", e.message));
+  setTimeout(() => { runReconcile(); setInterval(runReconcile, 24 * 60 * 60 * 1000); }, 20 * 60 * 1000);
 }
 
 // Bid follow-up clock: puts dated "Bid follow-up" tasks, with the email written out, on
@@ -4989,14 +5005,52 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           resp.contacts.some(c=>String(c.id)===String(apolloContactId));
         let skipReason = enrollResponse?.skipped_contact_ids?.[apolloContactId];
 
+        // Apollo declines a contact it believes changed jobs (39 of 62 failed October drafts).
+        // When our verdict for this exact address is a fresh valid one, the person is reachable
+        // there: ask once more with sequence_job_change. Otherwise a rep confirms the contact.
+        let jobChangeReview = false;
+        if (!addedOk(enrollResponse) && String(skipReason || "").includes(JOB_CHANGE_SKIP)) {
+          const verdict = (await client.query(
+            "SELECT email_verify_status,email_verified_at,email_verified_value FROM sdr_lead_state WHERE pipedrive_lead_id=$1",
+            [draft.pipedrive_lead_id])).rows[0];
+          if (emailConfirmedValid(verdict, draft.contact_email_snapshot)) {
+            await assertCurrentEnrollment();
+            enrollResponse = await apolloClient.addContactsToSequence(
+              draft.apollo_sequence_id, [apolloContactId], mailbox.apollo_mailbox_id,
+              { sequence_unverified_email: true, sequence_job_change: true },
+            );
+            skipReason = enrollResponse?.skipped_contact_ids?.[apolloContactId];
+          } else {
+            jobChangeReview = true;
+          }
+        }
+
         // Existing/finished memberships require a separate review. Never remove and
         // re-add a contact as an automatic collision workaround.
         if (!addedOk(enrollResponse)) {
           const reason = skipReason || "not added (Apollo returned no enrolled contact)";
+          // An explicit skip created no membership: close the reservation so it is not read as
+          // an enrollment needing review on the next attempt.
+          if (skipReason) await recordProviderSkip({ pool: client, reservation, reason: skipReason });
+          if (jobChangeReview) {
+            await client.query("BEGIN");
+            try {
+              await setOutreachControl({ query: (...args) => client.query(...args) }, {
+                companyId: process.env.SDR_CRM_COMPANY_ID, leadId: String(draft.pipedrive_lead_id),
+                scope: { kind: "lead", id: String(draft.pipedrive_lead_id) }, channel: "email",
+                reason: `Apollo reports a job change for ${draft.contact_email_snapshot}: confirm the contact is still at the company`,
+                contextHash: crypto.createHash("sha256").update(`job-change:${draft.id}:${draft.contact_email_snapshot}`).digest("hex"),
+                actor: { source: "service", accountId: "provider-operations", execution: "automatic", ownership: "matched_own_receipt" },
+              });
+              await client.query("COMMIT");
+            } catch (holdError) { await client.query("ROLLBACK"); throw holdError; }
+          }
           const e = new Error(`Apollo did not enroll the contact: ${reason}`);
           e.status = 409;
           e.code = "apollo_skipped";
           e.skipReason = reason;
+          // A held draft stays in the queue for the rep who confirms the contact.
+          if (jobChangeReview) e.preserveDraft = true;
           throw e;
         }
         enrolled = true;
