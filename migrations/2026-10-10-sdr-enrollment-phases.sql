@@ -2,7 +2,9 @@
 ALTER TABLE sdr_provider_operations ADD COLUMN IF NOT EXISTS enrollment_phase text;
 ALTER TABLE sdr_provider_operations DROP CONSTRAINT IF EXISTS sdr_provider_operations_state_check;
 ALTER TABLE sdr_provider_operations ADD CONSTRAINT sdr_provider_operations_state_check
-  CHECK (state IN ('reserved','unresolved','confirmed','superseded','protected_external_state','pre_add_refused'));
+  -- 'provider_skipped' (2026-10-27-sdr-provider-skipped.sql) is listed here too: this file runs on
+  -- every boot before that one, and re-adding the check without it fails once such rows exist.
+  CHECK (state IN ('reserved','unresolved','confirmed','superseded','protected_external_state','pre_add_refused','provider_skipped'));
 DO $$ BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='sdr_provider_operations'::regclass AND conname='sdr_provider_operations_enrollment_phase_check') THEN
   ALTER TABLE sdr_provider_operations ADD CONSTRAINT sdr_provider_operations_enrollment_phase_check
