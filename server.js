@@ -982,6 +982,8 @@ async function initDB() {
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_verify_status TEXT`);
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_verified_value TEXT`);
+    // When a soft (catch-all/unknown) verdict had its one recheck (softRecheckDue in lib/emailVerifyRefresh.js).
+    await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_soft_rechecked_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS lead_origin TEXT`);
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS resolved_email TEXT`);
     await pool.query(`ALTER TABLE sdr_lead_state ADD COLUMN IF NOT EXISTS email_flag TEXT`);
