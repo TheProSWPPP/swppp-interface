@@ -48,6 +48,7 @@ import {bidInviteLeadFor,BID_INVITE_MESSAGE} from './lib/bidInviteGuard.js';
 import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,recordProviderSkip,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
 import {JOB_CHANGE_SKIP} from './lib/outreachHistory.js';
 import {reconcileStuckSends} from './lib/sdrSendReconcile.js';
+import {canonicalMailbox} from './lib/mailboxAliases.js';
 import {softGuardState,softEnrolledToday} from './lib/softVerdictGuard.js';
 import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
@@ -2768,7 +2769,9 @@ app.post("/api/sdr/outreach/sweep", async (req, res) => {
 // ---------------------------------------------------------------------------
 const _gmailTokenCache = new Map(); // mailbox_email → { token, exp }
 
-async function accessTokenForMailbox(mailboxEmail) {
+async function accessTokenForMailbox(requestedMailbox) {
+  // A former address of a moved mailbox resolves to its current one (lib/mailboxAliases.js).
+  const mailboxEmail = canonicalMailbox(requestedMailbox);
   const cached = _gmailTokenCache.get(mailboxEmail);
   if (cached && cached.exp > Date.now() + 30_000) return cached.token;
   const { rows } = await pool.query(`SELECT refresh_token FROM sdr_inbox_accounts WHERE mailbox_email=$1`, [mailboxEmail]);
@@ -3390,7 +3393,7 @@ app.get("/api/sdr/outbox", async (req, res) => {
     // so a non-admin only sees their own queue.
     const vis = await visibleMailboxes(req.sdrUser).catch(() => null);
     const allowed = vis ? new Set(vis.map((v) => v.email.toLowerCase())) : null;
-    const scoped = msgs.filter((m) => !allowed || allowed.has(String(m.from_email || "").toLowerCase()));
+    const scoped = msgs.filter((m) => !allowed || allowed.has(canonicalMailbox(m.from_email)));
     const emails = [...new Set(scoped.map((m) => String(m.to_email || "").toLowerCase()).filter(Boolean))];
     const leadMap = {};
     if (emails.length) {
@@ -3701,7 +3704,7 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
   const sequenceId = ev.sequence_id || ev.emailer_campaign_id || null;
   const emailerMessageId = ev.emailer_message_id || ev.message_id || null;
   const contactEmail = ev.email || ev.contact?.email || null;
-  const mailboxEmail = ev.email_account?.email || ev.from_email || null;
+  const mailboxEmail = ev.email_account?.email || ev.from_email ? canonicalMailbox(ev.email_account?.email || ev.from_email) : null;
   const occurredAt = ev.created_at || ev.timestamp || new Date().toISOString();
   // Apollo doesn't always send an event id — synthesize a stable dedupe key so
   // webhook retries don't double-insert (NULLs never conflict in a UNIQUE index).
