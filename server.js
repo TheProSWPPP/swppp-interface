@@ -48,6 +48,7 @@ import {bidInviteLeadFor,BID_INVITE_MESSAGE} from './lib/bidInviteGuard.js';
 import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,recordProviderSkip,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
 import {JOB_CHANGE_SKIP} from './lib/outreachHistory.js';
 import {reconcileStuckSends} from './lib/sdrSendReconcile.js';
+import {softGuardState,softEnrolledToday} from './lib/softVerdictGuard.js';
 import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
 import { sdrDraftVerifyEnabled, checkDraftEmail } from "./lib/sdrDraftVerify.js";
@@ -1032,6 +1033,9 @@ async function initDB() {
     //  start_date_grace_days — 0: only projects that have not broken ground. Set to N to also
     //    admit projects that started up to N days ago.
     await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS recontact_after_days INT`);
+    // Daily cap on automatic enrollments to soft-verdict (catch-all/unknown) addresses; valid
+    // addresses are never counted (lib/softVerdictGuard.js).
+    await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS soft_verdict_daily_cap INT NOT NULL DEFAULT 40`);
     await pool.query(`ALTER TABLE sdr_settings ADD COLUMN IF NOT EXISTS start_date_grace_days INT NOT NULL DEFAULT 0`);
     await pool.query(`INSERT INTO sdr_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
     // Editable first-touch draft copy per trigger. Seeded from the code templates; the
@@ -1382,6 +1386,8 @@ async function enrollAutoDrafts(createdDrafts, { override = false } = {}) {
         out.enrolled++;
       } else {
         out.skipped++;
+        if (payload.code === "soft_cap_reached") out.softCapped = (out.softCapped || 0) + 1;
+        if (payload.code === "soft_bounce_guard") out.softPausedBounce = (out.softPausedBounce || 0) + 1;
         console.warn(`[auto-outreach] enrollment refused (${resp.status}, ${payload.code || "unclassified"})`);
       }
     } catch (e) {
@@ -1408,6 +1414,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
     } // business hours only
     trackSdrJob("enrollment", async () => {
       const mode=(await pool.query("SELECT auto_outreach_enabled,auto_outreach_mode FROM sdr_settings WHERE id=1")).rows[0];
+      const softBefore = await softEnrolledToday(pool).catch(() => null);
       const recovered={enrolled:0,skipped:0};
       let adopted=0;
       if (mode?.auto_outreach_enabled && mode?.auto_outreach_mode === "send") {
@@ -1419,13 +1426,22 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
           if (!due.length) break;
           const pass=await enrollAutoDrafts(due);
           recovered.enrolled+=pass.enrolled;recovered.skipped+=pass.skipped;
+          recovered.softCapped=(recovered.softCapped||0)+(pass.softCapped||0);recovered.softPausedBounce=(recovered.softPausedBounce||0)+(pass.softPausedBounce||0);
         }
       }
       const r = await runAutoOutreach(pool, { mailboxSentToday });
       const fresh = r?.mode === "send" && Array.isArray(r.createdDrafts) ? await enrollAutoDrafts(r.createdDrafts) : {enrolled:0,skipped:0};
       if (r?.skipped) return r;
+      // Soft-verdict outcomes for the system check: enrolled this run, held by the daily quota,
+      // held by the per-sequence bounce guard (at drafting or at send).
+      const softAfter = softBefore === null ? null : await softEnrolledToday(pool).catch(() => null);
+      const soft = {softEnrolled:softAfter === null ? 0 : Math.max(0, softAfter - softBefore),
+        softCapped:(r?.soft?.capped||0)+(recovered.softCapped||0)+(fresh.softCapped||0),
+        softPausedBounce:(r?.soft?.pausedBounce||0)+(recovered.softPausedBounce||0)+(fresh.softPausedBounce||0),
+        softDailyCap:r?.soft?.cap??0,softBouncingSequences:r?.soft?.bouncingSequences?.length||0,softGuardUnavailable:r?.soft?.guardAvailable===false?1:0};
+      if (soft.softBouncingSequences) console.log("[auto-outreach] soft enrollments paused by the bounce guard:", JSON.stringify(r.soft.bouncingSequences));
       return {coverage:r?.errors?.length||r?.scanLimitReached||recovered.skipped||fresh.skipped ? "partial" : "complete",
-        counts:{created:r?.created||0,capacity:r?.capacity||0,selected:r?.eligible||0,scanned:r?.scanned||0,refused:r?.refused||0,scanLimitReached:r?.scanLimitReached?1:0,enrolled:recovered.enrolled+fresh.enrolled,deferred:recovered.skipped+fresh.skipped,adopted}};
+        counts:{created:r?.created||0,capacity:r?.capacity||0,selected:r?.eligible||0,scanned:r?.scanned||0,refused:r?.refused||0,scanLimitReached:r?.scanLimitReached?1:0,enrolled:recovered.enrolled+fresh.enrolled,deferred:recovered.skipped+fresh.skipped,adopted,...soft}};
     })
       .catch((e) => console.error("[auto-outreach] run failed:", e.message));
   };
@@ -4759,9 +4775,10 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     // Pre-send email verification: block enroll on a confident-bad address so we stop burning
     // sends + sender reputation on dead mailboxes / typo domains. Fail-open for people (no key or
     // API error → proceeds; catch-all / unknown allowed). Admin can force via override:true.
-    // The automation is stricter: it never forces, and it only sends to an address confirmed
-    // valid. Unconfirmed addresses (catch-all, unknown, no answer) bounced at 8.3% against 3.4%
-    // for valid ones and got SWPPP - PB and LBA auto-paused by Apollo (2026-09-16, 2026-10-10).
+    // The automation is stricter: it never forces, and it sends only to a valid or a soft
+    // (catch-all / unknown) verdict, soft ones within the soft brakes below. Unconfirmed addresses
+    // bounced at 8.3% against 3.4% for valid ones and got SWPPP - PB and LBA auto-paused by Apollo
+    // (2026-09-16, 2026-10-10); an address with no verdict at all still waits for a rep.
     if (emailVerify.verifyEnabled() && (req.body?.skip_verify !== true || req.sdrUser?.machine)) {
       const adminForcing = req.body?.override === true && req.sdrUser?.role === "admin" && !req.sdrUser?.machine;
       let verdict = "skipped";
@@ -4817,7 +4834,27 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
           message: `Email ${targetEmail} failed verification (${blocked.status}) — not enrolled.${blocked.suggestion ? ` Suggested: ${blocked.suggestion}` : ""}`,
         });
       }
-      if (req.sdrUser?.machine && verdict !== "valid") {
+      // Automation sends to a valid verdict, and since 2026-10-27 to a soft one (catch-all /
+      // unknown) within the soft brakes: the daily soft quota and the per-sequence bounce guard
+      // (lib/softVerdictGuard.js). Both refusals are retried later; a valid address is never held.
+      if (req.sdrUser?.machine && verdict === "soft") {
+        const soft = await softGuardState(pool, (await pool.query("SELECT * FROM sdr_settings WHERE id = 1")).rows[0]);
+        const bouncing = soft.bouncing.get(String(draft.apollo_sequence_id));
+        if (!soft.available || bouncing) {
+          return res.status(409).json({
+            code: "soft_bounce_guard", status: verdict,
+            message: soft.available
+              ? `Not sending automatically: ${targetEmail} is unconfirmed (${verdict}) and this sequence bounced ${(bouncing.rate * 100).toFixed(1)}% in the last 7 days. It is tried again when that drops below 4%.`
+              : `Not sending automatically: ${targetEmail} is unconfirmed (${verdict}) and the sequence bounce rate could not be read. It is tried again later.`,
+          });
+        }
+        if (await softEnrolledToday(pool) >= soft.cap) {
+          return res.status(429).json({
+            code: "soft_cap_reached", status: verdict,
+            message: `Not sending automatically today: ${soft.cap} unconfirmed (${verdict}) addresses were already enrolled today. It is tried again tomorrow.`,
+          });
+        }
+      } else if (req.sdrUser?.machine && verdict !== "valid") {
         return res.status(409).json({
           code: "email_unconfirmed", status: verdict,
           message: `Not sending automatically: ${targetEmail} could not be confirmed (${verdict}). A rep can review and send it.`,

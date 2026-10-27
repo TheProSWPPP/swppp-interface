@@ -28,3 +28,14 @@ export function jobIssueLabel(category:string|null|undefined) {
   if(!category)return null;
   return ISSUES[category]||`Issue: ${category.replaceAll('_',' ')}.`;
 }
+
+// Outreach replenishment, admins only: how unconfirmed (catch-all / unknown) addresses fared in
+// the last run. They are capped per day and held for a sequence that is bouncing.
+export function softVerdictSummary(counts:Record<string,number>|undefined|null) {
+  if(!counts||!['softEnrolled','softCapped','softPausedBounce'].some(key=>key in counts))return null;
+  const n=(key:string)=>Number(counts[key])||0;
+  const parts=[`${n('softEnrolled')} enrolled`];
+  if(n('softCapped'))parts.push(`${n('softCapped')} held by the daily limit${n('softDailyCap')?` of ${n('softDailyCap')}`:''}`);
+  if(n('softPausedBounce'))parts.push(`${n('softPausedBounce')} held because ${n('softBouncingSequences')===1?'a sequence is':'sequences are'} bouncing 4% or more`);
+  return `Unconfirmed (catch-all) addresses, last run: ${parts.join(', ')}.${n('softGuardUnavailable')?' The bounce check could not be read, so none were sent.':''}`;
+}
