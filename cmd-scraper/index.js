@@ -10,6 +10,7 @@
 
 import express from "express";
 import { chromium } from "playwright";
+import { loginCmdPage } from "./login.js";
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || "";
@@ -65,26 +66,7 @@ async function ensureBrowser() {
 async function login() {
   await ensureBrowser();
   console.log("Logging into CMD...");
-  await page.goto(LOGIN_URL, { waitUntil: "networkidle" });
-  await page.fill(
-    'input#Username, input[name="Username"], input[name="username"], input#Email, input[name="Email"], input[type="email"]',
-    CMD_USER
-  );
-  await page.fill(
-    'input#Password, input[name="Password"], input[name="password"], input[type="password"]',
-    CMD_PASS
-  );
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: "networkidle", timeout: NAV_TIMEOUT_MS }).catch(() => null),
-    page.evaluate(() => {
-      const form = document.querySelector('form:has(input[type="password"])');
-      if (!form) return "no form";
-      const btn = form.querySelector('button[type=submit], input[type=submit]');
-      if (btn) { btn.click(); return "clicked"; }
-      form.submit();
-      return "submitted";
-    }),
-  ]);
+  await loginCmdPage(page, { username: CMD_USER, password: CMD_PASS, loginUrl: LOGIN_URL, timeoutMs: NAV_TIMEOUT_MS });
   loginAt = Date.now();
   console.log("Login complete.");
 }

@@ -25,7 +25,7 @@ import bodyParser from "body-parser";
 import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
-import pg from "pg";
+import { createDatabasePool, databaseHealthHandler } from "./lib/database.js";
 import { PDFDocument } from "pdf-lib";
 import { splitPdf } from "./lib/planPdfSplit.js";
 import { scanPlanSet, PLAN_SCAN_MODEL } from "./lib/planScan.js";
@@ -111,8 +111,6 @@ import {createLinkedinInboundHandler} from "./lib/sdrLinkedinInbound.js";
 import {chargeLinkedinRead} from "./lib/sdrLinkedinReadBudget.js";
 import { runAutoOutreach, pruneStaleQueuedDrafts, expireStaleQueuedDrafts, adoptPendingAutomaticDrafts, emailConfirmedValid } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
-
-const { Pool } = pg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -544,10 +542,7 @@ app.use((req, res, next) => {
 
 // Database connection
 // Railway automatically provides DATABASE_URL
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
-});
+const pool = createDatabasePool(process.env.DATABASE_URL);
 
 // Shared per-mailbox daily send count (America/Chicago day). This is the single
 // cap both the SDR and TXR050000/permit cold systems draw from — every email send
@@ -1639,9 +1634,7 @@ let memoryArchive = [];
 let memoryContent = [];
 
 // API Routes
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", database: !!process.env.DATABASE_URL });
-});
+app.get("/health", databaseHealthHandler(pool, !!process.env.DATABASE_URL));
 
 // Build identity. The 2026-07-30 review could not prove the deployed code was the code it
 // read, because nothing exposed a commit. Railway injects RAILWAY_GIT_COMMIT_SHA on deploy.

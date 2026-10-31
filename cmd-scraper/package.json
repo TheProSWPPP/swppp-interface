@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "postinstall": "playwright install --with-deps chromium"
+    "postinstall": "playwright install --with-deps chromium",
+    "test": "node --test *.test.js"
   },
   "dependencies": {
     "express": "^4.21.2",
