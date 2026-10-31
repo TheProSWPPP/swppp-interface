@@ -9,7 +9,7 @@ COPY package.json package-lock.json* ./
 RUN npm install --omit=dev --no-audit --no-fund --ignore-scripts \
  && npx playwright install --with-deps chromium
 
-COPY index.js ./
+COPY index.js login.js ./
 
 ENV NODE_ENV=production
 ENV PORT=3000
