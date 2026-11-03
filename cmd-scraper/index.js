@@ -11,6 +11,7 @@
 import express from "express";
 import { chromium } from "playwright";
 import { loginCmdPage } from "./login.js";
+import { refuseNonCmdUrl } from "./hostGuard.js";
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || "";
@@ -541,6 +542,8 @@ app.post("/cmd/scrape-bidder", requireKey, async (req, res) => {
   if (!url || !/^https?:\/\//i.test(url)) {
     return res.status(400).json({ ok: false, error: "project_url required (must be http(s) URL)" });
   }
+  const notCmd1 = refuseNonCmdUrl(url, "project_url");
+  if (notCmd1) return res.status(notCmd1.status).json(notCmd1.body);
   try {
     const result = await withLock(() => scrapeBidder(url));
     if (result.error) {
@@ -559,6 +562,8 @@ app.post("/cmd/scrape-contacts", requireKey, async (req, res) => {
   if (!url || !/^https?:\/\//i.test(url)) {
     return res.status(400).json({ ok: false, error: "company_url required (must be http(s) URL)" });
   }
+  const notCmd2 = refuseNonCmdUrl(url, "company_url");
+  if (notCmd2) return res.status(notCmd2.status).json(notCmd2.body);
   try {
     const result = await withLock(() => scrapeContacts(url));
     res.json({ ok: true, ...result, login_age_seconds: Math.floor((Date.now() - loginAt) / 1000) });
