@@ -32,6 +32,12 @@ export interface UploadResult {
   renamed?: string[];
   /** Columns the server filled in because the sheet lacks them. */
   injected?: string[];
+  /** Bid invites only: rows per Lead Origin value, e.g. {"Bid Invite: BuildingConnected": 12}. */
+  platforms?: Record<string, number>;
+  /** Bid invites only: how many bid dates were read, were missing, or fall before the cut-off date. */
+  bidDates?: { parsed: number; missing: number; beforeFloor: number };
+  /** Plain-English notes about the file, e.g. rows with no readable bid date. */
+  warnings?: string[];
 }
 
 export async function uploadLeadsCsv(file: File, kind?: LeadUploadKind): Promise<UploadResult> {
