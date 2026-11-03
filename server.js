@@ -17,6 +17,8 @@ import {registerSdrFollowupHandoffRoutes} from './lib/sdrFollowupHandoffRoutes.j
 // END OBSERVATION ADDITION
 // BEGIN OBSERVATION ADDITION
 import {createSalesHistoryRuntime} from './lib/salesHistoryRuntime.js';
+import {refreshOrderFacts} from './lib/orderSales.js';
+import {trelloConfigured} from './lib/trelloClient.js';
 import {createConversationSyncRuntime} from './lib/sdrConversationSync.js';
 // END OBSERVATION ADDITION
 import express from "express";
@@ -7506,6 +7508,17 @@ if (crmObserverEnabled && process.env.PIPEDRIVE_API_TOKEN && crmCompanyId && pro
 // BEGIN OBSERVATION ADDITION
 const salesHistoryRuntime=createSalesHistoryRuntime({pool,apiToken:process.env.PIPEDRIVE_API_TOKEN});
 salesHistoryRuntime.start({enabled:process.env.SDR_SALES_HISTORY_ENABLED==='true'});
+// Order facts for the Sales page (lib/orderSales.js): Trello read only, every 6 hours, when the
+// orders source is selected or being validated. Needs TRELLO_API_KEY/TOKEN/ORDERS_BOARD_ID.
+if((process.env.SDR_SALES_SOURCE==='orders'||process.env.SDR_ORDER_FACTS_ENABLED==='true')&&trelloConfigured()&&process.env.DATABASE_URL){
+  let ordersRunning=false;
+  const runOrderFacts=()=>{if(ordersRunning)return;ordersRunning=true;
+    refreshOrderFacts(pool).then(r=>console.log('[order-facts]',JSON.stringify({orders:r?.orders,valued:r?.valued,matched:r?.matched,cards_complete:r?.cards_complete,skipped:r?.skipped})))
+      .catch(()=>console.error('[order-facts] refresh failed; previous order facts remain'))
+      .finally(()=>{ordersRunning=false;});};
+  setTimeout(runOrderFacts,150_000);
+  setInterval(runOrderFacts,6*60*60*1000);
+}
 // END OBSERVATION ADDITION
 // BEGIN OBSERVATION ADDITION
 // Conversation collection is independent from read routes and all action workers.
