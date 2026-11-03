@@ -4,9 +4,9 @@ export type MetricKey = 'messages_completed'|'contacts_reached'|'first_touches'|
   'human_reply_rate'|'positive_reply_rate'|'followup_completion_rate'|'duplicate_rate'|'quote_close_rate'|'contact_to_win_rate'|
   'won_booked_value'|'average_won_deal_value'|'company_won_booked_value'|'company_average_won_deal_value'|'company_won_deals'|'won_deals'|
   'collected_value'|'eligible_supply'|'bounce_rate'|'bounce_events'|'spam_blocked_events'|'open_rate'|'spam_rate'|'unresolved_quotes';
-export type MetricsQuery = { from:string; to:string; timezone?:'America/Chicago'; mailbox?:string; source?:string; sequence?:string };
+export type MetricsQuery = { from:string; to:string; timezone?:'America/Chicago'; mailbox?:string; source?:string; sequence?:string; salesSource?:'orders'|'pipedrive' };
 export type MetricsResponse = {
-  company_sales?:{date_review?:{count:number;value:number};date_warnings?:Array<{month:string;count:number;reason:string}>;reconstructed_dates?:number;history_from:string|null;history_to:string|null;freshness:{last_complete_at:string|null;state:'fresh'|'stale'|'unknown'}};
+  company_sales?:{source?:'orders'|'pipedrive';matched?:{count:number;of:number};valued?:{count:number;of:number};paid?:{count:number;value:number;unknown?:number};date_review?:{count:number;value:number}|null;date_warnings?:Array<{month:string;count:number;reason:string}>;reconstructed_dates?:number;history_from:string|null;history_to:string|null;freshness:{last_complete_at:string|null;state:'fresh'|'stale'|'unknown'}};
   test_data?:{excluded_messages:number;excluded_deals:number|null;unreviewed_messages:number;unreviewed_deals:number|null};
   observation_cutoff?:string|null;
   window:{from:string;to:string;timezone:'America/Chicago';provisional:boolean};
@@ -24,5 +24,6 @@ export function getMetrics(query:MetricsQuery,signal?:AbortSignal):Promise<Metri
   if(query.mailbox) params.set('mailbox',query.mailbox);
   if(query.source) params.set('source',query.source);
   if(query.sequence) params.set('sequence',query.sequence);
+  if(query.salesSource) params.set('salesSource',query.salesSource);
   return sdrReadRequest<MetricsResponse>(`/api/sdr/metrics?${params}`,signal);
 }

@@ -17,6 +17,8 @@ import {registerSdrFollowupHandoffRoutes} from './lib/sdrFollowupHandoffRoutes.j
 // END OBSERVATION ADDITION
 // BEGIN OBSERVATION ADDITION
 import {createSalesHistoryRuntime} from './lib/salesHistoryRuntime.js';
+import {refreshOrderFacts} from './lib/orderSales.js';
+import {trelloConfigured} from './lib/trelloClient.js';
 import {createConversationSyncRuntime} from './lib/sdrConversationSync.js';
 // END OBSERVATION ADDITION
 import express from "express";
@@ -95,6 +97,8 @@ import { enrollmentRetryEnabled, beginEnrollmentAttempt, recordEnrollmentAttempt
 import { refreshRetryDraft } from "./lib/sdrRetryDraftRefresh.js";
 import { enrollmentSendBlock } from "./lib/sdrEnrollmentSendGuard.js";
 import { drainReplyActions, storedReplyIntent, NO_ACTION_LABELS } from "./lib/sdrReplyActions.js";
+import { enqueueExitOnly, replyExitMode } from "./lib/replyExit.js";
+import { runVolumeWatch, createVolumeAlertNotifier } from "./lib/sdrVolumeWatch.js";
 import { collectPipedriveReplies } from "./lib/sdrPipedriveReplyIntake.js";
 import { enqueueOpenAlert, drainOpenAlerts, createOpenAlertClients, checkOpenAlertContext } from "./lib/sdrOpenAlerts.js";
 import { registerSdrReplyActionBacklogRoutes } from "./lib/sdrReplyActionBacklogRoutes.js";
@@ -1570,6 +1574,17 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
   };
   setTimeout(runOpenAlerts, 110_000);
   setInterval(runOpenAlerts, 5 * 60 * 1000);
+  // Sending-volume dip alert (lib/sdrVolumeWatch.js). Read only; emails SDR_VOLUME_ALERT_TO.
+  const runVolumeAlerts = () => {
+    if (process.env.SDR_VOLUME_ALERTS_ENABLED !== "true") return;
+    const to = String(process.env.SDR_VOLUME_ALERT_TO || "").split(",").map((v) => v.trim()).filter(Boolean);
+    void trackSdrJob("volume_watch", () => runVolumeWatch(pool, {
+      notify: to.length ? createVolumeAlertNotifier({ pool, gmail: gmailInbox, getToken: accessTokenForMailbox, to,
+        notifyOwner: process.env.SDR_VOLUME_ALERT_NOTIFY_OWNER === "true" }) : null,
+    })).catch(() => console.error("[volume-watch] run failed; see run health"));
+  };
+  setTimeout(runVolumeAlerts, 120_000);
+  setInterval(runVolumeAlerts, 30 * 60 * 1000);
   setTimeout(runReplyActions, 100_000);
   setInterval(runReplyActions, 5 * 60 * 1000);
   setTimeout(runInboxWatch, 90_000);
@@ -4030,6 +4045,18 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
             await stopOwnedEnrollment({pool,apollo:apolloClient,expected:{contactId:sendRow.apollo_contact_id,campaignId:replySeqId,sendId:sendRow.id,leadId:sendRow.pipedrive_lead_id||leadId,membershipId:null,addedAt:null},actionId:`event-stop:${apolloEventId||sendRow.id}`});
           } catch (e) {
             console.error("Apollo remove-from-sequence on reply failed:", e.message);
+          }
+        }
+        // A reply Apollo saw (even one no Gmail watch read) exits the person from every
+        // sequence. Off unless SDR_REPLY_EXIT_MODE is set; the project is used only on an
+        // exact send match, otherwise the reply address alone identifies the person.
+        if (replyExitMode() !== "off" && apolloEventId) {
+          try {
+            // Stored at detection time: a polled event's own time can be the outbound send's.
+            await enqueueExitOnly(pool,{messageId:`apollo:${apolloEventId}`,source:"apollo",mailbox:mailboxEmail || "apollo",
+              receivedAt:new Date().toISOString(),providerEventAt:occurredAt,leadId:mayMutateSend ? (sendRow?.pipedrive_lead_id || leadId || null) : null,fromEmail:contactEmail,intent:"apollo_detected"});
+          } catch (e) {
+            console.error("Reply exit enqueue failed:", e.message);
           }
         }
       }
@@ -7491,6 +7518,17 @@ if (crmObserverEnabled && process.env.PIPEDRIVE_API_TOKEN && crmCompanyId && pro
 // BEGIN OBSERVATION ADDITION
 const salesHistoryRuntime=createSalesHistoryRuntime({pool,apiToken:process.env.PIPEDRIVE_API_TOKEN});
 salesHistoryRuntime.start({enabled:process.env.SDR_SALES_HISTORY_ENABLED==='true'});
+// Order facts for the Sales page (lib/orderSales.js): Trello read only, every 6 hours, when the
+// orders source is selected or being validated. Needs TRELLO_API_KEY/TOKEN/ORDERS_BOARD_ID.
+if((process.env.SDR_SALES_SOURCE==='orders'||process.env.SDR_ORDER_FACTS_ENABLED==='true')&&trelloConfigured()&&process.env.DATABASE_URL){
+  let ordersRunning=false;
+  const runOrderFacts=()=>{if(ordersRunning)return;ordersRunning=true;
+    refreshOrderFacts(pool).then(r=>console.log('[order-facts]',JSON.stringify({orders:r?.orders,valued:r?.valued,matched:r?.matched,cards_complete:r?.cards_complete,skipped:r?.skipped})))
+      .catch(()=>console.error('[order-facts] refresh failed; previous order facts remain'))
+      .finally(()=>{ordersRunning=false;});};
+  setTimeout(runOrderFacts,150_000);
+  setInterval(runOrderFacts,6*60*60*1000);
+}
 // END OBSERVATION ADDITION
 // BEGIN OBSERVATION ADDITION
 // Conversation collection is independent from read routes and all action workers.

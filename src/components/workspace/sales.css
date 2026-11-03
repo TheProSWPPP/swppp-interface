@@ -18,6 +18,8 @@
 .sales-year-select{display:flex;align-items:center;gap:8px;min-height:44px;padding-left:12px;border:1px solid #d2dfe7;background:white;border-radius:6px;color:#426078}
 .sales-year-select select{min-height:44px;padding:8px 30px 8px 0;min-width:140px;background:transparent;font-size:13px;font-weight:600;color:#143549}
 .sales-currency-note{margin-left:auto;font-size:12px;color:#596b7b}
+.sales-source-toggle{font-size:12px;padding:4px 10px}
+.sales-order-lines{margin:8px 0 0;font-size:13px;color:#596b7b}
 .sales-custom-dates{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:16px;background:white;border:1px solid #dce4eb;border-radius:8px}
 .sales-custom-dates label{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600}
 .sales-custom-dates input{min-height:44px;border:1px solid #cbd9e3;border-radius:5px;padding:8px 12px}
