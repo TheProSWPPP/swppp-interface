@@ -42,9 +42,17 @@ CREATE TABLE IF NOT EXISTS sdr_linkedin_reply_alerts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), company_id text NOT NULL, account_id text NOT NULL,
   candidate_id uuid NOT NULL, source_message_id text NOT NULL, chat_id text, thread_url text,
   reply_text text NOT NULL, suggested_answer text, lane text,
-  state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','sent','answered','dismissed','failed')),
+  -- pending: email not sent yet; sent: emailed, reminders to come; reminded: both reminders sent,
+  -- still unanswered (terminal for the drain); answered, dismissed, failed.
+  state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','sent','reminded','answered','dismissed','failed')),
   sent_at timestamptz, gmail_message_id text, reminder1_sent_at timestamptz, reminder3_sent_at timestamptz,
+  next_reminder_at timestamptz, message_ids text[] NOT NULL DEFAULT '{}'::text[],
   answered_at timestamptz, answered_by text, failure_reason text,
   attempted_at timestamptz, reminder1_attempted_at timestamptz, reminder3_attempted_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(company_id,account_id,source_message_id));
+-- One open alert per person: a second message while it is open is appended to it, never a new email.
+CREATE UNIQUE INDEX IF NOT EXISTS sdr_linkedin_reply_alerts_open
+  ON sdr_linkedin_reply_alerts(company_id,account_id,candidate_id) WHERE state IN ('pending','sent');
+CREATE INDEX IF NOT EXISTS sdr_linkedin_reply_alerts_due
+  ON sdr_linkedin_reply_alerts(company_id,account_id,next_reminder_at) WHERE state='sent';

@@ -7432,6 +7432,9 @@ const linkedinClient=linkedinConfigured&&(linkedinMode!=='disabled'||linkedinHos
 // Derek's prospect lanes (2026-11-03): the retired Pipedrive/AGC/LBA path is not wired. Research
 // reads go through Apify (no cookie); the seat does sends plus one finalist read per person.
 const linkedinApify=createApifyClient();
+// TODO(lane C {lastProject}): readCards/readDeals are not passed, so resolveLastProject finds
+// nothing and the optional "most recently {lastProject}" clause always drops. Wire the read-only
+// Trello client from PR #125 here once it lands.
 registerSdrLinkedinRoutes(app,{pool,companyId:'13105180',accountId:linkedinAccountId,mode:linkedinMode,webhookSecret:process.env.SDR_LINKEDIN_WEBHOOK_SECRET,client:linkedinClient,hostedAuthEnabled:linkedinHostedEnabled&&Boolean(linkedinConfigured),hostedNotifyUrl:process.env.SDR_LINKEDIN_HOSTED_NOTIFY_URL,apify:linkedinApify,upload,searchSource:process.env.SDR_LINKEDIN_SEARCH_SOURCE==='unipile_salesnav'?'unipile_salesnav':'apify',ownerId:process.env.SDR_LINKEDIN_OWNER_ID||null});
 if(linkedinMode!=='disabled'&&linkedinClient){
  const readFreshContext=createLinkedinProspectFreshContext({pool,client:linkedinClient});

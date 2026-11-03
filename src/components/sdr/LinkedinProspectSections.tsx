@@ -10,7 +10,7 @@ const day=(value:string|null|undefined)=>value?new Date(value).toLocaleDateStrin
 export function LinkedinRepliesSection({alerts,onHandled,busyId}:{alerts:LinkedinReplyAlert[];onHandled?:(id:string)=>void;busyId?:string|null}){
  const [copied,setCopied]=useState<string|null>(null);
  const copy=async(alert:LinkedinReplyAlert)=>{try{await navigator.clipboard.writeText(alert.suggested_answer||'');setCopied(alert.id)}catch{setCopied(null)}};
- const open=alerts.filter(a=>['pending','sent','failed'].includes(a.state));
+ const open=alerts.filter(a=>['pending','sent','reminded','failed'].includes(a.state));
  return <section className={card} aria-label="LinkedIn replies"><h2 className="text-lg font-semibold text-slate-900">Replies</h2><p className="mt-1 text-sm text-slate-600">Their messages stopped as soon as they replied. Answer in LinkedIn yourself; the suggested answer is a starting point.</p>
   {alerts.length===0?<p className="mt-3 text-sm text-slate-600">No LinkedIn replies yet.</p>:<ul className="mt-4 space-y-4">{alerts.map(alert=><li key={alert.id} className="rounded-xl border border-slate-200 p-4">
    <div className="flex flex-wrap items-baseline justify-between gap-2"><strong className="text-sm text-slate-900">{alert.name||'Someone'}{alert.company?` (${alert.company})`:''}</strong><span className="text-xs font-medium text-slate-700">{open.includes(alert)?alert.state==='failed'?'Email to Derek failed':'Open':'Handled'}{alert.lane?` · ${LANE_NAMES[alert.lane]}`:''}</span></div>
