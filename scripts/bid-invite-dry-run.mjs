@@ -5,6 +5,9 @@
 //   PIPEDRIVE_API_TOKEN=... node scripts/bid-invite-dry-run.mjs --csv BC.csv   (adds the customer check, Pipedrive reads only)
 //   DATABASE_URL=... PIPEDRIVE_API_TOKEN=... SDR_CRM_COMPANY_ID=... node scripts/bid-invite-dry-run.mjs   (imported leads, read-only transaction)
 //
+// Pilot: --pilot=10 (database mode) prints BID_INVITE_ONLY_LEADS for the 10 newest-bid contacts that
+//        would get Email 1 next, every lead of each batch included (a batch only sends when all its
+//        leads are listed).
 // Options: --out=bid-invite-samples.html (refuses to overwrite unless --force), --limit=10,
 //          --min-bid-date=2026-09-01, --signature-file=sig.txt (CSV mode; default: Derek's .co signature).
 // Samples using wording that is not on the page Derek saw (Email 2/3 naming several projects,
@@ -16,7 +19,7 @@ import { planFromCsv, SAMPLE_SIGNATURE } from "../lib/bidInviteCsvPreview.js";
 import { renderPreviewHtml, runBidInviteSequence, bidInviteConfig } from "../lib/bidInviteEngine.js";
 
 export function parseArgs(argv) {
-  const opts = { csv: [], out: "bid-invite-samples.html", limit: 10, force: false, minBidDate: null, signatureFile: null };
+  const opts = { csv: [], out: "bid-invite-samples.html", limit: 10, force: false, minBidDate: null, signatureFile: null, pilot: 0 };
   let inCsv = false;
   for (const arg of argv) {
     if (arg === "--csv") { inCsv = true; continue; }
@@ -28,6 +31,7 @@ export function parseArgs(argv) {
       else if (k === "force") opts.force = true;
       else if (k === "min-bid-date") opts.minBidDate = v;
       else if (k === "signature-file") opts.signatureFile = v;
+      else if (k === "pilot") opts.pilot = Math.max(1, Number(v) || 10);
       else throw new Error(`unknown option --${k}`);
       continue;
     }
@@ -49,6 +53,11 @@ async function readOnlyPool(connectionString) {
     end: async () => { await client.query("ROLLBACK").catch(() => {}); client.release(); await pool.end(); },
   };
   return db;
+}
+
+// Lead ids of the first n new batches (newest bid first), for BID_INVITE_ONLY_LEADS.
+export function pilotLeadIds(result, n) {
+  return [...new Set(result.samples.filter((s) => !s.batchId && s.step === "e1").slice(0, n).flatMap((s) => s.leads.map((l) => l.id)))];
 }
 
 export function printCounts(result) {
@@ -80,14 +89,16 @@ async function main() {
     try {
       const pd = process.env.PIPEDRIVE_API_TOKEN ? await import("../lib/pipedriveClient.js") : null;
       const { isCustomerLead } = await import("../lib/customerSuppression.js");
+      const limit = Math.max(opts.limit, opts.pilot);
       result = await runBidInviteSequence(db, {
-        mode: "dry_run", preview: true, limit: opts.limit, maxNewBatches: opts.limit, pd, isCustomerLead: pd ? isCustomerLead : async () => null,
+        mode: "dry_run", preview: true, limit, maxNewBatches: limit, pd, isCustomerLead: pd ? isCustomerLead : async () => null,
         onlyLeads: cfg.onlyLeads, minBidDate, companyId: cfg.companyId,
       });
     } finally { await db.end(); }
   }
   fs.writeFileSync(out, renderPreviewHtml(result));
   printCounts(result);
+  if (opts.pilot && !opts.csv.length) console.log(`\nPilot (${opts.pilot} newest bids):\nBID_INVITE_ONLY_LEADS=${pilotLeadIds(result, opts.pilot).join(",")}`);
   console.log(`\nWrote ${out}`);
 }
 

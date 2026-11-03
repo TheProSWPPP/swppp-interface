@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS bid_invite_batches (
   owner_task_due date,
   owner_task_attempts int NOT NULL DEFAULT 0,
   owner_task_error text,
+  reply_checked_at timestamptz,        -- last reply check that read Gmail/Pipedrive (bounded per run)
+  paused_at timestamptz,               -- the contact wrote to a rep (not to us): next email held back
+  pause_reason text,
   reply_detected_at timestamptz,
   reply_source text,
   reply_handled_at timestamptz,
