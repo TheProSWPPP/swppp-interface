@@ -13,23 +13,25 @@ const job: LeadImportJob = {
 it("offers two separate upload entry points before a job is selected", () => {
   const html = renderToStaticMarkup(createElement(LeadUpload));
   expect(html).toContain("Lead Import");
-  expect(html).toContain("Upload project list");
-  expect(html).toContain("Upload bid sheet");
+  expect(html).toContain("CMD upload");
+  expect(html).toContain("Bid invites upload");
   expect(html).toContain('data-upload-kind="project_list"');
   expect(html).toContain('data-upload-kind="bid_sheet"');
   expect(html).toContain("These contacts never get cold emails.");
-  expect(html).toContain("BuildingConnected, ConstructConnect, iSQFT tabs exported as CSV");
+  expect(html).toContain("a Platform column: BC, CC, ISQFT or Other");
+  expect(html).not.toContain("Upload project list");
+  expect(html).not.toContain("Upload bid sheet");
   expect(html).not.toContain("Recorded import results");
 });
 
 it("labels which button created a job", () => {
   const bid = renderToStaticMarkup(createElement(ProgressRow, { job: { ...job, kind: "bid_sheet" } }));
-  expect(bid).toContain("Bid sheet");
+  expect(bid).toContain("Bid invites");
   const list = renderToStaticMarkup(createElement(ProgressRow, { job: { ...job, kind: "project_list" } }));
-  expect(list).toContain("Project list");
+  expect(list).toContain("CMD");
   const old = renderToStaticMarkup(createElement(ProgressRow, { job }));
-  expect(old).not.toContain("Bid sheet");
-  expect(old).not.toContain("Project list");
+  expect(old).not.toContain("Bid invites");
+  expect(old).not.toContain("CMD");
 });
 
 it("offers recorded rows for a terminal card without a delete control", () => {
