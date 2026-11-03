@@ -40,8 +40,11 @@ export interface SdrMailbox {
   signature_html: string | null;
   created_at: string;
   updated_at: string;
-  // New contacts the app started in a sequence today (what the daily cap limits).
+  // What the daily cap counts today: new contacts the app started in a sequence plus bid
+  // invite follow-ups sent from Gmail (bid_sent_today, also shown on its own).
   sent_today: number;
+  cold_sent_today?: number;
+  bid_sent_today?: number;
   // Emails Apollo delivered from this mailbox today / in 14 days, same source as the Dashboard feed.
   delivered_today?: number;
   delivered_14d?: number;
