@@ -4157,7 +4157,7 @@ function MailboxesView({ user }: { user: SdrUser }) {
                 </div>
                 <div className="mb-2 text-[11px] text-slate-500">All steps sent by Apollo from this mailbox, same as the Dashboard.</div>
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-600">New contacts started today</span>
+                  <span className="font-semibold text-slate-600">{(m.bid_sent_today ?? 0) > 0 ? "New contacts and bid follow-ups today" : "New contacts started today"}</span>
                   <span className={cn("font-mono font-semibold", (m.sent_today ?? 0) >= (m.daily_cap ?? 0) ? "text-rose-600" : "text-slate-800")}>
                     {m.sent_today ?? 0} / {m.daily_cap ?? 0}
                   </span>
@@ -4168,6 +4168,11 @@ function MailboxesView({ user }: { user: SdrUser }) {
                     style={{ width: `${Math.min(100, ((m.sent_today ?? 0) / Math.max(1, m.daily_cap ?? 1)) * 100)}%` }}
                   />
                 </div>
+                {(m.bid_sent_today ?? 0) > 0 && (
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    Includes {m.bid_sent_today} bid invite follow-up{m.bid_sent_today === 1 ? "" : "s"}, which count against the same cap.
+                  </div>
+                )}
                 <div className="mt-1 text-[11px] text-slate-400">
                   Warmup day {m.warmup_day ?? "—"} · ramping to {m.daily_send_limit}/day
                 </div>

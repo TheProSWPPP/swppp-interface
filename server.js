@@ -80,7 +80,7 @@ import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
-import { runBidInviteSequence, bidInviteConfig, liveRefusal as bidInviteLiveRefusal, bidInviteSentToday, bidInviteStatus,
+import { runBidInviteSequence, bidInviteConfig, liveRefusal as bidInviteLiveRefusal, liveSendBlock as bidInviteLiveSendBlock, bidInviteSentToday, bidInviteStatus,
   registerBidInviteExitHook, renderPreviewHtml as renderBidInvitePreview } from "./lib/bidInviteEngine.js";
 import { registerLinkedinExitHook } from "./lib/linkedinExitHook.js";
 import { runQuietConversationClock, createGeminiQuietDrafter } from "./lib/quietConversationClock.js";
@@ -1487,6 +1487,10 @@ function bidInviteDeps(mode, extra = {}) {
 }
 {
   const bidMode = bidInviteConfig().mode;
+  // Live bid emails need the reply exit live too (a reply takes the person out of every
+  // sequence). Said once at startup; every run reports it again and counts the due batches held.
+  const bidSendBlock = bidInviteLiveSendBlock();
+  if (bidSendBlock) console.error("[bid-invites] live mode will not send:", bidSendBlock);
   if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && bidMode !== "off") {
     const runBidInvites = () => {
       if (bidMode === "live") {
@@ -1495,7 +1499,7 @@ function bidInviteDeps(mode, extra = {}) {
       }
       // Scheduled dry runs plan at most 10 new batches a pass, to keep the Pipedrive reads small.
       return trackSdrJob("bid_invites", () => runBidInviteSequence(pool, bidInviteDeps(bidMode, bidMode === "dry_run" ? { maxNewBatches: 10 } : {})))
-        .then((r) => console.log("[bid-invites]", JSON.stringify({ mode: r.mode, skipped: r.skipped || null, counts: r.counts, holds: r.holds, errors: r.errors?.length || 0 })))
+        .then((r) => console.log("[bid-invites]", JSON.stringify({ mode: r.mode, skipped: r.skipped || null, reason: r.reason || null, counts: r.counts, holds: r.holds, errors: r.errors?.length || 0 })))
         .catch((e) => console.error("[bid-invites] failed:", e.message));
     };
     // First run 7 minutes after boot, clear of the lead sync and the quiet clock offsets.
@@ -1828,7 +1832,7 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
                       (SELECT count(*)::int FROM sdr_sends s
                          WHERE s.mailbox_id = sdr_mailboxes.id
                            AND (s.sent_at AT TIME ZONE 'America/Chicago')::date
-                               = (now() AT TIME ZONE 'America/Chicago')::date) AS sent_today,
+                               = (now() AT TIME ZONE 'America/Chicago')::date) AS cold_sent_today,
                       -- Emails Apollo actually delivered, counted the same way as the Dashboard's
                       -- Latest activity feed (lib/sdrActivityFeed.js), so both screens agree.
                       (SELECT count(*)::int FROM sdr_reporting_messages f
@@ -1848,16 +1852,21 @@ app.get("/api/sdr/mailboxes", async (req, res) => {
     sql += ` ORDER BY email`;
     const { rows } = await pool.query(sql, params);
     // Attach the ramped daily cap + warmup day so the UI can show "3/5 sent today".
-    // sent_today counts the shared sdr_sends log (the one per-mailbox cap that the
-    // SDR and TXR050000/permit cold systems both draw from).
+    // sent_today is what the cap counts (mailboxSentToday): the shared sdr_sends log that the
+    // SDR and TXR050000/permit cold systems both draw from, plus bid invite follow-ups sent
+    // from Gmail (bid_sent_today, shown apart).
     // bounce_rate rides along so a mailbox that has been held back shows WHY, rather than
     // looking like the ramp arbitrarily stalled.
     const health = await mailboxBounceHealth(pool);
     const apolloLimits = await apolloDailyLimits();
+    const bidToday = new Map();
+    for (const m of rows) bidToday.set(m.id, await bidInviteSentToday(pool, m.id));
     const mailboxes = rows.map((m) => {
       const h = health.get(m.id);
       return {
         ...m,
+        bid_sent_today: bidToday.get(m.id) || 0,
+        sent_today: (m.cold_sent_today || 0) + (bidToday.get(m.id) || 0),
         apollo_daily_limit: apolloLimits?.get(String(m.apollo_mailbox_id)) ?? null,
         daily_cap: dailyCap(m.warmup_started_at, { target: m.daily_send_limit, health: h }),
         warmup_day: rampDay(m.warmup_started_at),
