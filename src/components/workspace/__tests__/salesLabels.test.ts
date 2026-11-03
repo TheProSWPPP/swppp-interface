@@ -16,6 +16,6 @@ describe('sales labels follow the sales source',()=>{
   expect(orderSummaryLines(data,money)).toEqual(['8 of 10 orders valued.','Paid: 6 orders ($12,500).','Matched to Pipedrive: 7 of 10.']);
   expect(orderSummaryLines({company_sales:{source:'pipedrive'}} as unknown as MetricsResponse,money)).toEqual([]);
   expect(ORDERS_DEFINITION).toContain('Trello card');
-  for(const text of [ORDERS_DEFINITION,...salesCards('orders').map(card=>card.detail)])expect(text).not.toMatch(/[–—]/);
+  for(const text of [ORDERS_DEFINITION,...salesCards('orders').map(card=>card.detail)])expect(text).not.toMatch(/[\u2013\u2014]/);
  });
 });
