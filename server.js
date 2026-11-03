@@ -96,6 +96,7 @@ import { refreshRetryDraft } from "./lib/sdrRetryDraftRefresh.js";
 import { enrollmentSendBlock } from "./lib/sdrEnrollmentSendGuard.js";
 import { drainReplyActions, storedReplyIntent, NO_ACTION_LABELS } from "./lib/sdrReplyActions.js";
 import { enqueueExitOnly, replyExitMode } from "./lib/replyExit.js";
+import { runVolumeWatch, createVolumeAlertNotifier } from "./lib/sdrVolumeWatch.js";
 import { collectPipedriveReplies } from "./lib/sdrPipedriveReplyIntake.js";
 import { enqueueOpenAlert, drainOpenAlerts, createOpenAlertClients, checkOpenAlertContext } from "./lib/sdrOpenAlerts.js";
 import { registerSdrReplyActionBacklogRoutes } from "./lib/sdrReplyActionBacklogRoutes.js";
@@ -1570,6 +1571,17 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
   };
   setTimeout(runOpenAlerts, 110_000);
   setInterval(runOpenAlerts, 5 * 60 * 1000);
+  // Sending-volume dip alert (lib/sdrVolumeWatch.js). Read only; emails SDR_VOLUME_ALERT_TO.
+  const runVolumeAlerts = () => {
+    if (process.env.SDR_VOLUME_ALERTS_ENABLED !== "true") return;
+    const to = String(process.env.SDR_VOLUME_ALERT_TO || "").split(",").map((v) => v.trim()).filter(Boolean);
+    void trackSdrJob("volume_watch", () => runVolumeWatch(pool, {
+      notify: to.length ? createVolumeAlertNotifier({ pool, gmail: gmailInbox, getToken: accessTokenForMailbox, to,
+        notifyOwner: process.env.SDR_VOLUME_ALERT_NOTIFY_OWNER === "true" }) : null,
+    })).catch(() => console.error("[volume-watch] run failed; see run health"));
+  };
+  setTimeout(runVolumeAlerts, 120_000);
+  setInterval(runVolumeAlerts, 30 * 60 * 1000);
   setTimeout(runReplyActions, 100_000);
   setInterval(runReplyActions, 5 * 60 * 1000);
   setTimeout(runInboxWatch, 90_000);
