@@ -6619,13 +6619,15 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
   }
 
   // Read and normalise first so a wrong-sheet upload is refused before a job row exists.
+  // `kind` is read first: it widens bid-sheet header detection (lib/leadCsvNormalize.js).
+  const kind = readUploadKind(req.body?.kind);
   let csvBase64, normalized;
   try {
     const fileBuffer = fs.readFileSync(req.file.path);
     // Map Milo's bid-aggregator headers onto the canonical shape BEFORE n8n parses the file.
     // A file matching neither shape passes through byte-identical rather than being guessed at.
     // See lib/leadCsvNormalize.js.
-    normalized = normalizeLeadCsv(fileBuffer.toString("utf8"));
+    normalized = normalizeLeadCsv(fileBuffer.toString("utf8"), { kind, minBidDate: process.env.BID_INVITE_MIN_BID_DATE });
     csvBase64 = Buffer.from(normalized.csv, "utf8").toString("base64");
   } finally {
     try { fs.unlinkSync(req.file.path); } catch {}
@@ -6633,7 +6635,6 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
 
   // The upload screen has one button per sheet and sends `kind`. No `kind` (older clients)
   // behaves exactly as before. See lib/leadUploadKind.js.
-  const kind = readUploadKind(req.body?.kind);
   const kindCheck = checkUploadKind(kind, normalized);
   if (!kindCheck.ok) return res.status(kindCheck.status).json({ error: kindCheck.error });
 
@@ -6649,7 +6650,7 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
   }
   if (normalized.source !== "cmd") {
     console.log(
-      `[lead-import] job ${jobId}: kind=${kind || "none"} source=${normalized.source} renamed=[${normalized.renamed}] injected=[${normalized.injected}]`,
+      `[lead-import] job ${jobId}: kind=${kind || "none"} source=${normalized.source} renamed=[${normalized.renamed}] injected=[${normalized.injected}] platforms=${JSON.stringify(normalized.platforms)} bidDates=${JSON.stringify(normalized.bidDates)}`,
     );
   }
 
@@ -6680,6 +6681,9 @@ app.post("/api/leads/upload", upload.single("file"), async (req, res) => {
     source: normalized.source,
     renamed: normalized.renamed,
     injected: normalized.injected,
+    platforms: normalized.platforms,
+    bidDates: normalized.bidDates,
+    warnings: normalized.warnings,
   });
 });
 

@@ -34,20 +34,20 @@ const STATUS_COLOR: Record<LeadImportStatus, string> = {
 };
 
 const KIND_LABEL: Record<LeadUploadKind, string> = {
-  bid_sheet: "Bid sheet",
-  project_list: "Project list",
+  bid_sheet: "Bid invites",
+  project_list: "CMD",
 };
 
 const UPLOAD_ZONES: { kind: LeadUploadKind; title: string; hint: string }[] = [
   {
     kind: "project_list",
-    title: "Upload project list",
+    title: "CMD upload",
     hint: "Monthly CMD project list exported as CSV. Drop it here or click to browse.",
   },
   {
     kind: "bid_sheet",
-    title: "Upload bid sheet",
-    hint: "Estimator's bid tracker (BuildingConnected, ConstructConnect, iSQFT tabs exported as CSV). These contacts never get cold emails.",
+    title: "Bid invites upload",
+    hint: "One CSV per platform tab (BuildingConnected, ConstructConnect, iSqFt, Other) with a Platform column: BC, CC, ISQFT or Other. These contacts never get cold emails.",
   },
 ];
 
@@ -291,13 +291,31 @@ export default function LeadUpload() {
         <div className="mt-6">
           {mapping?.source === "bid-aggregator" && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-              <div className="font-semibold">Read as a bid aggregator sheet</div>
+              <div className="font-semibold">Read as a bid invites sheet</div>
               <div className="mt-1">
                 Renamed {mapping.renamed?.join(", ") || "nothing"}. Filled in{" "}
-                {mapping.injected?.join(", ") || "nothing"}. Every row is set to Stage CM, which is
-                the bidding sequence rather than a congratulations one. Check the rows below before
-                approving.
+                {mapping.injected?.join(", ") || "nothing"}. Stage set to Bid Invite (no CMD
+                lookups, no cold sequences). Check the rows below before approving.
               </div>
+              {mapping.platforms && Object.keys(mapping.platforms).length > 0 && (
+                <div className="mt-1">
+                  Platforms:{" "}
+                  {Object.entries(mapping.platforms)
+                    .map(([origin, n]) => `${origin.replace(/^Bid Invite:?\s*/i, "") || "no platform"} ${n}`)
+                    .join(", ")}
+                  .
+                </div>
+              )}
+              {mapping.bidDates && (
+                <div className="mt-1">
+                  Bid dates: {mapping.bidDates.parsed} read
+                  {mapping.bidDates.missing ? `, ${mapping.bidDates.missing} missing` : ""}
+                  {mapping.bidDates.beforeFloor ? `, ${mapping.bidDates.beforeFloor} before the cut-off date` : ""}.
+                </div>
+              )}
+              {mapping.warnings?.map((w) => (
+                <div key={w} className="mt-1 font-medium">{w}</div>
+              ))}
             </div>
           )}
           {mapping?.source === "unknown" && (
@@ -305,8 +323,8 @@ export default function LeadUpload() {
               <div className="font-semibold">Column names not recognised</div>
               <div className="mt-1">
                 The file went through untouched, so nothing was mangled, but the importer may not
-                find the columns it needs. Expected either the MBT layout or Milo's aggregator
-                layout.
+                find the columns it needs. Expected either the CMD layout or a bid invites sheet
+                with Company, Contact Name, Email and Platform columns.
               </div>
             </div>
           )}
