@@ -21,8 +21,8 @@ try {
   let report;
   try {
     await client.query('BEGIN READ ONLY');
-    const { projects, board, deals } = await readOrderInputs(client);
-    const { facts, excluded } = buildOrderFacts(projects, board.cards, deals, { paidOptions: board.paidOptions });
+    const { projects, board, deals, links } = await readOrderInputs(client);
+    const { facts, excluded } = buildOrderFacts(projects, board.cards, deals, { paidOptions: board.paidOptions, links });
     const rows = new Map();
     const row = m => rows.get(m) || rows.set(m, { month: m, crm_won: 0, crm_value: 0, orders: 0, order_value: 0, unvalued: 0, matched: 0, paid: 0 }).get(m);
     for (const deal of deals) {
