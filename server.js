@@ -59,7 +59,7 @@ import { ownerScope, withLeadLock, leadVisibilityScope, leadVisibleTo } from "./
 import { staleDraftBlock } from "./lib/draftFreshness.js";
 import { normalizeLeadCsv } from "./lib/leadCsvNormalize.js";
 import { readUploadKind, checkUploadKind } from "./lib/leadUploadKind.js";
-import { isCustomerLead, refreshCustomerIndex, customerIndexStats, customerMatch } from "./lib/customerSuppression.js";
+import { isCustomerLead, refreshCustomerIndex, customerIndexStats } from "./lib/customerSuppression.js";
 import { buildDraftFromLead } from "./lib/sdrDraftGenerator.js";
 import {registerSdrDraftReplacementRoutes} from './lib/sdrDraftReplacement.js';
 import {prepareDraftCreation,commitDraftCreation,draftCreationOrigin} from "./lib/sdrDraftCreation.js";
@@ -106,7 +106,8 @@ import { registerSdrConversationRoutes } from "./lib/sdrConversationRoutes.js";
 import {registerSdrLinkedinRoutes} from "./lib/sdrLinkedinRoutes.js";
 import {createLinkedinClient} from "./lib/sdrLinkedinClient.js";
 import {startLinkedinRuntime} from "./lib/sdrLinkedinRuntime.js";
-import {createLinkedinFreshContext} from "./lib/sdrLinkedinFreshContext.js";
+import {createLinkedinProspectFreshContext} from "./lib/sdrLinkedinProspectFreshContext.js";
+import {createApifyClient} from "./lib/apifyClient.js";
 import {createLinkedinInboundHandler} from "./lib/sdrLinkedinInbound.js";
 import {chargeLinkedinRead} from "./lib/sdrLinkedinReadBudget.js";
 import { runAutoOutreach, pruneStaleQueuedDrafts, expireStaleQueuedDrafts, adoptPendingAutomaticDrafts, emailConfirmedValid } from "./lib/autoOutreach.js";
@@ -7432,12 +7433,16 @@ const linkedinAccountId=process.env.SDR_LINKEDIN_ACCOUNT_ID||null;
 const linkedinHostedEnabled=process.env.SDR_LINKEDIN_HOSTED_AUTH_ENABLED==='true';
 const linkedinConfigured=linkedinAccountId&&process.env.SDR_LINKEDIN_API_KEY&&process.env.SDR_LINKEDIN_DSN&&process.env.SDR_CRM_COMPANY_ID==='13105180';
 const linkedinClient=linkedinConfigured&&(linkedinMode!=='disabled'||linkedinHostedEnabled)?createLinkedinClient({baseUrl:process.env.SDR_LINKEDIN_DSN,apiKey:process.env.SDR_LINKEDIN_API_KEY,accountId:linkedinAccountId,allowWrites:linkedinMode==='live'&&process.env.SDR_LINKEDIN_ALLOW_WRITES==='true',allowHostedAuth:linkedinHostedEnabled,onRead:()=>chargeLinkedinRead({pool,companyId:'13105180',accountId:linkedinAccountId})}):null;
-const linkedinCustomerLookup=async leadId=>{const lead=await pipedriveClient.getLead(leadId);if(!lead)throw new Error('lead_unavailable');const orgId=lead.organization_id??lead.org_id;if(!orgId)throw new Error('organization_unavailable');const org=await pipedriveClient.getOrganization(orgId);if(!org?.name)throw new Error('organization_unavailable');const index=await refreshCustomerIndex({force:true});return customerMatch({label_ids:lead.label_ids,org_id:orgId,org_name:org.name},index)!==null};
-registerSdrLinkedinRoutes(app,{pool,companyId:'13105180',accountId:linkedinAccountId,mode:linkedinMode,webhookSecret:process.env.SDR_LINKEDIN_WEBHOOK_SECRET,client:linkedinClient,hostedAuthEnabled:linkedinHostedEnabled&&Boolean(linkedinConfigured),hostedNotifyUrl:process.env.SDR_LINKEDIN_HOSTED_NOTIFY_URL,crm:pipedriveClient,apollo:apolloClient,customerLookup:linkedinCustomerLookup});
+// Derek's prospect lanes (2026-11-03): the retired Pipedrive/AGC/LBA path is not wired. Research
+// reads go through Apify (no cookie); the seat does sends plus one finalist read per person.
+const linkedinApify=createApifyClient();
+// TODO(lane C {lastProject}): readCards/readDeals are not passed, so resolveLastProject finds
+// nothing and the optional "most recently {lastProject}" clause always drops. Wire the read-only
+// Trello client from PR #125 here once it lands.
+registerSdrLinkedinRoutes(app,{pool,companyId:'13105180',accountId:linkedinAccountId,mode:linkedinMode,webhookSecret:process.env.SDR_LINKEDIN_WEBHOOK_SECRET,client:linkedinClient,hostedAuthEnabled:linkedinHostedEnabled&&Boolean(linkedinConfigured),hostedNotifyUrl:process.env.SDR_LINKEDIN_HOSTED_NOTIFY_URL,apify:linkedinApify,upload,searchSource:process.env.SDR_LINKEDIN_SEARCH_SOURCE==='unipile_salesnav'?'unipile_salesnav':'apify',ownerId:process.env.SDR_LINKEDIN_OWNER_ID||null});
 if(linkedinMode!=='disabled'&&linkedinClient){
- const customerLookup=linkedinCustomerLookup;
- const readFreshContext=createLinkedinFreshContext({pool,client:linkedinClient,crm:pipedriveClient,apollo:apolloClient,customerLookup});
- startLinkedinRuntime({pool,client:linkedinClient,companyId:'13105180',accountId:linkedinAccountId,mode:linkedinMode,readFreshContext,onInbound:createLinkedinInboundHandler({pool,client:linkedinClient,crm:pipedriveClient,apollo:apolloClient,mode:linkedinMode,appBase:process.env.PUBLIC_BASE_URL})});
+ const readFreshContext=createLinkedinProspectFreshContext({pool,client:linkedinClient});
+ startLinkedinRuntime({pool,client:linkedinClient,companyId:'13105180',accountId:linkedinAccountId,mode:linkedinMode,readFreshContext,gmail:gmailInbox,getToken:accessTokenForMailbox,onInbound:createLinkedinInboundHandler({pool,client:linkedinClient,crm:pipedriveClient,apollo:apolloClient,mode:linkedinMode,appBase:process.env.PUBLIC_BASE_URL})});
 }
 
 if (process.env.SDR_CONVERSATION_HISTORY_ENABLED === "true") {
