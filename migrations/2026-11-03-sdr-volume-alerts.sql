@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS sdr_volume_alerts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   mailbox_email text NOT NULL,
   day date NOT NULL,
-  kind text NOT NULL CHECK (kind IN ('volume_dip','stalled_today','cap_lowered')),
+  kind text NOT NULL CHECK (kind IN ('volume_dip','stalled_today','cap_lowered','facts_stale')),
   sent integer NOT NULL,
   baseline numeric NOT NULL,
   evidence jsonb NOT NULL DEFAULT '{}',
