@@ -29,9 +29,9 @@ it("shows the server's sentence, not the JSON, when the upload is refused", asyn
   stubFetch({
     ok: false,
     status: 400,
-    text: async () => JSON.stringify({ error: "This looks like the estimator's bid tracker. Use Upload bid sheet." }),
+    text: async () => JSON.stringify({ error: "This looks like a bid invites sheet. Use Bid invites upload." }),
   });
   await expect(uploadLeadsCsv(file, "project_list")).rejects.toThrow(
-    "This looks like the estimator's bid tracker. Use Upload bid sheet.",
+    "This looks like a bid invites sheet. Use Bid invites upload.",
   );
 });
