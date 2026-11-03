@@ -51,6 +51,13 @@ CREATE TABLE IF NOT EXISTS sdr_linkedin_reply_alerts (
   attempted_at timestamptz, reminder1_attempted_at timestamptz, reminder3_attempted_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(company_id,account_id,source_message_id));
+-- A database that already has the first version of this table gets the new columns and states.
+ALTER TABLE sdr_linkedin_reply_alerts
+  ADD COLUMN IF NOT EXISTS next_reminder_at timestamptz,
+  ADD COLUMN IF NOT EXISTS message_ids text[] NOT NULL DEFAULT '{}'::text[];
+ALTER TABLE sdr_linkedin_reply_alerts DROP CONSTRAINT IF EXISTS sdr_linkedin_reply_alerts_state_check;
+ALTER TABLE sdr_linkedin_reply_alerts ADD CONSTRAINT sdr_linkedin_reply_alerts_state_check
+  CHECK (state IN ('pending','sent','reminded','answered','dismissed','failed'));
 -- One open alert per person: a second message while it is open is appended to it, never a new email.
 CREATE UNIQUE INDEX IF NOT EXISTS sdr_linkedin_reply_alerts_open
   ON sdr_linkedin_reply_alerts(company_id,account_id,candidate_id) WHERE state IN ('pending','sent');
