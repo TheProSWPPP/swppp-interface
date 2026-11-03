@@ -95,6 +95,7 @@ import { enrollmentRetryEnabled, beginEnrollmentAttempt, recordEnrollmentAttempt
 import { refreshRetryDraft } from "./lib/sdrRetryDraftRefresh.js";
 import { enrollmentSendBlock } from "./lib/sdrEnrollmentSendGuard.js";
 import { drainReplyActions, storedReplyIntent, NO_ACTION_LABELS } from "./lib/sdrReplyActions.js";
+import { enqueueExitOnly, replyExitMode } from "./lib/replyExit.js";
 import { collectPipedriveReplies } from "./lib/sdrPipedriveReplyIntake.js";
 import { enqueueOpenAlert, drainOpenAlerts, createOpenAlertClients, checkOpenAlertContext } from "./lib/sdrOpenAlerts.js";
 import { registerSdrReplyActionBacklogRoutes } from "./lib/sdrReplyActionBacklogRoutes.js";
@@ -4029,6 +4030,17 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
             await stopOwnedEnrollment({pool,apollo:apolloClient,expected:{contactId:sendRow.apollo_contact_id,campaignId:replySeqId,sendId:sendRow.id,leadId:sendRow.pipedrive_lead_id||leadId,membershipId:null,addedAt:null},actionId:`event-stop:${apolloEventId||sendRow.id}`});
           } catch (e) {
             console.error("Apollo remove-from-sequence on reply failed:", e.message);
+          }
+        }
+        // A reply Apollo saw (even one no Gmail watch read) exits the person from every
+        // sequence. Off unless SDR_REPLY_EXIT_MODE is set; the project is used only on an
+        // exact send match, otherwise the reply address alone identifies the person.
+        if (replyExitMode() !== "off" && apolloEventId) {
+          try {
+            await enqueueExitOnly(pool,{messageId:`apollo:${apolloEventId}`,source:"apollo",mailbox:mailboxEmail || "apollo",
+              receivedAt:occurredAt,leadId:mayMutateSend ? (sendRow?.pipedrive_lead_id || leadId || null) : null,fromEmail:contactEmail,intent:"apollo_detected"});
+          } catch (e) {
+            console.error("Reply exit enqueue failed:", e.message);
           }
         }
       }

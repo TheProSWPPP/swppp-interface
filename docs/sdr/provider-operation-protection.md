@@ -2,6 +2,11 @@
 
 The Apollo adapter has no verified generation-conditional removal. The automatic stop executor therefore makes **zero removal calls**. A fresh contact read or local advisory lock does not change that policy. It records the expected local send/generation and a review reason. Provider mail may remain scheduled.
 
+**Superseded for replies (2026-10 and 2026-11-03).** Two reply paths do write to Apollo, both with `mark_as_finished` (history kept) and both taking Apollo's own status on a fresh read as the receipt, never the write's 200:
+
+- `stop_sequence` (reply or bounce on a project): finishes only the one membership proven to be this app's own send (`stopOwnedEnrollment` with `allowRemoval`).
+- `exit_person` (`lib/replyExit.js`, any human reply, behind `SDR_REPLY_EXIT_MODE=off|dry_run|live`, default off): finishes EVERY active or paused membership of every Apollo contact of the replying person, including memberships this app did not create (added by hand in Apollo, permit sequences). This is deliberate: a reply means the person leaves every sequence. `dry_run` records the plan in `sdr_reply_exits` and writes nothing to Apollo. Out-of-office and bounces never trigger it.
+
 Current-enrollment operator removal remains an explicit review action; this change does not implement an operator removal endpoint. Its contact+campaign scope and the external remove/re-add race must be shown before execution. Established contact-wide unsubscribe is a separate policy and is not represented as project-only cancellation.
 
 ## Implemented callers
@@ -11,6 +16,7 @@ Current-enrollment operator removal remains an explicit review action; this chan
 | `sdrAutoSwitch.runAutoSwitch` | Context changes produce durable stop review and an unresolved engagement event. No generation, marker clear, replacement enrollment, or provider removal. Cleared identity/trigger fields also invalidate the context. |
 | `apolloCollision.campaignsToRelease` | No campaign is released automatically, including finished campaigns. |
 | `inboxReplyWatch.createReplyActionClients.stop_sequence` | Shared durable executor, no broad removal, no stopped receipt inferred from absence. Existing reply-message/action foreign keys retained. |
+| `inboxReplyWatch.createReplyActionClients.exit_person` | Person-wide finish on a human reply (see above). Off by default; receipt is a fresh contact read; an uncertain receipt stays in review until a re-read shows no open membership. |
 | Legacy inbox reply and bounce | Shared executor; no raw removal; bounce notes report provider-stop review. |
 | Reply marker clearing | Existing marker is preserved; no GET/PATCH claim of conditional safety. Already empty marker can be observed. |
 | `sdrReplyActions.enqueueReplyActions` | Stop target includes send ID so reused contact/campaign generations remain separate. |
