@@ -17,4 +17,17 @@ CREATE TABLE IF NOT EXISTS sdr_order_facts (
   observed_at timestamptz NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_sdr_order_facts_day ON sdr_order_facts(ordered_on) WHERE current;
+-- Reviewed project/card -> Pipedrive deal links (lib/sdrOrderReconciliation.js semantics).
+-- Filled by staff when an order and its deal cannot be matched by email; read by the refresh.
+CREATE TABLE IF NOT EXISTS sdr_order_deal_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id text,
+  card_id text,
+  pipedrive_deal_id text NOT NULL,
+  evidence jsonb NOT NULL,
+  reviewed_by text NOT NULL,
+  reviewed_at timestamptz NOT NULL DEFAULT NOW(),
+  active boolean NOT NULL DEFAULT true,
+  CHECK (project_id IS NOT NULL OR card_id IS NOT NULL)
+);
 COMMIT;

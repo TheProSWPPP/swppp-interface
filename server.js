@@ -4051,8 +4051,9 @@ app.post("/api/sdr/events/ingest", express.json({ limit: "1mb" }), async (req, r
         // exact send match, otherwise the reply address alone identifies the person.
         if (replyExitMode() !== "off" && apolloEventId) {
           try {
+            // Stored at detection time: a polled event's own time can be the outbound send's.
             await enqueueExitOnly(pool,{messageId:`apollo:${apolloEventId}`,source:"apollo",mailbox:mailboxEmail || "apollo",
-              receivedAt:occurredAt,leadId:mayMutateSend ? (sendRow?.pipedrive_lead_id || leadId || null) : null,fromEmail:contactEmail,intent:"apollo_detected"});
+              receivedAt:new Date().toISOString(),providerEventAt:occurredAt,leadId:mayMutateSend ? (sendRow?.pipedrive_lead_id || leadId || null) : null,fromEmail:contactEmail,intent:"apollo_detected"});
           } catch (e) {
             console.error("Reply exit enqueue failed:", e.message);
           }

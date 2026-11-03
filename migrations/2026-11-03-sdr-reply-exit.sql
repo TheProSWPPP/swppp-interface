@@ -6,6 +6,13 @@ ALTER TABLE sdr_reply_actions DROP CONSTRAINT IF EXISTS sdr_reply_actions_kind_c
 ALTER TABLE sdr_reply_actions ADD CONSTRAINT sdr_reply_actions_kind_check
   CHECK(kind IN ('stop_sequence','forward','create_task','create_note','match_lead','clear_sequence_flag','exit_person'));
 
+-- Apollo-detected, LinkedIn and bid-invite replies are recorded only as exit triggers
+-- (reply_kind 'exit_signal', no project or thread link) so the readers of human Gmail
+-- replies (quiet follow-up clock, ops snapshot, engagement summary, inbox lists) skip them.
+ALTER TABLE sdr_reply_messages DROP CONSTRAINT IF EXISTS sdr_reply_messages_reply_kind_check;
+ALTER TABLE sdr_reply_messages ADD CONSTRAINT sdr_reply_messages_reply_kind_check
+  CHECK (reply_kind IN ('human','auto','bounce','exit_signal'));
+
 -- The 180-day recent-reply fence (lib/recentReply.js) reads the sender from here, so a reply
 -- seen only by the current reply pipeline still blocks new cold outreach to that address.
 ALTER TABLE sdr_reply_messages ADD COLUMN IF NOT EXISTS from_email text;

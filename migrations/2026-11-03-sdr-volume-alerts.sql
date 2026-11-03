@@ -13,7 +13,9 @@ CREATE TABLE IF NOT EXISTS sdr_volume_alerts (
   created_at timestamptz NOT NULL DEFAULT NOW(),
   notified_at timestamptz,
   resolved_at timestamptz,
+  notify_receipt jsonb,
   UNIQUE(mailbox_email, day, kind)
 );
+ALTER TABLE sdr_volume_alerts ADD COLUMN IF NOT EXISTS notify_receipt jsonb;
 CREATE INDEX IF NOT EXISTS idx_sdr_volume_alerts_open ON sdr_volume_alerts(created_at) WHERE resolved_at IS NULL;
 COMMIT;
