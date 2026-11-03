@@ -80,7 +80,8 @@ import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
-import { runBidFollowUpClock } from "./lib/bidFollowUpClock.js";
+import { runBidInviteSequence, bidInviteConfig, liveRefusal as bidInviteLiveRefusal, bidInviteSentToday, bidInviteStatus,
+  registerBidInviteExitHook, renderPreviewHtml as renderBidInvitePreview } from "./lib/bidInviteEngine.js";
 import { runQuietConversationClock, createGeminiQuietDrafter } from "./lib/quietConversationClock.js";
 import { readFollowupOutcomes } from "./lib/followupOutcomeReadout.js";
 import * as gmailInbox from "./lib/gmailInbox.js";
@@ -550,7 +551,8 @@ const pool = createDatabasePool(process.env.DATABASE_URL);
 
 // Shared per-mailbox daily send count (America/Chicago day). This is the single
 // cap both the SDR and TXR050000/permit cold systems draw from — every email send
-// records into sdr_sends, so this counts them together.
+// records into sdr_sends, so this counts them together. Bid invite follow-ups sent
+// straight from Gmail (lib/bidInviteEngine.js) count against the same cap.
 async function mailboxSentToday(mailboxId) {
   const { rows } = await pool.query(
     `SELECT count(*)::int n FROM sdr_sends
@@ -558,7 +560,7 @@ async function mailboxSentToday(mailboxId) {
         AND (sent_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date`,
     [mailboxId],
   );
-  return rows[0].n;
+  return rows[0].n + await bidInviteSentToday(pool, mailboxId);
 }
 
 // Initial Database Schema Setup
@@ -1464,15 +1466,38 @@ if (process.env.DATABASE_URL && process.env.APOLLO_API_KEY) {
   setTimeout(() => { runReconcile(); setInterval(runReconcile, 24 * 60 * 60 * 1000); }, 20 * 60 * 1000);
 }
 
-// Bid follow-up clock: puts dated "Bid follow-up" tasks, with the email written out, on
-// bid-sheet leads for the lead owner to send by hand. Sends nothing. Off unless switched on.
-if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.BID_FOLLOWUP_ENABLED === "true") {
-  const runBidClock = () =>
-    runBidFollowUpClock(pool, { pd: pipedriveClient })
-      .then((r) => { if (r.created || r.skipped || r.failed) console.log("[bid-followup]", JSON.stringify(r)); })
-      .catch((e) => console.error("[bid-followup] failed:", e.message));
-  setTimeout(runBidClock, 120_000);
-  setInterval(runBidClock, 60 * 60 * 1000);
+// Bid invite follow-ups (lib/bidInviteEngine.js): Email 1 after the bid date, Email 2/3 about 4
+// and 6 weeks after it (customers: Email 1, then a task for the owner), sent from the .co Gmail
+// mailboxes. BID_INVITE_SEQUENCE=off (default) | dry_run | live. The old before-bid task clock
+// (BID_FOLLOWUP_ENABLED) is gone: nothing goes out before the bid date.
+// The exit hook is registered whatever the mode, so a reply anywhere closes bid invite work.
+if (process.env.DATABASE_URL) registerBidInviteExitHook(pool);
+function bidInviteDeps(mode, extra = {}) {
+  const cfg = bidInviteConfig();
+  return {
+    mode, pd: pipedriveClient, gmail: gmailInbox, getToken: accessTokenForMailbox,
+    verifyEmail: (email) => emailVerify.verifyEmail(email), isCustomerLead,
+    draftReply: createGeminiQuietDrafter({ apiKey: GEMINI_API_KEY, model: cfg.replyModel || GEMINI_MODEL }),
+    onlyLeads: cfg.onlyLeads, perMailboxDay: cfg.perMailboxDay, minBidDate: cfg.minBidDate, companyId: cfg.companyId,
+    mailboxSentToday, ...extra,
+  };
+}
+{
+  const bidMode = bidInviteConfig().mode;
+  if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && bidMode !== "off") {
+    const runBidInvites = () => {
+      if (bidMode === "live") {
+        const refusal = bidInviteLiveRefusal(process.env, { gmailConfigured: gmailInbox.isConfigured() });
+        if (refusal) return console.error("[bid-invites] live mode refused:", refusal);
+      }
+      // Scheduled dry runs plan at most 10 new batches a pass, to keep the Pipedrive reads small.
+      return trackSdrJob("bid_invites", () => runBidInviteSequence(pool, bidInviteDeps(bidMode, bidMode === "dry_run" ? { maxNewBatches: 10 } : {})))
+        .then((r) => console.log("[bid-invites]", JSON.stringify({ mode: r.mode, skipped: r.skipped || null, counts: r.counts, holds: r.holds, errors: r.errors?.length || 0 })))
+        .catch((e) => console.error("[bid-invites] failed:", e.message));
+    };
+    // First run 7 minutes after boot, clear of the lead sync and the quiet clock offsets.
+    setTimeout(() => { runBidInvites(); setInterval(runBidInvites, 10 * 60 * 1000); }, 7 * 60 * 1000);
+  }
 }
 
 // Quiet-conversation clock: when a buyer conversation stalls after a real reply, puts a task
@@ -2002,6 +2027,34 @@ app.get("/api/sdr/customer-index", async (req, res) => {
   }
 });
 
+// Bid invite follow-ups: what would go out, rendered, whatever BID_INVITE_SEQUENCE says. Always a
+// dry run (no claim, send, Pipedrive write or verification credit). ?format=html is a plain page of
+// the sample emails with their flags, for showing Derek before anything is switched on.
+app.get("/api/sdr/bid-invites/preview", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
+    const result = await runBidInviteSequence(pool, bidInviteDeps("dry_run", { preview: true, limit, maxNewBatches: limit }));
+    if (req.query.format === "html") return res.type("html").send(renderBidInvitePreview(result));
+    res.json(result);
+  } catch (err) {
+    console.error("GET /api/sdr/bid-invites/preview error:", err);
+    res.status(500).json({ error: "Bid invite preview failed", detail: err.message });
+  }
+});
+
+app.get("/api/sdr/bid-invites/status", async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
+  if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  try {
+    res.json({ mode: bidInviteConfig().mode, ...(await bidInviteStatus(pool)) });
+  } catch (err) {
+    console.error("GET /api/sdr/bid-invites/status error:", err);
+    res.status(500).json({ error: "Bid invite status failed", detail: err.message });
+  }
+});
+
 app.get("/api/sdr/settings", async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database not configured" });
   if (req.sdrUser?.role !== "admin") return res.status(403).json({ error: "Admin only" });
@@ -2243,6 +2296,8 @@ app.get("/api/sdr/leads", async (req, res) => {
       else addFilter("s.trigger_type = $$", req.query.trigger);
     }
     if (req.query.stage) addFilter("s.project_stage = $$", req.query.stage);
+    // Bid invite leads only (Lead Origin "Bid Invite..."); they rank by lead score like the rest.
+    if (req.query.origin === "bid_invite") where.push("lower(btrim(coalesce(s.lead_origin,''))) LIKE 'bid invite%'");
     // Outreach source filter (references the `ol` LATERAL below, which is in scope by the
     // time WHERE is evaluated): pipedrive | interface | none (never outreached).
     if (req.query.source) {

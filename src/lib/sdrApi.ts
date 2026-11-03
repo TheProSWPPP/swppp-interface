@@ -225,6 +225,8 @@ export interface SdrLead {
   outreach_sender_email: string | null;
   bid_date: string | null;
   start_date: string | null;
+  // "Bid Invite: BuildingConnected" etc. for bid-sheet leads (comes back via s.*).
+  lead_origin?: string | null;
   trigger_override: string | null;
   owner_name: string | null;
   lead_score: number | null;
@@ -298,6 +300,7 @@ export interface SdrLeadsQuery {
   trigger?: string;
   stage?: string;
   source?: string; // outreach source: pipedrive | interface | none
+  origin?: "bid_invite"; // bid-sheet leads only (Lead Origin "Bid Invite...")
   q?: string;
   sort?: string;
   dir?: "asc" | "desc";
@@ -741,6 +744,7 @@ export const sdrApi = {
     if (params?.trigger) qs.set("trigger", params.trigger);
     if (params?.stage) qs.set("stage", params.stage);
     if (params?.source) qs.set("source", params.source);
+    if (params?.origin) qs.set("origin", params.origin);
     if (params?.q) qs.set("q", params.q);
     if (params?.sort) qs.set("sort", params.sort);
     if (params?.dir) qs.set("dir", params.dir);
@@ -796,3 +800,9 @@ export const sdrApi = {
       body: JSON.stringify(params),
     }),
 };
+
+// "Bid Invite: BuildingConnected" -> "Bid invite · BuildingConnected"; plain "Bid Invite" -> "Bid invite".
+export function bidInviteChipLabel(origin: string | null | undefined): string {
+  const platform = String(origin || "").replace(/^\s*bid invite\s*:?\s*/i, "").trim();
+  return platform ? `Bid invite · ${platform}` : "Bid invite";
+}
