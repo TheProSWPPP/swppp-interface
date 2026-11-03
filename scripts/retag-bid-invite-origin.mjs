@@ -7,7 +7,7 @@
 // to write. It was written but not run when it was added; Ivan runs it.
 //
 //   PIPEDRIVE_API_TOKEN=... node scripts/retag-bid-invite-origin.mjs                    (dry run, the lead below)
-//   PIPEDRIVE_API_TOKEN=... node scripts/retag-bid-invite-origin.mjs --lead=<id> --platform=ConstructConnect
+//   PIPEDRIVE_API_TOKEN=... node scripts/retag-bid-invite-origin.mjs --lead=<id> --platform=BuildingConnected   (optional; stops if it disagrees with the lead's own code)
 //   PIPEDRIVE_API_TOKEN=... DATABASE_URL=... node scripts/retag-bid-invite-origin.mjs --apply
 //   DATABASE_URL=... node scripts/retag-bid-invite-origin.mjs --scan                      (list other bare-code rows, read only)
 //
@@ -24,12 +24,18 @@ const PD_BASE = 'https://api.pipedrive.com/v1';
 export const SHORT_CODE = /^(bc|cc|isqft|other|buildingconnected|constructconnect)$/i;
 
 /** The decision, with no I/O: what would be written, or why it must not be. */
-export function planRetag(currentValue, platformArg) {
-  const platform = platformFromColumn(platformArg);
-  if (!platform) return { ok: false, reason: `--platform must be BuildingConnected, ConstructConnect, iSqFt or Other (got "${platformArg}")` };
+export function planRetag(currentValue, platformArg = '') {
   const current = String(currentValue ?? '');
   if (!SHORT_CODE.test(current.trim())) {
     return { ok: false, reason: `current Lead Origin is ${JSON.stringify(current)}, not a bare short code, so nothing to do` };
+  }
+  // The platform comes from the code the lead already carries ("BC" is BuildingConnected).
+  // --platform is only a cross-check: if it disagrees, stop rather than guess.
+  const platform = platformFromColumn(current);
+  if (String(platformArg).trim()) {
+    const asked = platformFromColumn(platformArg);
+    if (!asked) return { ok: false, reason: `--platform must be BuildingConnected, ConstructConnect, iSqFt or Other (got "${platformArg}")` };
+    if (asked !== platform) return { ok: false, reason: `--platform ${asked} disagrees with the current value ${JSON.stringify(current)}, which means ${platform}` };
   }
   return { ok: true, from: current, to: `Bid Invite: ${platform}` };
 }
@@ -88,7 +94,7 @@ async function run(args) {
   if (args.includes('--scan')) return scan();
 
   const leadId = flag('lead') || DEFAULT_LEAD;
-  const platformArg = flag('platform') || 'BuildingConnected';
+  const platformArg = flag('platform');
   const first = await readOrigin(leadId);
   console.log(`lead ${leadId} "${first.title}": Lead Origin is ${JSON.stringify(first.value)}`);
   const plan = planRetag(first.value, platformArg);
