@@ -82,6 +82,7 @@ import { syncLeadState } from "./lib/pipedriveSync.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
 import { runBidInviteSequence, bidInviteConfig, liveRefusal as bidInviteLiveRefusal, bidInviteSentToday, bidInviteStatus,
   registerBidInviteExitHook, renderPreviewHtml as renderBidInvitePreview } from "./lib/bidInviteEngine.js";
+import { registerLinkedinExitHook } from "./lib/linkedinExitHook.js";
 import { runQuietConversationClock, createGeminiQuietDrafter } from "./lib/quietConversationClock.js";
 import { readFollowupOutcomes } from "./lib/followupOutcomeReadout.js";
 import * as gmailInbox from "./lib/gmailInbox.js";
@@ -1472,7 +1473,8 @@ if (process.env.DATABASE_URL && process.env.APOLLO_API_KEY) {
 // mailboxes. BID_INVITE_SEQUENCE=off (default) | dry_run | live. The old before-bid task clock
 // (BID_FOLLOWUP_ENABLED) is gone: nothing goes out before the bid date.
 // The exit hook is registered whatever the mode, so a reply anywhere closes bid invite work.
-if (process.env.DATABASE_URL) registerBidInviteExitHook(pool);
+// The LinkedIn prospect lanes (#124) join the same exit: a reply holds the person's LinkedIn lane too.
+if (process.env.DATABASE_URL) { registerBidInviteExitHook(pool); registerLinkedinExitHook(pool, { companyId: process.env.SDR_CRM_COMPANY_ID }); }
 function bidInviteDeps(mode, extra = {}) {
   const cfg = bidInviteConfig();
   return {
