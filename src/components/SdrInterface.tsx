@@ -39,6 +39,7 @@ import {
   getToken,
   getUser,
   pipedriveLeadUrl,
+  bidInviteChipLabel,
   sdrApi,
   setSession,
   type SdrDraft,
@@ -1974,7 +1975,16 @@ function LeadRow({
         {lead.person_email && <div className="text-xs text-slate-400">{lead.person_email}</div>}
       </td>
       {/* Stage */}
-      <td className="px-4 py-3.5 align-top text-slate-600">{lead.project_stage || "—"}</td>
+      <td className="px-4 py-3.5 align-top text-slate-600">
+        {lead.project_stage || "—"}
+        {/^\s*bid invite/i.test(lead.lead_origin || "") && (
+          <div className="mt-1">
+            <span className="inline-block rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700" data-bid-invite-chip>
+              {bidInviteChipLabel(lead.lead_origin)}
+            </span>
+          </div>
+        )}
+      </td>
       {/* Lead score (Pipedrive) — priority signal */}
       <td className="px-4 py-3.5 align-top whitespace-nowrap">
         {lead.lead_score == null ? (
