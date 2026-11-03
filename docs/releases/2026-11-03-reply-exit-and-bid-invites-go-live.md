@@ -50,8 +50,9 @@ A reply recorded elsewhere closes the person's bid batches through the exit hook
 
 ## Other rules switched on with `BID_INVITE_SEQUENCE`
 
-- At most one bid email per company per Chicago day, across mailboxes. The company is the Pipedrive organization, or the email domain when there is none; personal mail domains (gmail.com and the like) are never a company.
+- At most one bid email per company per Chicago day, across mailboxes. Two sends are the same company when they share the Pipedrive organization or the email domain (a batch with an organization and one without it, same domain, count as one); personal mail domains (gmail.com and the like) are never a company.
+- A cold Apollo enrolment to an address that got a bid email in the last 72 hours is held with a plain message saying when it can go (send guard, `lib/sdrSendSafety.js`), even after the bid lead is archived. The draft is kept.
 - Derek's window is 4 to 6 weeks after the bid: Email 2 goes only if it can go by bid + 56 days, Email 3 only by bid + 70 days. A follow-up that cannot make it is skipped and the bid simply ends.
 - Time zone: the organization's state, else the contact's phone area code, else Central.
 - Each mailbox's "sent today" on the Mailboxes page counts bid follow-ups with cold starts, the same number the shared daily cap counts, and says how many were bid follow-ups.
-- The volume alert compares each mailbox's total (cold plus bid, which share the cap) and shows the two apart; its freshness check reads Apollo's own outbound facts only.
+- The volume alert: "nothing sent by noon" reads cold (Apollo) sends only, so bid emails never hide a full Apollo stop. The dip rule compares cold sends with the cold baseline minus that day's extra bid sends (above the mailbox's own bid average, never below 0), so bid emails that took part of the shared cap are not a false dip. Alerts show cold and bid apart; the freshness check reads Apollo's own outbound facts only.

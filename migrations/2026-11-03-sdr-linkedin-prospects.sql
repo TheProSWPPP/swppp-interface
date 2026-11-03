@@ -2,6 +2,8 @@
 -- Nothing here sends: every new path is behind its own SDR_LINKEDIN_* switch, default off.
 -- sdr_linkedin_actions.step gains the values 'inmail' and 'withdraw'; the column has no CHECK,
 -- and UNIQUE(company_id,account_id,person_id,step) keeps each step to once per person.
+-- One transaction: a failure part way leaves nothing half applied.
+BEGIN;
 ALTER TABLE sdr_linkedin_candidates
   ADD COLUMN IF NOT EXISTS lane text CHECK (lane IN ('A','B','C','D')),
   ADD COLUMN IF NOT EXISTS priority integer NOT NULL DEFAULT 1000,
@@ -63,3 +65,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS sdr_linkedin_reply_alerts_open
   ON sdr_linkedin_reply_alerts(company_id,account_id,candidate_id) WHERE state IN ('pending','sent');
 CREATE INDEX IF NOT EXISTS sdr_linkedin_reply_alerts_due
   ON sdr_linkedin_reply_alerts(company_id,account_id,next_reminder_at) WHERE state='sent';
+COMMIT;
