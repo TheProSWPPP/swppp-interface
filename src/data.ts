@@ -97,6 +97,7 @@ export interface AIContentItem {
   n8nExecutionId?: string;
   errorMessage?: string;
   metadata?: Record<string, any>;
+  ownerFacts?: string;
   version?: number;
   basePillarId?: string;
   legacyWordpressUrl?: string;

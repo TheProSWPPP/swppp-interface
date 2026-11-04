@@ -34,7 +34,7 @@ interface AIContentListProps {
   statesWithPillar: Set<string | undefined>;
   statusFilter: string;
   onSelect: (item: AIContentItem) => void;
-  onCreate: (data: { type: string; keyword?: string; state?: string; pillarId?: string }) => void;
+  onCreate: (data: { type: string; keyword?: string; state?: string; pillarId?: string; ownerFacts?: string }) => void;
   onBulkDelete: (ids: string[]) => void;
   onGenerate: (id: string) => void;
   onBulkGenerate: (ids: string[]) => void;
@@ -68,6 +68,7 @@ export default function AIContentList({
   // Add form
   const [newType, setNewType] = useState<ContentType>("spoke");
   const [newKeyword, setNewKeyword] = useState("");
+  const [newFacts, setNewFacts] = useState("");
   const [newState, setNewState] = useState("");
 
   const filtered = useMemo(() => {
@@ -133,12 +134,13 @@ export default function AIContentList({
     if (newType === "pillar") {
       if (!newState) return;
       // Topic is optional for pillars — blank falls back to the scope's canonical guide.
-      onCreate({ type: "pillar", state: newState, keyword: newKeyword.trim() || undefined });
+      onCreate({ type: "pillar", state: newState, keyword: newKeyword.trim() || undefined, ownerFacts: newFacts.trim() || undefined });
     } else {
       if (!newKeyword.trim()) return;
-      onCreate({ type: newType, keyword: newKeyword.trim(), state: newState || undefined });
+      onCreate({ type: newType, keyword: newKeyword.trim(), state: newState || undefined, ownerFacts: newFacts.trim() || undefined });
     }
     setNewKeyword("");
+    setNewFacts("");
     setNewState("");
     setShowAddForm(false);
   };
@@ -242,6 +244,14 @@ export default function AIContentList({
                 <button onClick={() => setShowAddForm(false)} className="text-slate-400 hover:text-slate-600 p-1">
                   <X className="h-4 w-4" />
                 </button>
+              </div>
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-slate-600 mb-1">Facts for the writer (optional)</label>
+                <textarea
+                  value={newFacts} onChange={(e) => setNewFacts(e.target.value)} rows={4} maxLength={4000}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm"
+                />
+                <p className="text-xs text-slate-400 mt-1">Recent news, dates, rules or links the article must use. The writer treats these as true.</p>
               </div>
               {newType === "pillar" && newState && (
                 <p className="text-xs text-slate-400 mt-2">

@@ -5725,6 +5725,15 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
   }
 });
 
+// Owner-supplied facts for the AI writer, kept at ai_content.metadata.owner_facts.
+const OWNER_FACTS_MAX = 4000;
+function cleanOwnerFacts(v) {
+  return typeof v === "string" ? v.trim().slice(0, OWNER_FACTS_MAX) : undefined;
+}
+function rowOwnerFacts(row) {
+  return row && row.metadata && typeof row.metadata.owner_facts === "string" ? row.metadata.owner_facts : "";
+}
+
 app.get("/api/ai-content", async (req, res) => {
   const { type, status, state } = req.query;
 
@@ -5759,6 +5768,7 @@ app.get("/api/ai-content", async (req, res) => {
       n8nExecutionId: r.n8n_execution_id,
       errorMessage: r.error_message,
       metadata: r.metadata,
+      ownerFacts: rowOwnerFacts(r),
       version: r.version || 1,
       basePillarId: r.base_pillar_id,
       legacyWordpressUrl: r.legacy_wordpress_url,
@@ -5775,6 +5785,7 @@ app.get("/api/ai-content", async (req, res) => {
 
 app.post("/api/ai-content", async (req, res) => {
   let { type, keyword, state, pillarId, force } = req.body;
+  const ownerFacts = cleanOwnerFacts(req.body.ownerFacts) || "";
 
   // Pillar topic is optional. Blank = the scope's canonical guide, auto-built from state.
   // "Nationwide" is a scope, not a state — it gets a generalized, federal-baseline keyword.
@@ -5826,6 +5837,8 @@ app.post("/api/ai-content", async (req, res) => {
     id, type, status: "queued", keyword,
     state: state || null,
     pillarId: pillarId || null,
+    ownerFacts,
+    metadata: ownerFacts ? { owner_facts: ownerFacts } : {},
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -5839,15 +5852,15 @@ app.post("/api/ai-content", async (req, res) => {
     // For pillars: base_pillar_id = self (each pillar starts its own lineage at v1, is_current=true)
     const basePillarId = type === "pillar" ? id : null;
     await pool.query(
-      `INSERT INTO ai_content (id, type, status, keyword, state, pillar_id, base_pillar_id, version, is_current)
-       VALUES ($1, $2, 'queued', $3, $4, $5, $6, 1, TRUE)`,
-      [id, type, keyword, state || null, pillarId || null, basePillarId]
+      `INSERT INTO ai_content (id, type, status, keyword, state, pillar_id, base_pillar_id, version, is_current, metadata)
+       VALUES ($1, $2, 'queued', $3, $4, $5, $6, 1, TRUE, $7::jsonb)`,
+      [id, type, keyword, state || null, pillarId || null, basePillarId, JSON.stringify(ownerFacts ? { owner_facts: ownerFacts } : {})]
     );
     const result = await pool.query("SELECT * FROM ai_content WHERE id = $1", [id]);
     const r = result.rows[0];
     res.status(201).json({
       id: r.id, type: r.type, status: r.status, keyword: r.keyword,
-      state: r.state, pillarId: r.pillar_id,
+      state: r.state, pillarId: r.pillar_id, ownerFacts: rowOwnerFacts(r),
       version: r.version, basePillarId: r.base_pillar_id, isCurrent: r.is_current,
       createdAt: r.created_at, updatedAt: r.updated_at,
     });
@@ -5859,6 +5872,7 @@ app.post("/api/ai-content", async (req, res) => {
 app.put("/api/ai-content/:id", async (req, res) => {
   const { id } = req.params;
   const { keyword, state, type, pillarId, status, wordpressUrl, title } = req.body;
+  const ownerFacts = cleanOwnerFacts(req.body.ownerFacts);
 
   if (!process.env.DATABASE_URL) {
     const item = memoryContent.find((c) => c.id === id);
@@ -5873,6 +5887,10 @@ app.put("/api/ai-content/:id", async (req, res) => {
     }
     if (wordpressUrl !== undefined) item.wordpressUrl = wordpressUrl;
     if (title !== undefined) item.title = title;
+    if (ownerFacts !== undefined) {
+      item.metadata = { ...(item.metadata || {}), owner_facts: ownerFacts };
+      item.ownerFacts = ownerFacts;
+    }
     item.updatedAt = new Date().toISOString();
     return res.json(item);
   }
@@ -5890,6 +5908,10 @@ app.put("/api/ai-content/:id", async (req, res) => {
     }
     if (wordpressUrl !== undefined) { params.push(wordpressUrl); fields.push(`wordpress_url = $${params.length}`); }
     if (title !== undefined) { params.push(title); fields.push(`title = $${params.length}`); }
+    if (ownerFacts !== undefined) {
+      params.push(ownerFacts);
+      fields.push(`metadata = COALESCE(metadata,'{}'::jsonb) || jsonb_build_object('owner_facts', $${params.length}::text)`);
+    }
     if (fields.length === 0) return res.status(400).json({ error: "No fields to update" });
 
     fields.push("updated_at = NOW()");
@@ -5905,6 +5927,7 @@ app.put("/api/ai-content/:id", async (req, res) => {
       pillarId: r.pillar_id, wordpressPostId: r.wordpress_post_id,
       wordpressUrl: r.wordpress_url, n8nExecutionId: r.n8n_execution_id,
       errorMessage: r.error_message, metadata: r.metadata,
+      ownerFacts: rowOwnerFacts(r),
       createdAt: r.created_at, updatedAt: r.updated_at,
       generatedAt: r.generated_at, publishedAt: r.published_at,
     });
@@ -6000,6 +6023,7 @@ app.post("/api/ai-content/:id/generate", async (req, res) => {
       state: row.state,
       callback_url: `${RAILWAY_PUBLIC_URL}/api/ai-content/callback`,
       pillar_context: pillarContext,
+      owner_facts: rowOwnerFacts(row),
     };
 
     console.log(`Triggering n8n content generation for: ${row.keyword} (${row.type})`);
@@ -6166,9 +6190,10 @@ app.post("/api/ai-content/:id/regenerate-as-new-version", async (req, res) => {
     const newId = `content_${Date.now()}_v${newVersion}_${Math.random().toString(36).slice(2, 6)}`;
 
     await pool.query(
-      `INSERT INTO ai_content (id, type, status, keyword, state, base_pillar_id, version, is_current, legacy_wordpress_url)
-       VALUES ($1, 'pillar', 'queued', $2, $3, $4, $5, FALSE, $6)`,
-      [newId, row.keyword, row.state, basePillarId, newVersion, row.wordpress_url]
+      `INSERT INTO ai_content (id, type, status, keyword, state, base_pillar_id, version, is_current, legacy_wordpress_url, metadata)
+       VALUES ($1, 'pillar', 'queued', $2, $3, $4, $5, FALSE, $6, $7::jsonb)`,
+      [newId, row.keyword, row.state, basePillarId, newVersion, row.wordpress_url,
+        JSON.stringify(rowOwnerFacts(row) ? { owner_facts: rowOwnerFacts(row) } : {})]
     );
 
     // Trigger n8n. n8n will CREATE a brand-new WP draft post (versioned slug) — does NOT
@@ -6180,6 +6205,7 @@ app.post("/api/ai-content/:id/regenerate-as-new-version", async (req, res) => {
       state: row.state,
       callback_url: `${RAILWAY_PUBLIC_URL}/api/ai-content/callback`,
       pillar_context: null,
+      owner_facts: rowOwnerFacts(row),
       // is_new_version flag tells n8n to use the versioned-slug create path
       is_new_version: true,
       existing_wp_post_id: row.wordpress_post_id,  // for reference / audit only
