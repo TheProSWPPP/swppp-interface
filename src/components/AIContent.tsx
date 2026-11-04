@@ -105,7 +105,7 @@ export default function AIContent() {
     }
   };
 
-  const handleCreate = async (data: { type: string; keyword?: string; state?: string; pillarId?: string }) => {
+  const handleCreate = async (data: { type: string; keyword?: string; state?: string; pillarId?: string; ownerFacts?: string }) => {
     try {
       const res = await fetch("/api/ai-content", {
         method: "POST",

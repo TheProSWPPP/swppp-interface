@@ -54,6 +54,7 @@ export default function AIContentDetail({
   const [editKeyword, setEditKeyword] = useState(item.keyword);
   const [editState, setEditState] = useState(item.state || "");
   const [hasChanges, setHasChanges] = useState(false);
+  const [editFacts, setEditFacts] = useState(item.ownerFacts || "");
   const [versions, setVersions] = useState<PillarVersion[]>([]);
   const [versionLoading, setVersionLoading] = useState(false);
   const [versionAction, setVersionAction] = useState<string | null>(null);
@@ -87,6 +88,10 @@ export default function AIContentDetail({
       onUpdate(item.id, updates);
       setHasChanges(false);
     }
+  };
+
+  const handleSaveFacts = () => {
+    onUpdate(item.id, { ownerFacts: editFacts.trim() });
   };
 
   const handleRegenerate = () => {
@@ -228,6 +233,21 @@ export default function AIContentDetail({
                   </div>
                 )}
               </div>
+            )}
+          </div>
+
+          {/* Facts for the writer */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Facts for the writer (optional)</label>
+              <textarea value={editFacts} onChange={(e) => setEditFacts(e.target.value)} rows={4} maxLength={4000}
+                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm" />
+              <p className="text-xs text-slate-400 mt-1">Recent news, dates, rules or links the article must use. The writer treats these as true.</p>
+            </div>
+            {editFacts.trim() !== (item.ownerFacts || "") && (
+              <button onClick={handleSaveFacts} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 w-full justify-center">
+                <Save className="h-3.5 w-3.5" /> Save facts
+              </button>
             )}
           </div>
 
