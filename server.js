@@ -5251,9 +5251,11 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     // completed email_sent message receipt in the event handler.
 
     if (process.env.PIPEDRIVE_API_TOKEN) {
-      // Existing CRM fields are proposals. Enrollment does not prove an email was sent.
+      // Sequence_Started is our own marker and is written directly (see lib/pipedriveClient.js);
+      // owner and other existing CRM fields stay proposals.
       try {
-        await pipedriveClient.updateLead(draft.pipedrive_lead_id,{[pdSequenceStartedKey]:`Apollo:${draft.trigger_type}`});
+        await pipedriveClient.updateLead(draft.pipedrive_lead_id,{[pdSequenceStartedKey]:`Apollo:${draft.trigger_type} ${new Date().toISOString().slice(0, 10)}`});
+        result.pipedrive_sync='marker_written';
       } catch(error) { result.pipedrive_sync=error.code==='crm_change_requires_review'?'proposal_pending':'unresolved'; }
       if(result.send?.id)try {
         await publishOutreachEvent(pool,{leadId:draft.pipedrive_lead_id,event:{type:'queued',recipient:draft.contact_email_snapshot,
