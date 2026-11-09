@@ -1445,7 +1445,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
         softDailyCap:r?.soft?.cap??0,softBouncingSequences:r?.soft?.bouncingSequences?.length||0,softGuardUnavailable:r?.soft?.guardAvailable===false?1:0};
       if (soft.softBouncingSequences) console.log("[auto-outreach] soft enrollments paused by the bounce guard:", JSON.stringify(r.soft.bouncingSequences));
       return {coverage:r?.errors?.length||r?.scanLimitReached||recovered.skipped||fresh.skipped ? "partial" : "complete",
-        counts:{created:r?.created||0,capacity:r?.capacity||0,selected:r?.eligible||0,scanned:r?.scanned||0,refused:r?.refused||0,scanLimitReached:r?.scanLimitReached?1:0,enrolled:recovered.enrolled+fresh.enrolled,deferred:recovered.skipped+fresh.skipped,adopted,...soft}};
+        counts:{created:r?.created||0,capacity:r?.capacity||0,selected:r?.eligible||0,scanned:r?.scanned||0,refused:r?.refused||0,scanLimitReached:r?.scanLimitReached?1:0,enrolled:recovered.enrolled+fresh.enrolled,deferred:recovered.skipped+fresh.skipped,adopted,...soft,refusedBy:r?.refusedBy||{}}};
     })
       .catch((e) => console.error("[auto-outreach] run failed:", e.message));
   };
