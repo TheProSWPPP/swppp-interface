@@ -42,6 +42,7 @@ import * as apolloClient from "./lib/apolloClient.js";
 import * as pipedriveClient from "./lib/pipedriveClient.js";
 import {recordCompletedOutreach,attemptSequenceMarkerProposal,openActivityAlert} from './lib/sdrEngagementReceipts.js';
 import {publishOutreachEvent} from './lib/sdrNotePublisher.js';
+import {reportRefusedSend} from './lib/sdrRefusedSendNote.js';
 import {setOutreachControl} from './lib/sdrOutreachControls.js';
 import {configureCrmWriteProtection} from './lib/sdrCrmWriteProtection.js';
 import {registerSdrOutreachControlRoutes} from './lib/sdrOutreachControlRoutes.js';
@@ -550,6 +551,8 @@ app.use((req, res, next) => {
 // Database connection
 // Railway automatically provides DATABASE_URL
 const pool = createDatabasePool(process.env.DATABASE_URL);
+// Apollo poll: a first email Apollo refused to send gets one "Email not sent" note on the lead.
+const refusedSendNote = process.env.PIPEDRIVE_API_TOKEN ? ({ send }) => reportRefusedSend(pool, { send }) : null;
 
 // Shared per-mailbox daily send count (America/Chicago day). This is the single
 // cap both the SDR and TXR050000/permit cold systems draw from — every email send
@@ -1553,7 +1556,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.Q
 // is spam_blocked detection and step-tracking write-back, both latency-tolerant.
 if (process.env.DATABASE_URL && process.env.APOLLO_API_KEY) {
   const runEngPoll = () =>
-    trackSdrJob("apollo_poll", () => pollEngagement(pool, { baseUrl: `http://127.0.0.1:${port}`, callbackSecret: N8N_CALLBACK_SECRET }))
+    trackSdrJob("apollo_poll", () => pollEngagement(pool, { baseUrl: `http://127.0.0.1:${port}`, callbackSecret: N8N_CALLBACK_SECRET, onRefused: refusedSendNote }))
       .then((r) => { if (r && (r.emitted || r.skipped || r.rateLimited)) console.log("[engagement-poll]", JSON.stringify(r)); })
       .catch((e) => console.error("[engagement-poll] failed:", e.message));
   setTimeout(runEngPoll, 60_000);
@@ -3507,6 +3510,7 @@ app.post("/api/sdr/engagement/poll", async (req, res) => {
       baseUrl: `http://127.0.0.1:${port}`,
       callbackSecret: N8N_CALLBACK_SECRET,
       force: true,
+      onRefused: refusedSendNote,
     });
     res.json(result);
   } catch (err) {
