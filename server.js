@@ -50,7 +50,7 @@ import {assertSendSafety} from './lib/sdrSendSafety.js';
 import {bidInviteLeadFor,BID_INVITE_MESSAGE} from './lib/bidInviteGuard.js';
 import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,recordProviderSkip,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
 import {JOB_CHANGE_SKIP} from './lib/outreachHistory.js';
-import {reconcileStuckSends} from './lib/sdrSendReconcile.js';
+import {reconcileStuckSends,raiseRefusedSendTask} from './lib/sdrSendReconcile.js';
 import {canonicalMailbox} from './lib/mailboxAliases.js';
 import {softGuardState,softEnrolledToday} from './lib/softVerdictGuard.js';
 import * as emailVerify from "./lib/emailVerify.js";
@@ -552,7 +552,11 @@ app.use((req, res, next) => {
 // Railway automatically provides DATABASE_URL
 const pool = createDatabasePool(process.env.DATABASE_URL);
 // Apollo poll: a first email Apollo refused to send gets one "Email not sent" note on the lead.
-const refusedSendNote = process.env.PIPEDRIVE_API_TOKEN ? ({ send }) => reportRefusedSend(pool, { send }) : null;
+// When the refusal was a false invalid-MX one on an open project, a rep is also asked to email
+// the person by hand (lib/sdrSendReconcile.js raiseRefusedSendTask).
+const refusedSendTask = process.env.APOLLO_API_KEY
+  ? ({ send }) => raiseRefusedSendTask(pool, { send }, { apollo: apolloClient, addActivity: (args) => pipedriveClient.addActivity(args) }) : null;
+const refusedSendNote = process.env.PIPEDRIVE_API_TOKEN ? ({ send }) => reportRefusedSend(pool, { send }, { raiseTask: refusedSendTask }) : null;
 
 // Shared per-mailbox daily send count (America/Chicago day). This is the single
 // cap both the SDR and TXR050000/permit cold systems draw from — every email send
