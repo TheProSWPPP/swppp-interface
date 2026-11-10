@@ -5261,7 +5261,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         await publishOutreachEvent(pool,{leadId:draft.pipedrive_lead_id,event:{type:'queued',recipient:draft.contact_email_snapshot,
           eventAt:new Date().toISOString(),source:{kind:'apollo',actionId:String(result.send.id)},
           result:{status:'enrolled',receipt:{acceptedContactId:String(apolloContactId),sequenceId:String(draft.apollo_sequence_id)},summary:`Sequence: ${draft.trigger_type}. Sender: ${mailbox.email}.`},
-          nextAction:'Wait for a completed-message receipt; review any contact or cadence conflict in the SDR workspace.'}});
+          nextAction:'None. Replies and bounces are added to this lead as notes.'}});
       } catch(error) { console.error('Enrollment note receipt unavailable:',error.message); }
     }
 
