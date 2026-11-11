@@ -48,7 +48,7 @@ import {configureCrmWriteProtection} from './lib/sdrCrmWriteProtection.js';
 import {registerSdrOutreachControlRoutes} from './lib/sdrOutreachControlRoutes.js';
 import {assertSendSafety} from './lib/sdrSendSafety.js';
 import {bidInviteLeadFor,BID_INVITE_MESSAGE} from './lib/bidInviteGuard.js';
-import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,recordProviderSkip,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
+import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,assertFollowOnCurrent,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,recordProviderSkip,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
 import {JOB_CHANGE_SKIP} from './lib/outreachHistory.js';
 import {reconcileStuckSends,raiseRefusedSendTask} from './lib/sdrSendReconcile.js';
 import {canonicalMailbox} from './lib/mailboxAliases.js';
@@ -81,6 +81,7 @@ import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
 import { runCompanySwap, companySwapEnabled, swapReady, releaseSettledSwapHolds } from "./lib/sdrCompanySwap.js";
+import { runStageFollowOn, stageFollowOnEnabled } from "./lib/sdrStageFollowOn.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
 import { runBidInviteSequence, bidInviteConfig, liveRefusal as bidInviteLiveRefusal, liveSendBlock as bidInviteLiveSendBlock, bidInviteSentToday, bidInviteStatus,
   registerBidInviteExitHook, renderPreviewHtml as renderBidInvitePreview } from "./lib/bidInviteEngine.js";
@@ -1470,6 +1471,19 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
           recovered.softCapped=(recovered.softCapped||0)+(pass.softCapped||0);recovered.softPausedBounce=(recovered.softPausedBounce||0)+(pass.softPausedBounce||0);
         }
       }
+      // Stage follow-ons go first so they keep the sender the contact already heard from
+      // (lib/sdrStageFollowOn.js). Off unless SDR_STAGE_FOLLOW_ON=on; a failure never stops the
+      // normal pass.
+      const followOn={created:0,enrolled:0,deferred:0};
+      if (stageFollowOnEnabled() && mode?.auto_outreach_enabled && mode?.auto_outreach_mode === "send") {
+        try {
+          const { leads, ...ran } = await runStageFollowOn(pool, { mailboxSentToday, enrollDrafts: (drafts) => enrollAutoDrafts(drafts) });
+          followOn.created=ran.created||0;followOn.enrolled=ran.enrolled||0;followOn.deferred=ran.deferred||0;
+          console.log("[stage-follow-on]", JSON.stringify({ ...ran, leads: (leads||[]).filter((l) => l.result !== "skipped").map((l) => ({ lead: l.leadId, hop: l.hop, result: l.result })) }));
+        } catch (e) {
+          console.error("[stage-follow-on] failed:", e.message);
+        }
+      }
       const r = await runAutoOutreach(pool, { mailboxSentToday });
       const fresh = r?.mode === "send" && Array.isArray(r.createdDrafts) ? await enrollAutoDrafts(r.createdDrafts) : {enrolled:0,skipped:0};
       if (r?.skipped) return r;
@@ -1482,7 +1496,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && process.env.A
         softDailyCap:r?.soft?.cap??0,softBouncingSequences:r?.soft?.bouncingSequences?.length||0,softGuardUnavailable:r?.soft?.guardAvailable===false?1:0};
       if (soft.softBouncingSequences) console.log("[auto-outreach] soft enrollments paused by the bounce guard:", JSON.stringify(r.soft.bouncingSequences));
       return {coverage:r?.errors?.length||r?.scanLimitReached||recovered.skipped||fresh.skipped ? "partial" : "complete",
-        counts:{created:r?.created||0,capacity:r?.capacity||0,selected:r?.eligible||0,scanned:r?.scanned||0,refused:r?.refused||0,scanLimitReached:r?.scanLimitReached?1:0,enrolled:recovered.enrolled+fresh.enrolled,deferred:recovered.skipped+fresh.skipped,adopted,...soft,refusedBy:r?.refusedBy||{}}};
+        counts:{created:r?.created||0,capacity:r?.capacity||0,selected:r?.eligible||0,scanned:r?.scanned||0,refused:r?.refused||0,scanLimitReached:r?.scanLimitReached?1:0,enrolled:recovered.enrolled+fresh.enrolled,deferred:recovered.skipped+fresh.skipped,adopted,followOnCreated:followOn.created,followOnEnrolled:followOn.enrolled,followOnDeferred:followOn.deferred,...soft,refusedBy:r?.refusedBy||{}}};
     })
       .catch((e) => console.error("[auto-outreach] run failed:", e.message));
   };
@@ -5158,7 +5172,9 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
             draft.apollo_sequence_id,
             [apolloContactId],
             mailbox.apollo_mailbox_id,
-            { sequence_unverified_email: true },
+            // A follow-on adds the contact next to a sequence it already finished; Apollo
+            // refuses that without this flag. Set only on a reservation the guard permitted.
+            { sequence_unverified_email: true, ...(reservation.followOn ? { sequence_finished_in_other_campaigns: true } : {}) },
           );
         };
         enrollResponse = await enrollContact();
@@ -5186,9 +5202,11 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
             [draft.pipedrive_lead_id])).rows[0];
           if (emailConfirmedValid(verdict, draft.contact_email_snapshot)) {
             await assertCurrentEnrollment();
+            // A second add: a follow-on is proven again first (nothing for any other draft).
+            await assertFollowOnCurrent({pool:client,reservation});
             enrollResponse = await apolloClient.addContactsToSequence(
               draft.apollo_sequence_id, [apolloContactId], mailbox.apollo_mailbox_id,
-              { sequence_unverified_email: true, sequence_job_change: true },
+              { sequence_unverified_email: true, sequence_job_change: true, ...(reservation.followOn ? { sequence_finished_in_other_campaigns: true } : {}) },
             );
             skipReason = enrollResponse?.skipped_contact_ids?.[apolloContactId];
           } else {
