@@ -2862,14 +2862,15 @@ app.post("/api/sdr/outreach/sweep", async (req, res) => {
   if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
   const full = req.body?.full === true;
   if (full) {
-    const run = sweepSentOutreach(pool, { full: true });
-    run
-      .then((r) => console.log("[outreach-sweep] full:", JSON.stringify(r)))
-      .catch((e) => console.error("[outreach-sweep] full failed:", e.message));
-    // One sweep runs at a time. A sweep that stands aside for another answers at once: say so
-    // instead of "started".
-    const early = await Promise.race([run.catch(() => null), new Promise((resolve) => setTimeout(() => resolve(null), 1500))]);
-    if (early?.skipped) return res.status(409).json({ started: false, reason: early.skipped });
+    // One sweep runs at a time. The answer waits until this run holds the sweep lock or has
+    // stood aside for another, and says which.
+    const locked = await new Promise((resolve) => {
+      sweepSentOutreach(pool, { full: true, onLock: resolve })
+        .then((r) => console.log("[outreach-sweep] full:", JSON.stringify(r)))
+        .catch((e) => { console.error("[outreach-sweep] full failed:", e.message); resolve(null); });
+    });
+    if (locked === false) return res.status(409).json({ started: false, reason: "already_running" });
+    if (locked === null) return res.status(500).json({ started: false, error: "Sweep could not start" });
     return res.status(202).json({ started: true, full: true });
   }
   try {
