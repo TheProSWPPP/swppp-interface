@@ -80,7 +80,7 @@ import { runPermitAutoOutreach } from "./lib/permitAuto.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
-import { runCompanySwap, companySwapEnabled, swapReady } from "./lib/sdrCompanySwap.js";
+import { runCompanySwap, companySwapEnabled, swapReady, releaseSettledSwapHolds } from "./lib/sdrCompanySwap.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
 import { runBidInviteSequence, bidInviteConfig, liveRefusal as bidInviteLiveRefusal, liveSendBlock as bidInviteLiveSendBlock, bidInviteSentToday, bidInviteStatus,
   registerBidInviteExitHook, renderPreviewHtml as renderBidInvitePreview } from "./lib/bidInviteEngine.js";
@@ -1335,6 +1335,14 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
         // lib/sdrCompanySwap.js). Last in the pass, so a lead drafted or enrolled above is left
         // alone. It sends nothing. OFF unless SDR_COMPANY_SWAP=on. It waits for a pass where the
         // CRM sync was complete and the sent-folder sweep finished: its "untouched" test reads both.
+        // A swap whose write result was never confirmed left a hold on its lead. The sync above
+        // has read the leads again, so those holds can go, whether or not the swap is on.
+        try {
+          const lifted = await releaseSettledSwapHolds(pool);
+          if (lifted.released) console.log("[company-swap] holds released:", lifted.released);
+        } catch (e) {
+          console.error("[company-swap] hold release failed:", e.message);
+        }
         try {
           if (companySwapEnabled()) {
             const ready = swapReady({ sync: r, sweep });
@@ -2854,9 +2862,14 @@ app.post("/api/sdr/outreach/sweep", async (req, res) => {
   if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
   const full = req.body?.full === true;
   if (full) {
-    sweepSentOutreach(pool, { full: true })
+    const run = sweepSentOutreach(pool, { full: true });
+    run
       .then((r) => console.log("[outreach-sweep] full:", JSON.stringify(r)))
       .catch((e) => console.error("[outreach-sweep] full failed:", e.message));
+    // One sweep runs at a time. A sweep that stands aside for another answers at once: say so
+    // instead of "started".
+    const early = await Promise.race([run.catch(() => null), new Promise((resolve) => setTimeout(() => resolve(null), 1500))]);
+    if (early?.skipped) return res.status(409).json({ started: false, reason: early.skipped });
     return res.status(202).json({ started: true, full: true });
   }
   try {
