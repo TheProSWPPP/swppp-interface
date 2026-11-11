@@ -868,6 +868,9 @@ async function initDB() {
         last_thread_ts TIMESTAMPTZ
       )
     `);
+    // Set when a sweep has read the whole sent folder to its end; cleared when a sweep stops at
+    // its page cap (lib/outreachSync.js). NULL = the ledger may have a gap.
+    await pool.query(`ALTER TABLE sdr_outreach_sweep_state ADD COLUMN IF NOT EXISTS backfilled_at TIMESTAMPTZ`);
     await pool.query(`INSERT INTO sdr_outreach_sweep_state (id) VALUES (1) ON CONFLICT DO NOTHING`);
 
     // Unified inbox: per-mailbox Gmail OAuth (lib/gmailInbox.js). One row per connected
