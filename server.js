@@ -80,6 +80,7 @@ import { runPermitAutoOutreach } from "./lib/permitAuto.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
+import { runCompanySwap, companySwapEnabled, swapReady, releaseSettledSwapHolds } from "./lib/sdrCompanySwap.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
 import { runBidInviteSequence, bidInviteConfig, liveRefusal as bidInviteLiveRefusal, liveSendBlock as bidInviteLiveSendBlock, bidInviteSentToday, bidInviteStatus,
   registerBidInviteExitHook, renderPreviewHtml as renderBidInvitePreview } from "./lib/bidInviteEngine.js";
@@ -867,6 +868,9 @@ async function initDB() {
         last_thread_ts TIMESTAMPTZ
       )
     `);
+    // Set when a sweep has read the whole sent folder to its end; cleared when a sweep stops at
+    // its page cap (lib/outreachSync.js). NULL = the ledger may have a gap.
+    await pool.query(`ALTER TABLE sdr_outreach_sweep_state ADD COLUMN IF NOT EXISTS backfilled_at TIMESTAMPTZ`);
     await pool.query(`INSERT INTO sdr_outreach_sweep_state (id) VALUES (1) ON CONFLICT DO NOTHING`);
 
     // Unified inbox: per-mailbox Gmail OAuth (lib/gmailInbox.js). One row per connected
@@ -1309,8 +1313,10 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
           console.error("[auto-outreach] prune failed:", e.message);
         }
         // Incremental sweep of the Pipedrive sent folder → per-lead outreach ledger.
+        let sweep = null;
         try {
           const sw = await sweepSentOutreach(pool, { full: false });
+          sweep = sw;
           console.log("[outreach-sweep]", JSON.stringify(sw));
         } catch (e) {
           console.error("[outreach-sweep] failed:", e.message);
@@ -1324,6 +1330,30 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
           }
         } catch (e) {
           console.error("[auto-switch] failed:", e.message);
+        }
+        // Company swap: apply CMD's held company change on leads nobody has touched (see
+        // lib/sdrCompanySwap.js). Last in the pass, so a lead drafted or enrolled above is left
+        // alone. It sends nothing. OFF unless SDR_COMPANY_SWAP=on. It waits for a pass where the
+        // CRM sync was complete and the sent-folder sweep finished: its "untouched" test reads both.
+        // A swap whose write result was never confirmed left a hold on its lead. The sync above
+        // has read the leads again, so those holds can go, whether or not the swap is on.
+        try {
+          const lifted = await releaseSettledSwapHolds(pool);
+          if (lifted.released) console.log("[company-swap] holds released:", lifted.released);
+        } catch (e) {
+          console.error("[company-swap] hold release failed:", e.message);
+        }
+        try {
+          if (companySwapEnabled()) {
+            const ready = swapReady({ sync: r, sweep });
+            if (!ready.ok) console.log("[company-swap] deferred:", ready.reason);
+            else {
+              const { leads, ...swapped } = await runCompanySwap(pool);
+              console.log("[company-swap]", JSON.stringify({ ...swapped, leadIds: leads.map((l) => l.leadId) }));
+            }
+          }
+        } catch (e) {
+          console.error("[company-swap] failed:", e.message);
         }
       })
       .catch((e) => console.error("[sync] sdr_lead_state failed:", e.message));
@@ -2832,9 +2862,15 @@ app.post("/api/sdr/outreach/sweep", async (req, res) => {
   if (!process.env.PIPEDRIVE_API_TOKEN) return res.status(503).json({ error: "Pipedrive not configured" });
   const full = req.body?.full === true;
   if (full) {
-    sweepSentOutreach(pool, { full: true })
-      .then((r) => console.log("[outreach-sweep] full:", JSON.stringify(r)))
-      .catch((e) => console.error("[outreach-sweep] full failed:", e.message));
+    // One sweep runs at a time. The answer waits until this run holds the sweep lock or has
+    // stood aside for another, and says which.
+    const locked = await new Promise((resolve) => {
+      sweepSentOutreach(pool, { full: true, onLock: resolve })
+        .then((r) => console.log("[outreach-sweep] full:", JSON.stringify(r)))
+        .catch((e) => { console.error("[outreach-sweep] full failed:", e.message); resolve(null); });
+    });
+    if (locked === false) return res.status(409).json({ started: false, reason: "already_running" });
+    if (locked === null) return res.status(500).json({ started: false, error: "Sweep could not start" });
     return res.status(202).json({ started: true, full: true });
   }
   try {
