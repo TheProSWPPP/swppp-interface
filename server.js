@@ -48,7 +48,7 @@ import {configureCrmWriteProtection} from './lib/sdrCrmWriteProtection.js';
 import {registerSdrOutreachControlRoutes} from './lib/sdrOutreachControlRoutes.js';
 import {assertSendSafety} from './lib/sdrSendSafety.js';
 import {bidInviteLeadFor,BID_INVITE_MESSAGE} from './lib/bidInviteGuard.js';
-import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,recordProviderSkip,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
+import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,assertFollowOnCurrent,recordPreAddRefusal,recordEnrollmentReceipt,recordEnrollmentUncertainty,recordProviderSkip,stopOwnedEnrollment} from './lib/sdrProviderOperations.js';
 import {JOB_CHANGE_SKIP} from './lib/outreachHistory.js';
 import {reconcileStuckSends,raiseRefusedSendTask} from './lib/sdrSendReconcile.js';
 import {canonicalMailbox} from './lib/mailboxAliases.js';
@@ -5202,6 +5202,8 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
             [draft.pipedrive_lead_id])).rows[0];
           if (emailConfirmedValid(verdict, draft.contact_email_snapshot)) {
             await assertCurrentEnrollment();
+            // A second add: a follow-on is proven again first (nothing for any other draft).
+            await assertFollowOnCurrent({pool:client,reservation});
             enrollResponse = await apolloClient.addContactsToSequence(
               draft.apollo_sequence_id, [apolloContactId], mailbox.apollo_mailbox_id,
               { sequence_unverified_email: true, sequence_job_change: true, ...(reservation.followOn ? { sequence_finished_in_other_campaigns: true } : {}) },
