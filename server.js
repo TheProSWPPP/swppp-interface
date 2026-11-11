@@ -80,7 +80,7 @@ import { runPermitAutoOutreach } from "./lib/permitAuto.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
-import { runCompanySwap, companySwapEnabled } from "./lib/sdrCompanySwap.js";
+import { runCompanySwap, companySwapEnabled, swapReady } from "./lib/sdrCompanySwap.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
 import { runBidInviteSequence, bidInviteConfig, liveRefusal as bidInviteLiveRefusal, liveSendBlock as bidInviteLiveSendBlock, bidInviteSentToday, bidInviteStatus,
   registerBidInviteExitHook, renderPreviewHtml as renderBidInvitePreview } from "./lib/bidInviteEngine.js";
@@ -1310,8 +1310,10 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
           console.error("[auto-outreach] prune failed:", e.message);
         }
         // Incremental sweep of the Pipedrive sent folder → per-lead outreach ledger.
+        let sweep = null;
         try {
           const sw = await sweepSentOutreach(pool, { full: false });
+          sweep = sw;
           console.log("[outreach-sweep]", JSON.stringify(sw));
         } catch (e) {
           console.error("[outreach-sweep] failed:", e.message);
@@ -1328,11 +1330,16 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
         }
         // Company swap: apply CMD's held company change on leads nobody has touched (see
         // lib/sdrCompanySwap.js). Last in the pass, so a lead drafted or enrolled above is left
-        // alone. It sends nothing. OFF unless SDR_COMPANY_SWAP=on.
+        // alone. It sends nothing. OFF unless SDR_COMPANY_SWAP=on. It waits for a pass where the
+        // CRM sync was complete and the sent-folder sweep finished: its "untouched" test reads both.
         try {
           if (companySwapEnabled()) {
-            const { leads, ...swapped } = await runCompanySwap(pool);
-            console.log("[company-swap]", JSON.stringify({ ...swapped, leadIds: leads.map((l) => l.leadId) }));
+            const ready = swapReady({ sync: r, sweep });
+            if (!ready.ok) console.log("[company-swap] deferred:", ready.reason);
+            else {
+              const { leads, ...swapped } = await runCompanySwap(pool);
+              console.log("[company-swap]", JSON.stringify({ ...swapped, leadIds: leads.map((l) => l.leadId) }));
+            }
           }
         } catch (e) {
           console.error("[company-swap] failed:", e.message);
