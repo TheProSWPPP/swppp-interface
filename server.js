@@ -80,6 +80,7 @@ import { runPermitAutoOutreach } from "./lib/permitAuto.js";
 import { runPermitIngest } from "./scripts/permit-ingest.mjs";
 import { runEchoBulkRefresh } from "./scripts/echo-bulk-refresh.mjs";
 import { syncLeadState } from "./lib/pipedriveSync.js";
+import { runCompanySwap, companySwapEnabled } from "./lib/sdrCompanySwap.js";
 import { sweepSentOutreach } from "./lib/outreachSync.js";
 import { runBidInviteSequence, bidInviteConfig, liveRefusal as bidInviteLiveRefusal, liveSendBlock as bidInviteLiveSendBlock, bidInviteSentToday, bidInviteStatus,
   registerBidInviteExitHook, renderPreviewHtml as renderBidInvitePreview } from "./lib/bidInviteEngine.js";
@@ -1324,6 +1325,17 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
           }
         } catch (e) {
           console.error("[auto-switch] failed:", e.message);
+        }
+        // Company swap: apply CMD's held company change on leads nobody has touched (see
+        // lib/sdrCompanySwap.js). Last in the pass, so a lead drafted or enrolled above is left
+        // alone. It sends nothing. OFF unless SDR_COMPANY_SWAP=on.
+        try {
+          if (companySwapEnabled()) {
+            const { leads, ...swapped } = await runCompanySwap(pool);
+            console.log("[company-swap]", JSON.stringify({ ...swapped, leadIds: leads.map((l) => l.leadId) }));
+          }
+        } catch (e) {
+          console.error("[company-swap] failed:", e.message);
         }
       })
       .catch((e) => console.error("[sync] sdr_lead_state failed:", e.message));
