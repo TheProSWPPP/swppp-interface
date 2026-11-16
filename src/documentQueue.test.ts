@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ProjectStatus } from "./data";
 import {
   countDocumentGroups,
+  documentGroupLabel,
   documentGroup,
   documentStatusLabel,
   dueState,
@@ -13,6 +14,9 @@ import {
 } from "./documentQueue";
 
 describe("document status groups", () => {
+  it("names the shared post-generation group without asserting legacy generation proof", () => {
+    expect(documentGroupLabel("ready")).toBe("Generated / ready");
+  });
   it("counts every status into exactly one tile, including Ready", () => {
     const statuses: ProjectStatus[] = ["Ready", "Ready", "Complete", "Pending Review", "Approved for Generation", "Processing", "Manual Processing", "New", ""];
     const counts = countDocumentGroups(statuses.map((status) => ({ status })));

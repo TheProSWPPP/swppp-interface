@@ -309,9 +309,13 @@ export default function ProjectDetail({
   };
 
   const handleRetrigger = async () => {
+    const preserveGeneratedInputs = ["Generated", "Ready", "Complete"].includes(currentForm.current.status);
+    const refreshMessage = preserveGeneratedInputs
+      ? "Check environmental data? Existing generation inputs and PDFs will be kept; only lookup notes will be saved. Reopen for review to apply new lookup values."
+      : "Refresh environmental data (soil, waterbodies, endangered species, MS4)? This does not regenerate PDFs. An order being prepared will return to Pending Review. Continue?";
     if (
       !confirm(
-        "Refresh environmental data (soil, waterbodies, endangered species, MS4)? This does not regenerate PDFs. Continue?",
+        refreshMessage,
       )
     )
       return;
@@ -353,7 +357,9 @@ export default function ProjectDetail({
         alert("Lookup results could not be saved. Your edits are kept; review the save error before trying again.");
         return;
       }
-      alert(result.failed
+      alert(prepared.keptGenerationInputs
+        ? "Lookup notes saved. Generation inputs and existing PDFs were kept. Reopen for review to apply new environmental values."
+        : result.failed
         ? "Lookup failed or was incomplete. Review notes were saved; existing information was kept where results were unavailable."
         : prepared.needsReview
           ? "Environmental data saved with review notes. Verify the updated information."
@@ -1615,7 +1621,7 @@ export default function ProjectDetail({
                   <button
                     onClick={handleApprove}
                     disabled={
-                      isGenerating || isSaving ||
+                      isGenerating || isRetriggering || isSaving ||
                       (!formData.plansUploaded && !formData.isIndustrial)
                     }
                     className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-brand-600 hover:bg-brand-700 focus:ring-4 focus:ring-brand-500/20 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-brand-600/20"
@@ -1680,7 +1686,7 @@ export default function ProjectDetail({
                   {isGenerated && (
                     <button
                       onClick={handleGenerateAgain}
-                      disabled={isGenerating || isSaving}
+                      disabled={isGenerating || isRetriggering || isSaving}
                       className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-sm"
                     >
                       {isGenerating ? "Starting generation..." : "Generate again"}

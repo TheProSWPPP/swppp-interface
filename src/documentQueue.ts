@@ -10,7 +10,7 @@ export const DOCUMENT_GROUPS: { key: DocumentGroup; label: string }[] = [
   { key: "new", label: "New requests" },
   { key: "review", label: "Needs review" },
   { key: "progress", label: "Being prepared" },
-  { key: "ready", label: "Generated" },
+  { key: "ready", label: "Generated / ready" },
 ];
 
 export function documentGroup(status: ProjectStatus | string | undefined): DocumentGroup {

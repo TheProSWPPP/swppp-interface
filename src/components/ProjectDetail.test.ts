@@ -215,7 +215,7 @@ describe("document link availability", () => {
 describe("OPS document output evidence", () => {
   it("keeps a Generated milestone separate from individual file evidence and approval actions", () => {
     const html = render({ status: "Generated", generationNote: "MS4 source needs staff review", folderLink: "https://example.invalid/folder" });
-    expect(html).toContain("Generated");
+    expect(html).toContain("Automated generation recorded. Check individual file links and review notes below");
     expect(html).toContain("0 of 4 file links recorded");
     expect(html).toContain("Project status and folder links do not confirm document contents or customer delivery.");
     expect(html).toContain("MS4 source needs staff review");
