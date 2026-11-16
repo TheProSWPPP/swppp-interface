@@ -1,3 +1,4 @@
+import {ensureImportReceipts,claimImportRow,completeImportRow,finalizeImportJob} from './lib/leadImportReceipts.js';
 import {fetchPublishedWordpressPosts} from './lib/wpPublishedInventory.js';
 import {stripGenerationMetadata,projectGenerationView,updateProject,mergeProjectPatch,mergePlanAnalysis,registerGenerationResultRoute} from './lib/projectGenerationResults.js';
 import {createApprovalObservationRecorder} from './lib/sdrApprovalObservations.js';
@@ -673,6 +674,7 @@ async function initDB() {
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_lead_import_rows_job_index ON lead_import_rows(job_id, row_index)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_lead_import_rows_status ON lead_import_rows(status)`);
     console.log("Table 'lead_import_rows' verified/created.");
+    await ensureImportReceipts(pool);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS abbreviation_cache (
@@ -6967,6 +6969,7 @@ app.post("/api/leads/upload/callback", express.json({ limit: "1mb" }), async (re
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
 
   try {
+    if (req.body.reconcile_upload === true) return res.json(await finalizeImportJob(pool, job_id));
     const fields = ["updated_at = NOW()"];
     const params = [];
     if (status) { params.push(status); fields.push(`status = $${params.length}`); }
@@ -6982,7 +6985,7 @@ app.post("/api/leads/upload/callback", express.json({ limit: "1mb" }), async (re
     );
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -7108,6 +7111,13 @@ app.patch("/api/leads/upload/:job_id/rows/:row_id", express.json({ limit: "100kb
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "Database required" });
   const { cleaned_data, status } = req.body || {};
   try {
+    if (req.body?.import_action) {
+      if (req.query.callback_secret !== N8N_CALLBACK_SECRET) return res.status(401).json({ error: "Invalid secret" });
+      const input = {jobId:req.params.job_id,rowId:req.params.row_id,attemptId:req.body.attempt_id,result:req.body.result};
+      if (req.body.import_action === 'claim') return res.json(await claimImportRow(pool,input));
+      if (req.body.import_action === 'complete') return res.json(await completeImportRow(pool,input));
+      return res.status(400).json({error:'Invalid import action'});
+    }
     const fields = ["updated_at = NOW()"];
     const params = [];
     if (cleaned_data) { params.push(cleaned_data); fields.push(`cleaned_data = $${params.length}`); }
@@ -7121,7 +7131,7 @@ app.patch("/api/leads/upload/:job_id/rows/:row_id", express.json({ limit: "100kb
     if (!result.rows.length) return res.status(404).json({ error: "Row not found" });
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
