@@ -17,6 +17,7 @@ export interface RetriggerResult {
 const statusKeys = ['soil', 'waterway', 'species', 'ms4', 'county', 'coordinates', 'overall'];
 const outcomes = ['complete', 'approved-order-input', 'no-qualifying-results', 'inferred', 'review-required', 'no-operator-found', 'failed'];
 const noteKeys = ['species', 'ms4', 'overall'];
+export const lookupSourceFields = ['status', 'projectAddress', 'stateTemplateId', 'stateTemplateName', 'landDisturbanceArea', 'latitude', 'longitude', 'state', 'county', 'city', 'countyFips'] as const;
 const fields = ['latitude', 'longitude', 'state', 'county', 'city', 'countyFips', 'soilData', 'endangeredSpecies', 'waterway', 'landDisturbanceArea', 'ms4Operator'] as const;
 const fieldStatus: Partial<Record<typeof fields[number], EnvironmentLookupField>> = {latitude:'coordinates',longitude:'coordinates',state:'coordinates',city:'coordinates',county:'county',countyFips:'county',soilData:'soil',endangeredSpecies:'species',waterway:'waterway',ms4Operator:'ms4'};
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -87,6 +88,9 @@ export async function requestProjectRetrigger(payload: Record<string, unknown>):
 }
 
 export function prepareRetriggerSave(base: Project, requested: Project, current: Project, result: RetriggerResult) {
+  if (current.status !== requested.status && ['Approved for Generation', 'Manual Processing', 'Processing'].includes(current.status)) {
+    throw new Error('Project processing began during the lookup. Wait for it to finish, then check environmental data again.');
+  }
   let previous: LookupMetadata;
   try { previous = validateLookupMetadata({ environmentLookupStatus: base.environmentLookupStatus || {}, environmentLookupNotes: base.environmentLookupNotes || {} }); }
   catch { previous = { environmentLookupStatus: {}, environmentLookupNotes: {} }; }
@@ -103,16 +107,15 @@ export function prepareRetriggerSave(base: Project, requested: Project, current:
     }
   }
   const submitted = { ...current };
-  const staleInputs = current.status !== requested.status || ['projectAddress', 'stateTemplateId', 'stateTemplateName', 'landDisturbanceArea'].some(key => current[key as keyof Project] !== requested[key as keyof Project]);
+  const staleInputs = lookupSourceFields.some(key => current[key] !== requested[key]);
   const keepGenerationInputs = ['Generated', 'Ready', 'Complete'].includes(current.status);
   const keptGenerationInputs = keepGenerationInputs && Object.entries(result.updates).some(([key, value]) => current[key as keyof Project] !== value);
   if (staleInputs) {
     metadata.environmentLookupStatus.overall = result.failed ? 'failed' : 'review-required';
     metadata.environmentLookupNotes.overall = 'Project inputs changed during lookup; staff should re-run the lookup or verify the earlier results.';
   } else if (!keepGenerationInputs) {
-    const changedCoordinates = current.latitude !== requested.latitude || current.longitude !== requested.longitude;
     for (const field of fields) {
-      if (Object.hasOwn(result.updates, field) && current[field] === requested[field] && !(changedCoordinates && ['latitude', 'longitude'].includes(field))) {
+      if (Object.hasOwn(result.updates, field) && current[field] === requested[field]) {
         (submitted as unknown as Record<string, unknown>)[field] = result.updates[field];
       }
     }

@@ -22,7 +22,7 @@
     },
     {
       "path": "src/components/ProjectDetail.tsx",
-      "sha256": "0cc467db46ce8823e488b3614b839d67e41cf08566b6117bb7b9cd046158b05b"
+      "sha256": "e6b7855f8c4c71f48f429be89c7a866fafc760ca9756b18feb2a2b4646a94f50"
     },
     {
       "path": "src/components/ArchiveList.tsx",
@@ -86,11 +86,11 @@
     },
     {
       "path": "src/projectPersistence.ts",
-      "sha256": "dbc02c16a66c727fd5d2c3b2bc6164cec14a6241e67462b89754763086c8dea8"
+      "sha256": "cc03a69a9aab69bbc222d700303b737594aa181422a9f90a4a0482ec3d1ebed9"
     },
     {
       "path": "src/projectRetrigger.ts",
-      "sha256": "ef31ba9c788639bee346c43774adba43ae67c51baab5286253ce75e81a13292a"
+      "sha256": "59bcc1d898fbf2fbfdf3bd56a660a2f0e5426c10fe63c079b52ade456725fa8c"
     }
   ],
   "protectedServerRoutes": [

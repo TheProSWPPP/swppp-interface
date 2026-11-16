@@ -33,5 +33,8 @@ it('retains authoritative lookup history during manual edits and keeps dirty fie
 it('explicit retrigger provenance saves even with unchanged business fields and includes every expected metadata value',()=>{
  const saved={...base,status:'Pending Review',environmentLookupStatus:{overall:'complete'},environmentLookupNotes:{ms4:'Existing history'}} as unknown as Project;
  const provenance={metadata:{environmentLookupStatus:{overall:'failed' as const},environmentLookupNotes:{overall:'Lookup failed; review needed.'}},expected:{environmentLookupStatus:saved.environmentLookupStatus,environmentLookupNotes:saved.environmentLookupNotes}};
- expect(changedProjectFields(saved,saved,provenance)).toEqual({patch:{id:'1',environmentLookupStatus:{overall:'failed'},environmentLookupNotes:{overall:'Lookup failed; review needed.'}},expected:{environmentLookupStatus:{overall:'complete'},environmentLookupNotes:{ms4:'Existing history'}}});
+ const request=changedProjectFields(saved,saved,provenance);
+ expect(request).toMatchObject({patch:{id:'1',status:'Pending Review',environmentLookupStatus:{overall:'failed'},environmentLookupNotes:{overall:'Lookup failed; review needed.'}},expected:{status:'Pending Review',environmentLookupStatus:{overall:'complete'},environmentLookupNotes:{ms4:'Existing history'}}});
+ expect(request.patch).not.toHaveProperty('phone');
+ expect(Object.keys(request.patch).filter(key=>key!=='id').sort()).toEqual(Object.keys(request.expected).sort());
 });
