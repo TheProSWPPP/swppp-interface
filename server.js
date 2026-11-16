@@ -1,3 +1,4 @@
+import {fetchPublishedWordpressPosts} from './lib/wpPublishedInventory.js';
 import {stripGenerationMetadata,projectGenerationView,updateProject,mergeProjectPatch,mergePlanAnalysis,registerGenerationResultRoute} from './lib/projectGenerationResults.js';
 import {createApprovalObservationRecorder} from './lib/sdrApprovalObservations.js';
 import {registerApprovalObservationHealth} from './lib/sdrApprovalObservationHealth.js';
@@ -5671,19 +5672,7 @@ app.get("/api/ai-content/stats", async (req, res) => {
 // Import existing WP articles into ai_content table
 app.post("/api/ai-content/import-wp", async (req, res) => {
   try {
-    // Fetch published posts from WP
-    const wpPosts = [];
-    let page = 1;
-    while (true) {
-      const wpRes = await fetch(
-        `https://proswppp.com/wp-json/wp/v2/posts?per_page=100&page=${page}&_fields=id,title,slug,date,link,categories,content`,
-      );
-      if (!wpRes.ok) break;
-      const posts = await wpRes.json();
-      if (!posts.length) break;
-      wpPosts.push(...posts);
-      page++;
-    }
+    const wpPosts = await fetchPublishedWordpressPosts(fetch);
 
     const US_STATES = [
       "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware",
@@ -5718,6 +5707,7 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
 
     let imported = 0;
     let skipped = 0;
+    let updated = 0;
     const results = [];
     const pillarStates = new Set(); // Track which states already have a pillar in this import
 
@@ -5748,8 +5738,9 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
           if (existing.status !== "published" || existing.wordpress_url !== wpUrl) {
             await pool.query(
               "UPDATE ai_content SET status = 'published', wordpress_url = $1, published_at = $2, updated_at = NOW() WHERE id = $3",
-              [wpUrl, post.date, existing.id]
+              [wpUrl, post.date_gmt + 'Z', existing.id]
             );
+            updated++;
           }
           skipped++;
           continue;
@@ -5757,7 +5748,9 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
       } else {
         const existing = memoryContent.find((c) => c.id === id || c.wordpressPostId === post.id);
         if (existing) {
+          if (existing.status !== "published" || existing.wordpressUrl !== post.link) updated++;
           existing.status = "published";
+          existing.publishedAt = post.date_gmt + "Z";
           existing.wordpressUrl = post.link || `https://proswppp.com/?p=${post.id}`;
           skipped++;
           continue;
@@ -5774,14 +5767,14 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
         wordCount,
         wordpressPostId: post.id,
         wordpressUrl: post.link || `https://proswppp.com/?p=${post.id}`,
-        publishedAt: post.date,
+        publishedAt: post.date_gmt + "Z",
       };
 
       if (process.env.DATABASE_URL) {
         await pool.query(
           `INSERT INTO ai_content (id, type, status, keyword, state, title, word_count, wordpress_post_id, wordpress_url, published_at, created_at, updated_at)
            VALUES ($1, $2, 'published', $3, $4, $5, $6, $7, $8, $9, $9, NOW())`,
-          [id, type, title, state, title, wordCount, post.id, item.wordpressUrl, post.date]
+          [id, type, title, state, title, wordCount, post.id, item.wordpressUrl, item.publishedAt]
         );
       } else {
         memoryContent.push(item);
@@ -5791,24 +5784,15 @@ app.post("/api/ai-content/import-wp", async (req, res) => {
       imported++;
     }
 
-    // Detect trashed posts — remove entries whose WP post no longer exists
-    let trashed = 0;
-    if (process.env.DATABASE_URL) {
-      const liveWpIds = new Set(wpPosts.map((p) => p.id));
-      const dbEntries = await pool.query(
-        "SELECT id, wordpress_post_id FROM ai_content WHERE wordpress_post_id IS NOT NULL AND status = 'published'"
-      );
-      for (const row of dbEntries.rows) {
-        if (!liveWpIds.has(row.wordpress_post_id)) {
-          await pool.query("DELETE FROM ai_content WHERE id = $1", [row.id]);
-          trashed++;
-        }
-      }
-    }
-
-    res.json({ imported, skipped, trashed, total: wpPosts.length, results });
+    // Absence from a public listing does not prove deletion (a post may be private).
+    const liveWpIds = new Set(wpPosts.map((p) => p.id));
+    const dbEntries = process.env.DATABASE_URL
+      ? (await pool.query("SELECT id, wordpress_post_id FROM ai_content WHERE wordpress_post_id IS NOT NULL AND status = 'published'")).rows
+      : memoryContent.filter(c => c.status === 'published' && c.wordpressPostId).map(c => ({id:c.id,wordpress_post_id:c.wordpressPostId}));
+    const missing = dbEntries.filter(row => !liveWpIds.has(Number(row.wordpress_post_id))).length;
+    res.json({ imported, updated, skipped, trashed: 0, missing, total: wpPosts.length, results });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status === 502 ? 502 : 500).json({ error: err.message });
   }
 });
 
