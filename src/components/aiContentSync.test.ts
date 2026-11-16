@@ -6,6 +6,7 @@ describe("AI Content website check", () => {
     expect(websiteCheckMessage({ imported: 0, trashed: 0 })).toBe("Website checked. No new or removed articles.");
     expect(websiteCheckMessage(null)).toBe("Website checked. No new or removed articles.");
     expect(websiteCheckMessage({ imported: 1, trashed: 2 })).toBe("Website checked: 1 new article added, 2 removed.");
+    expect(websiteCheckMessage({ imported: 0, updated: 17, missing: 2 })).toBe("Website checked: 17 articles updated, 2 not listed publicly; saved records kept.");
   });
   it("never writes when the page opens (import runs only from the button)", async () => {
     const fsModule = "fs"; // dynamic so the app type-check needs no Node types
