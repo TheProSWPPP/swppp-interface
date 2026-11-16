@@ -87,6 +87,8 @@ import { runBidInviteSequence, bidInviteConfig, liveRefusal as bidInviteLiveRefu
   registerBidInviteExitHook, renderPreviewHtml as renderBidInvitePreview } from "./lib/bidInviteEngine.js";
 import { registerLinkedinExitHook } from "./lib/linkedinExitHook.js";
 import { runQuietConversationClock, createGeminiQuietDrafter } from "./lib/quietConversationClock.js";
+import {runInternalReplyReminders,createInternalReminderNotifier} from './lib/sdrInternalReplyReminders.js';
+import {createInternalReminderClient} from './lib/sdrInternalReplyReminderClient.js';
 import { readFollowupOutcomes } from "./lib/followupOutcomeReadout.js";
 import * as gmailInbox from "./lib/gmailInbox.js";
 import { dailyCap, rampDay, bounceStepPenalty, mailboxBounceHealth } from "./lib/sendRamp.js";
@@ -1276,7 +1278,7 @@ async function initDB() {
     }
     console.log("Table 'automation_tasks' verified/created.");
     // Install additive protection before any route/worker can mutate outreach.
-    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-10-sdr-enrollment-phases.sql','2026-10-27-sdr-provider-skipped.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql','2026-10-07-sdr-open-alerts.sql','2026-10-08-sdr-followup-drafts.sql','2026-10-10-sdr-followup-handoffs.sql']) {
+    for(const migration of ['2026-10-05-sdr-crm-observations.sql','2026-10-07-sdr-manual-protection.sql','2026-10-07-sdr-outreach-controls.sql','2026-10-07-sdr-draft-revisions.sql','2026-10-07-sdr-provider-operations.sql','2026-10-10-sdr-enrollment-phases.sql','2026-10-27-sdr-provider-skipped.sql','2026-10-07-sdr-crm-proposals.sql','2026-10-07-sdr-note-events.sql','2026-10-07-sdr-policy-rollout.sql','2026-10-07-sdr-open-alerts.sql','2026-10-08-sdr-followup-drafts.sql','2026-10-10-sdr-followup-handoffs.sql','2026-11-16-sdr-internal-reply-reminders.sql']) {
       await pool.query(fs.readFileSync(new URL('./migrations/'+migration,import.meta.url),'utf8'));
     }
   } catch (err) {
@@ -1556,6 +1558,21 @@ function bidInviteDeps(mode, extra = {}) {
     // First run 7 minutes after boot, clear of the lead sync and the quiet clock offsets.
     setTimeout(() => { runBidInvites(); setInterval(runBidInvites, 10 * 60 * 1000); }, 7 * 60 * 1000);
   }
+}
+
+// Internal staff reminders use existing Pipedrive tasks; no customer sends or CRM edits.
+if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN && ['dry_run','live'].includes(process.env.SDR_INTERNAL_REMINDERS_MODE)) {
+  try {
+  const reminderClient=createInternalReminderClient({token:process.env.PIPEDRIVE_API_TOKEN,companyId:process.env.SDR_CRM_COMPANY_ID,
+    getThread:async(mailbox,id)=>gmailInbox.getThread(await accessTokenForMailbox(mailbox),id)});
+  const reminderNotify=createInternalReminderNotifier({gmail:gmailInbox,getToken:accessTokenForMailbox});
+  const runInternalReminders=()=>runInternalReplyReminders(pool,{mode:process.env.SDR_INTERNAL_REMINDERS_MODE,companyId:process.env.SDR_CRM_COMPANY_ID,
+    since:process.env.SDR_INTERNAL_REMINDERS_SINCE,seedTaskIds:String(process.env.SDR_INTERNAL_REMINDERS_SEED_TASKS||'').split(',').filter(Boolean),
+    derekUserId:process.env.SDR_INTERNAL_REMINDERS_DEREK_USER_ID,client:reminderClient,notify:reminderNotify,clock:()=>new Date()})
+    .then(({plans,...counts})=>console.log('[internal-reply-reminders]',JSON.stringify({...counts,planned:plans.length})))
+    .catch(()=>console.error('[internal-reply-reminders] run failed; no blind retry'));
+  setTimeout(()=>{void runInternalReminders();setInterval(()=>void runInternalReminders(),30*60*1000);},11*60*1000);
+  } catch { console.error('[internal-reply-reminders] disabled: invalid configuration'); }
 }
 
 // Quiet-conversation clock: when a buyer conversation stalls after a real reply, puts a task
