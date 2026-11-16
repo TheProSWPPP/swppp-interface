@@ -50,6 +50,47 @@ describe('explicit project retrigger persistence',()=>{
   const current={...base,status:'Approved for Generation' as const};const prepared=prepareRetriggerSave(base,base,current,readRetriggerResult(success));
   expect(prepared.submitted).toMatchObject({status:'Approved for Generation',soilData:'Staff soil',waterway:'Staff river'});expect(prepared.needsReview).toBe(true);
  });
+ it.each(['Generation Incomplete','Generation Failed'] as const)('refresh preserves %s status while saving lookup provenance',async status=>{
+  const project={...base,status} as Project;
+  const prepared=prepareRetriggerSave(project,project,project,readRetriggerResult(success));
+  expect(prepared.submitted.status).toBe(status);
+  const {patch,expected}=changedProjectFields(project,prepared.submitted,prepared.provenance);
+  expect(patch).not.toHaveProperty('status');
+  const concurrent={...project,phone:'Changed by staff'};
+  const saved=mergeProjectPatch(concurrent,patch,expected);
+  expect(saved).toMatchObject({status,phone:'Changed by staff',soilData:'New soil',environmentLookupStatus:{overall:'complete'}});
+ });
+ it.each(['Generated','Ready','Complete'] as const)('checks provenance without rewriting %s generation inputs',status=>{
+  const project={...base,status} as Project;
+  const prepared=prepareRetriggerSave(project,project,project,readRetriggerResult(success));
+  const {patch,expected}=changedProjectFields(project,prepared.submitted,prepared.provenance);
+  const saved=mergeProjectPatch(project,patch,expected);
+  expect(saved).toMatchObject({status,soilData:'Staff soil',waterway:'Staff river',latitude:'30',longitude:'-97'});
+  expect(patch).not.toHaveProperty('soilData');expect(patch).not.toHaveProperty('landDisturbanceArea');
+  expect(prepared.keptGenerationInputs).toBe(true);expect(prepared.needsReview).toBe(true);
+  expect(saved.environmentLookupStatus.overall).toBe('review-required');
+  expect(saved.environmentLookupNotes.overall).toContain('generation inputs and PDFs were kept');
+ });
+ it.each(['Approved for Generation','Manual Processing','Processing'] as const)('refresh returns %s to review and rejects an old generation callback',status=>{
+  const project={...base,status} as Project;
+  const prepared=prepareRetriggerSave(project,project,project,readRetriggerResult(success));
+  const {patch,expected}=changedProjectFields(project,prepared.submitted,prepared.provenance);
+  const saved=mergeProjectPatch(project,patch,expected);
+  expect(saved).toMatchObject({status:'Pending Review',soilData:'New soil'});
+  expect(()=>mergeProjectPatch(saved,{status:'Generated'},{status})).toThrow('These fields changed');
+ });
+ it('failed refresh keeps a generated milestone and writes review provenance',()=>{
+  const project={...base,status:'Generated'} as Project;
+  const result=readRetriggerResult({environmentLookupStatus:{overall:'failed'},environmentLookupNotes:{overall:'Provider failed'}});
+  const prepared=prepareRetriggerSave(project,project,project,result);
+  expect(prepared.submitted.status).toBe('Generated');
+  expect(prepared.needsReview).toBe(true);
+  expect(prepared.provenance.metadata.environmentLookupNotes.overall).toBe('Provider failed');
+ });
+ it('refresh promotes New intake to Pending Review',()=>{
+  const project={...base,status:'New'} as Project;
+  expect(prepareRetriggerSave(project,project,project,readRetriggerResult(success)).submitted.status).toBe('Pending Review');
+ });
  it('ordinary manual saves continue excluding lookup history',()=>{
   expect(changedProjectFields(base,{...base,soilData:'Manual',environmentLookupStatus:{overall:'failed'}})).toEqual({patch:{id:'fixture',soilData:'Manual'},expected:{soilData:'Staff soil'}});
  });

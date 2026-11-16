@@ -23,9 +23,9 @@ describe("ProjectList", () => {
 
   it("tile counts include every listed status", () => {
     const html = render(projects);
-    expect(html).toMatch(/Documents ready<\/p><p[^>]*>30</);
+    expect(html).toMatch(/Generated \/ ready<\/p><p[^>]*>30</);
     expect(html).toMatch(/Being prepared<\/p><p[^>]*>4</);
-    expect(html).toMatch(/Pending review<\/p><p[^>]*>1</);
+    expect(html).toMatch(/Needs review<\/p><p[^>]*>1</);
     expect(html).toMatch(/New requests<\/p><p[^>]*>0</);
   });
 
@@ -39,5 +39,16 @@ describe("ProjectList", () => {
 
   it("has no show-more control when everything fits", () => {
     expect(render(projects.slice(0, 5))).not.toContain("more</button>");
+  });
+
+  it("shows generated orders and distinct failed attempts under matching tile and filter labels", () => {
+    const html = render([make(1, "Generated"), make(2, "Generation Incomplete"), make(3, "Generation Failed"), make(4, "Pending Review")]);
+    expect(html).toMatch(/Generated \/ ready<\/p><p[^>]*>1</);
+    expect(html).toMatch(/Needs review<\/p><p[^>]*>3</);
+    expect(html).toContain('<option value="ready">Generated / ready (1)</option>');
+    expect(html).toContain('<option value="review">Needs review (3)</option>');
+    expect(html).toContain('>Generation Incomplete</span>');
+    expect(html).toContain('>Generation Failed</span>');
+    expect(html).toContain('>Pending review</span>');
   });
 });

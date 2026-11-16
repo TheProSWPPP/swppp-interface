@@ -104,10 +104,12 @@ export function prepareRetriggerSave(base: Project, requested: Project, current:
   }
   const submitted = { ...current };
   const staleInputs = current.status !== requested.status || ['projectAddress', 'stateTemplateId', 'stateTemplateName', 'landDisturbanceArea'].some(key => current[key as keyof Project] !== requested[key as keyof Project]);
+  const keepGenerationInputs = ['Generated', 'Ready', 'Complete'].includes(current.status);
+  const keptGenerationInputs = keepGenerationInputs && Object.entries(result.updates).some(([key, value]) => current[key as keyof Project] !== value);
   if (staleInputs) {
     metadata.environmentLookupStatus.overall = result.failed ? 'failed' : 'review-required';
     metadata.environmentLookupNotes.overall = 'Project inputs changed during lookup; staff should re-run the lookup or verify the earlier results.';
-  } else {
+  } else if (!keepGenerationInputs) {
     const changedCoordinates = current.latitude !== requested.latitude || current.longitude !== requested.longitude;
     for (const field of fields) {
       if (Object.hasOwn(result.updates, field) && current[field] === requested[field] && !(changedCoordinates && ['latitude', 'longitude'].includes(field))) {
@@ -115,9 +117,13 @@ export function prepareRetriggerSave(base: Project, requested: Project, current:
       }
     }
   }
-  if (current.status === requested.status) submitted.status = 'Pending Review';
+  if (keptGenerationInputs) {
+    metadata.environmentLookupStatus.overall = 'review-required';
+    metadata.environmentLookupNotes.overall = ['Environmental refresh found newer values; generation inputs and PDFs were kept. Reopen for review to apply lookup values.', metadata.environmentLookupNotes.overall].filter(Boolean).join(' ').slice(0, 300);
+  }
+  if (current.status === requested.status && ['New', 'Approved for Generation', 'Manual Processing', 'Processing', ''].includes(current.status)) submitted.status = 'Pending Review';
   return { submitted, provenance: { metadata, expected: {
     environmentLookupStatus: base.environmentLookupStatus ?? null,
     environmentLookupNotes: base.environmentLookupNotes ?? null,
-  } } satisfies LookupProvenance, needsReview: result.needsReview || staleInputs || Object.values(metadata.environmentLookupStatus).some(outcome => ['failed','review-required','inferred','no-operator-found'].includes(outcome)) };
+  } } satisfies LookupProvenance, keptGenerationInputs, needsReview: result.needsReview || staleInputs || keptGenerationInputs || Object.values(metadata.environmentLookupStatus).some(outcome => ['failed','review-required','inferred','no-operator-found'].includes(outcome)) };
 }

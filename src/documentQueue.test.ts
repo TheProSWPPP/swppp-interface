@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ProjectStatus } from "./data";
 import {
   countDocumentGroups,
+  documentGroupLabel,
   documentGroup,
   documentStatusLabel,
   dueState,
@@ -13,6 +14,9 @@ import {
 } from "./documentQueue";
 
 describe("document status groups", () => {
+  it("names the shared post-generation group without asserting legacy generation proof", () => {
+    expect(documentGroupLabel("ready")).toBe("Generated / ready");
+  });
   it("counts every status into exactly one tile, including Ready", () => {
     const statuses: ProjectStatus[] = ["Ready", "Ready", "Complete", "Pending Review", "Approved for Generation", "Processing", "Manual Processing", "New", ""];
     const counts = countDocumentGroups(statuses.map((status) => ({ status })));
@@ -27,6 +31,20 @@ describe("document status groups", () => {
     expect(documentStatusLabel("Approved for Generation")).toBe("Being prepared");
     expect(documentGroup("Pending Review")).toBe("review");
     expect(documentStatusLabel(undefined)).toBe("New request");
+  });
+
+  it("places verified generation in the post-generation group and failed attempts in review", () => {
+    const statuses: ProjectStatus[] = ["Generated", "Generation Incomplete", "Generation Failed", "Pending Review", "Ready", "Complete"];
+    expect(countDocumentGroups(statuses.map((status) => ({ status })))).toEqual({ new: 0, review: 3, progress: 0, ready: 3 });
+    expect(documentGroup("Generated")).toBe("ready");
+    expect(documentGroup("Generation Incomplete")).toBe("review");
+    expect(documentGroup("Generation Failed")).toBe("review");
+    expect(documentStatusLabel("Generated")).toBe("Generated");
+    expect(documentStatusLabel("Generation Incomplete")).toBe("Generation Incomplete");
+    expect(documentStatusLabel("Generation Failed")).toBe("Generation Failed");
+    expect(documentStatusLabel("Pending Review")).toBe("Pending review");
+    expect(documentStatusLabel("Ready")).toBe("Documents ready");
+    expect(documentStatusLabel("Complete")).toBe("Documents ready");
   });
 });
 

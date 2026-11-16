@@ -8,14 +8,16 @@ export type DocumentGroup = "new" | "review" | "progress" | "ready";
 
 export const DOCUMENT_GROUPS: { key: DocumentGroup; label: string }[] = [
   { key: "new", label: "New requests" },
-  { key: "review", label: "Pending review" },
+  { key: "review", label: "Needs review" },
   { key: "progress", label: "Being prepared" },
-  { key: "ready", label: "Documents ready" },
+  { key: "ready", label: "Generated / ready" },
 ];
 
 export function documentGroup(status: ProjectStatus | string | undefined): DocumentGroup {
   switch (status) {
     case "Pending Review":
+    case "Generation Incomplete":
+    case "Generation Failed":
       return "review";
     case "Processing":
     case "Manual Processing":
@@ -23,6 +25,7 @@ export function documentGroup(status: ProjectStatus | string | undefined): Docum
       return "progress";
     case "Ready":
     case "Complete":
+    case "Generated":
       return "ready";
     default:
       return "new";
@@ -33,7 +36,7 @@ export function documentGroupLabel(group: DocumentGroup): string {
   return DOCUMENT_GROUPS.find((g) => g.key === group)!.label;
 }
 
-// Plain status words for the list badge. Each one names its tile group.
+// Plain status words for the list badge; failed attempts retain their exact status.
 export function documentStatusLabel(status: ProjectStatus | string | undefined): string {
   switch (status) {
     case "Approved for Generation":
@@ -45,6 +48,12 @@ export function documentStatusLabel(status: ProjectStatus | string | undefined):
     case "Ready":
     case "Complete":
       return "Documents ready";
+    case "Generated":
+      return "Generated";
+    case "Generation Incomplete":
+      return "Generation Incomplete";
+    case "Generation Failed":
+      return "Generation Failed";
     case "Pending Review":
       return "Pending review";
     default:

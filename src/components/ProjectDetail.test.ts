@@ -198,7 +198,7 @@ describe("document link availability", () => {
     expect(documents).not.toMatch(/<a\b|View Template Doc/);
   });
 
-  it("preserves approval, retrigger and upload control labels and disabled conditions", () => {
+  it("preserves approval and upload controls while naming environmental refresh accurately", () => {
     expect(render({ status: "New" })).toContain(">Accept</button>");
     const noPlans = render({ status: "Pending Review", plansUploaded: false, isIndustrial: false });
     expect(buttonFor(noPlans, "Approve &amp; Generate")).toMatch(/^<button\b[^>]*disabled=""/);
@@ -206,13 +206,40 @@ describe("document link availability", () => {
     expect(buttonFor(withPlans, "Approve &amp; Generate")).not.toContain('disabled=""');
     const industrial = render({ status: "Pending Review", isIndustrial: true });
     expect(buttonFor(industrial, "Confirm Manual Processing")).not.toContain('disabled=""');
-    expect(render({ status: "Approved for Generation" })).toContain("Re-trigger Generation");
+    expect(render({ status: "Approved for Generation" })).toContain("Refresh environmental data");
     expect(render({ status: "Pending Review" })).toContain("Upload PDF (max 1 GB)");
   });
 });
 
 
 describe("OPS document output evidence", () => {
+  it("keeps a Generated milestone separate from individual file evidence and approval actions", () => {
+    const html = render({ status: "Generated", generationNote: "MS4 source needs staff review", folderLink: "https://example.invalid/folder" });
+    expect(html).toContain("Automated generation recorded. Check individual file links and review notes below");
+    expect(html).toContain("0 of 4 file links recorded");
+    expect(html).toContain("Project status and folder links do not confirm document contents or customer delivery.");
+    expect(html).toContain("MS4 source needs staff review");
+    expect(html).toContain("Generate again");
+    expect(html).toContain("Reopen for review");
+    expect(html).not.toContain("Awaiting Approval");
+    expect(html).not.toContain("Approve &amp; Generate");
+    expect(html).not.toContain("Re-trigger Generation");
+    expect(html).not.toContain("Approval recorded. Check individual file links below.");
+    expect(html).not.toContain("Regenerating Data");
+    expect(html).toMatch(/Company Name<\/label><input[^>]*disabled=""/);
+  });
+
+  it.each(["Generation Incomplete", "Generation Failed"] as ProjectStatus[])(
+    "allows %s to be reviewed and retried without an intake approval label", (status) => {
+      const html = render({ status, plansUploaded: true, generationNote: "Check output receipts" });
+      expect(html).toContain(status);
+      expect(html).toContain("Check output receipts");
+      expect(buttonFor(html, "Approve &amp; Generate")).not.toContain('disabled=""');
+      expect(html).toContain("Refresh environmental data");
+      expect(html).not.toContain("Awaiting Approval");
+    },
+  );
+
   it("does not treat Ready and a project folder as proof of generated files", () => {
     const html = sections(render({ folderLink: "https://example.invalid/project-folder" })).documents;
     expect(html).toContain("0 of 4 file links recorded");

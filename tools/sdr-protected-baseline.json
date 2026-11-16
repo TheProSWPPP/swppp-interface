@@ -6,7 +6,7 @@
     },
     {
       "path": "src/data.ts",
-      "sha256": "67df645dcaa75c979735ece27de4012c78e676968b75359863924aa687b545b8"
+      "sha256": "d3d8d26516c143ea4cad10fa871b0e2fd7c28653bf91ba0c60e34270cfe5d517"
     },
     {
       "path": "src/index.css",
@@ -22,7 +22,7 @@
     },
     {
       "path": "src/components/ProjectDetail.tsx",
-      "sha256": "e6763c1380d8f107e01d3e568a29e3d770efcc84c6d00361c7cf4391376f99c1"
+      "sha256": "0cc467db46ce8823e488b3614b839d67e41cf08566b6117bb7b9cd046158b05b"
     },
     {
       "path": "src/components/ArchiveList.tsx",
@@ -90,7 +90,7 @@
     },
     {
       "path": "src/projectRetrigger.ts",
-      "sha256": "c8c91595238b3431f1f7fe0f237e243a4caaadbc3677cdeb86c7c34e7dc58c78"
+      "sha256": "ef31ba9c788639bee346c43774adba43ae67c51baab5286253ce75e81a13292a"
     }
   ],
   "protectedServerRoutes": [

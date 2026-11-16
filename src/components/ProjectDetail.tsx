@@ -132,12 +132,16 @@ export default function ProjectDetail({
 
   const isApproved =
     project.status === "Approved for Generation" ||
+    project.status === "Generated" ||
     project.status === "Complete";
+  const isGenerated = project.status === "Generated";
+  const isGenerationProblem = project.status === "Generation Incomplete" || project.status === "Generation Failed";
   const isManual = project.status === "Manual Processing";
   const isNew = project.status === "New";
 
   const canApprove =
     project.status === "Pending Review" ||
+    isGenerationProblem ||
     project.status === "Processing" ||
     project.status === "";
 
@@ -278,11 +282,23 @@ export default function ProjectDetail({
   };
 
   const handleCancelGeneration = () => {
-    if (confirm("Cancel generation and reset status to Pending Review?")) {
+    if (confirm(isGenerated
+      ? "Reopen for review and reset status to Pending Review? Existing files remain available."
+      : "Cancel generation and reset status to Pending Review? Existing files remain available.")) {
       onUpdate({
         ...formData,
         status: "Pending Review",
       });
+    }
+  };
+
+  const handleGenerateAgain = async () => {
+    if (!confirm("Start a new document generation run? Existing files remain available; review the new output receipts before using them.")) return;
+    setIsGenerating(true);
+    try {
+      await onUpdate({ ...currentForm.current, status: "Approved for Generation" });
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -293,9 +309,13 @@ export default function ProjectDetail({
   };
 
   const handleRetrigger = async () => {
+    const preserveGeneratedInputs = ["Generated", "Ready", "Complete"].includes(currentForm.current.status);
+    const refreshMessage = preserveGeneratedInputs
+      ? "Check environmental data? Existing generation inputs and PDFs will be kept; only lookup notes will be saved. Reopen for review to apply new lookup values."
+      : "Refresh environmental data (soil, waterbodies, endangered species, MS4)? This does not regenerate PDFs. An order being prepared will return to Pending Review. Continue?";
     if (
       !confirm(
-        "This will re-trigger the project generation with updated details. Continue?",
+        refreshMessage,
       )
     )
       return;
@@ -337,14 +357,16 @@ export default function ProjectDetail({
         alert("Lookup results could not be saved. Your edits are kept; review the save error before trying again.");
         return;
       }
-      alert(result.failed
+      alert(prepared.keptGenerationInputs
+        ? "Lookup notes saved. Generation inputs and existing PDFs were kept. Reopen for review to apply new environmental values."
+        : result.failed
         ? "Lookup failed or was incomplete. Review notes were saved; existing information was kept where results were unavailable."
         : prepared.needsReview
-          ? "Lookup results saved with review notes. Verify the environmental information before approving."
-          : "Lookup results saved. Review the updated information before approving.");
+          ? "Environmental data saved with review notes. Verify the updated information."
+          : "Environmental data saved. Review the updated information.");
     } catch (error) {
-      console.error("Re-trigger failed:", error);
-      alert("Error re-triggering project. Please check your connection.");
+      console.error("Environmental data refresh failed:", error);
+      alert("Environmental data refresh failed. Please check your connection.");
     } finally {
       setIsRetriggering(false);
     }
@@ -617,30 +639,35 @@ export default function ProjectDetail({
                     "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border",
                     project.status === "Approved for Generation"
                       ? "bg-purple-50 text-purple-700 border-purple-200"
-                      : project.status === "Complete"
-                        ? "bg-green-50 text-green-700 border-green-200"
-                        : project.status === "Manual Processing"
-                          ? "bg-orange-50 text-orange-700 border-orange-200"
-                          : project.status === "Ready"
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : project.status === "New"
-                              ? "bg-slate-100 text-slate-700 border-slate-200"
-                              : "bg-brand-50 text-brand-700 border-brand-200",
+                      : project.status === "Generated"
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : isGenerationProblem
+                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                          : project.status === "Complete"
+                            ? "bg-green-50 text-green-700 border-green-200"
+                            : project.status === "Manual Processing"
+                              ? "bg-orange-50 text-orange-700 border-orange-200"
+                              : project.status === "Ready"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : project.status === "New"
+                                  ? "bg-slate-100 text-slate-700 border-slate-200"
+                                  : "bg-brand-50 text-brand-700 border-brand-200",
                   )}
                 >
                   {project.status || "Draft"}
                 </span>
                 {(project.status === "Approved for Generation" ||
+                  isGenerated ||
                   project.status === "Manual Processing" ||
                   project.status === "Ready") && (
                   <button
                     onClick={handleCancelGeneration}
                     disabled={isSaving}
                     className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded-full border border-red-200 transition-colors uppercase tracking-tight"
-                    title="Cancel Generation & Reset"
+                    title={isGenerated ? "Reopen for review; existing files remain" : "Cancel Generation & Reset"}
                   >
                     <XCircle className="h-3 w-3" />
-                    Cancel
+                    {isGenerated ? "Reopen for review" : "Cancel"}
                   </button>
                 )}
               </div>
@@ -1507,13 +1534,17 @@ export default function ProjectDetail({
               Status & Actions
             </h4>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              {isApproved
-                ? "Approval recorded. Check individual file links below."
-                : isManual
-                  ? "Marked for manual processing. Handled outside system."
-                  : isNew
-                    ? "Review request details. Accept to process or delete if invalid."
-                    : "Review accuracy. Approve to trigger generation."}
+              {isGenerated
+                ? "Automated generation recorded. Check individual file links and review notes below; the full package and delivery still need separate review."
+                : isApproved
+                  ? "Approval recorded. Check individual file links below."
+                  : isGenerationProblem
+                    ? "Generation needs review. Check output details below, then retry when ready."
+                    : isManual
+                      ? "Marked for manual processing. Handled outside system."
+                      : isNew
+                        ? "Review request details. Accept to process or delete if invalid."
+                        : "Review accuracy. Approve to trigger generation."}
             </p>
 
             <div className="space-y-4">
@@ -1577,12 +1608,12 @@ export default function ProjectDetail({
                     {isRetriggering ? (
                       <>
                         <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
-                        Re-running Data Lookup...
+                        Refreshing environmental data...
                       </>
                     ) : (
                       <>
                         <Loader2 className="-ml-1 mr-2 h-4 w-4" />
-                        Re-run Data Lookup (Soil, Waterbodies, Endangered, MS4)
+                        Refresh environmental data (Soil, Waterbodies, Endangered, MS4)
                       </>
                     )}
                   </button>
@@ -1590,7 +1621,7 @@ export default function ProjectDetail({
                   <button
                     onClick={handleApprove}
                     disabled={
-                      isGenerating || isSaving ||
+                      isGenerating || isRetriggering || isSaving ||
                       (!formData.plansUploaded && !formData.isIndustrial)
                     }
                     className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-brand-600 hover:bg-brand-700 focus:ring-4 focus:ring-brand-500/20 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-brand-600/20"
@@ -1629,7 +1660,7 @@ export default function ProjectDetail({
                       </>
                     ) : (
                       <>
-                        <CheckCircle className="h-4 w-4 mr-2" /> Approved
+                        <CheckCircle className="h-4 w-4 mr-2" /> {isGenerated ? "Generated" : "Approved"}
                       </>
                     )}
                   </div>
@@ -1642,15 +1673,25 @@ export default function ProjectDetail({
                     {isRetriggering ? (
                       <>
                         <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
-                        Regenerating Data...
+                        Refreshing environmental data...
                       </>
                     ) : (
                       <>
                         <Loader2 className="-ml-1 mr-2 h-4 w-4" />
-                        Re-trigger Generation
+                        Refresh environmental data (Soil, Waterbodies, Endangered, MS4)
                       </>
                     )}
                   </button>
+
+                  {isGenerated && (
+                    <button
+                      onClick={handleGenerateAgain}
+                      disabled={isGenerating || isRetriggering || isSaving}
+                      className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-sm"
+                    >
+                      {isGenerating ? "Starting generation..." : "Generate again"}
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -1760,7 +1801,7 @@ export default function ProjectDetail({
                             Approval recorded
                           </span>
                         )}
-                        {automated && !receipt && !isApproved && !isClickable && !isProjectReady && (
+                        {automated && !receipt && !isApproved && !isGenerationProblem && !isClickable && !isProjectReady && (
                           <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
                             Awaiting Approval
                           </span>
