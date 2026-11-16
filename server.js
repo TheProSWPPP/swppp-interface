@@ -52,6 +52,7 @@ import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,assertF
 import {JOB_CHANGE_SKIP} from './lib/outreachHistory.js';
 import {reconcileStuckSends,raiseRefusedSendTask} from './lib/sdrSendReconcile.js';
 import {canonicalMailbox} from './lib/mailboxAliases.js';
+import {claimSoftEnrollment} from './lib/softEnrollmentPacing.js';
 import {softGuardState,softEnrolledToday} from './lib/softVerdictGuard.js';
 import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
@@ -1678,6 +1679,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
     if (process.env.SDR_VOLUME_ALERTS_ENABLED !== "true") return;
     const to = String(process.env.SDR_VOLUME_ALERT_TO || "").split(",").map((v) => v.trim()).filter(Boolean);
     void trackSdrJob("volume_watch", () => runVolumeWatch(pool, {
+      getSequenceDetail: apolloClient.getSequenceDetail,
       notify: to.length ? createVolumeAlertNotifier({ pool, gmail: gmailInbox, getToken: accessTokenForMailbox, to,
         notifyOwner: process.env.SDR_VOLUME_ALERT_NOTIFY_OWNER === "true" }) : null,
     })).catch(() => console.error("[volume-watch] run failed; see run health"));
@@ -4937,6 +4939,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       }
     }
 
+    let verifiedSoft = false;
     // Pre-send email verification: block enroll on a confident-bad address so we stop burning
     // sends + sender reputation on dead mailboxes / typo domains. Fail-open for people (no key or
     // API error → proceeds; catch-all / unknown allowed). Admin can force via override:true.
@@ -5002,13 +5005,14 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
       // Automation sends to a valid verdict, and since 2026-10-27 to a soft one (catch-all /
       // unknown) within the soft brakes: the daily soft quota and the per-sequence bounce guard
       // (lib/softVerdictGuard.js). Both refusals are retried later; a valid address is never held.
-      if (req.sdrUser?.machine && verdict === "soft") {
+      verifiedSoft = req.sdrUser?.machine === true && verdict === "soft";
+      if (verifiedSoft) {
         const soft = await softGuardState(pool, (await pool.query("SELECT * FROM sdr_settings WHERE id = 1")).rows[0]);
         const bouncing = soft.bouncing.get(String(draft.apollo_sequence_id));
-        if (!soft.available || bouncing) {
+        if (!soft.available || !soft.covered?.has(String(draft.apollo_sequence_id)) || bouncing) {
           return res.status(409).json({
             code: "soft_bounce_guard", status: verdict,
-            message: soft.available
+            message: bouncing
               ? `Not sending automatically: ${targetEmail} is unconfirmed (${verdict}) and this sequence bounced ${(bouncing.rate * 100).toFixed(1)}% in the last 7 days. It is tried again when that drops below 4%.`
               : `Not sending automatically: ${targetEmail} is unconfirmed (${verdict}) and the sequence bounce rate could not be read. It is tried again later.`,
           });
@@ -5050,7 +5054,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     {
       const paused = await sequencePaused(draft.apollo_sequence_id);
       if (paused) {
-        return res.status(409).json({ code: "sequence_paused", reason: paused.reason, error: `This Apollo sequence is paused (${paused.reason}), so nothing would be sent. Resume it in Apollo first.` });
+        return res.status(paused.reason === "sequence_state_unavailable" ? 503 : 409).json({ code: paused.reason === "sequence_state_unavailable" ? paused.reason : "sequence_paused", reason: paused.reason, error: paused.reason === "sequence_state_unavailable" ? "Apollo sequence status is temporarily unavailable. This enrollment will retry after status can be confirmed." : `This Apollo sequence is paused (${paused.reason}), so nothing would be sent. Resume it in Apollo first.` });
       }
     }
 
@@ -5136,6 +5140,7 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         const safetyContext=await assertSendSafety(client,draft,{companyId:process.env.SDR_CRM_COMPANY_ID,actionKey:`draft:${draft.id}:${draft.revision}`,phase:'locked_preflight'});
         const contactDays=await readContactSendDaysAgo(client,{apolloContactId:String(apolloContactId),recipientEmail:draft.contact_email_snapshot});
         if(contactDays!==null&&contactDays<=await contactCooldownDays())throw draftConflict('contact_cooldown');
+        if (verifiedSoft) await claimSoftEnrollment(client,current);
         const reservation=await reserveEnrollment({pool:client,apollo:apolloClient,context:{...safetyContext,apolloContactId},draftRevision:current.revision,actionId:crypto.randomUUID(),enrollmentMode:'sdr_draft_v1'});
 
         // Carry the approved subject/body into Apollo contact custom fields.
