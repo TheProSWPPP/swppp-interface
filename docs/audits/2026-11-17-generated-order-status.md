@@ -21,7 +21,7 @@ Queue groups/counts/filtering/badges, detail locking/reopen/retry actions, envir
 The Brevo project-completion consumer reads projects by finish-date window, not by status. No completion messages, delivery actions or new triggers are introduced. Router callbacks retain CAS patch behavior, preserve unrelated fields, and do not use an upsert.
 
 ## Verification
-- Full serial Vitest run with a disposable local PostgreSQL database: 3,784 passed, one failed. The failing emailVerifyPassCandidates selector test also fails on the unchanged main archive; it is unrelated to document status.
+- Full serial Vitest run with a disposable local PostgreSQL database: 3,788 passed, one failed. The failing emailVerifyPassCandidates selector test also fails on the unchanged main archive; it is unrelated to document status.
 - Production build and TypeScript compilation pass. All 130 focused status tests pass after review corrections.
 - Sixteen producer tests cover both completion branches, review warnings, JO-only runs, partial/zero outputs, missing JO, unexecuted expected CSN/CL, explicit cover skip, malformed receipt hashes, held routing and unchanged graph/other nodes. The old implementation fails the new cases.
 - Changed-file lint reports the same existing any declarations and effect-dependency warning in ProjectDetail/data. No new lint finding was introduced. Diff whitespace checks pass.
