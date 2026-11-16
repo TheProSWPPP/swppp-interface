@@ -28,6 +28,20 @@ describe("document status groups", () => {
     expect(documentGroup("Pending Review")).toBe("review");
     expect(documentStatusLabel(undefined)).toBe("New request");
   });
+
+  it("places verified generation in the post-generation group and failed attempts in review", () => {
+    const statuses: ProjectStatus[] = ["Generated", "Generation Incomplete", "Generation Failed", "Pending Review", "Ready", "Complete"];
+    expect(countDocumentGroups(statuses.map((status) => ({ status })))).toEqual({ new: 0, review: 3, progress: 0, ready: 3 });
+    expect(documentGroup("Generated")).toBe("ready");
+    expect(documentGroup("Generation Incomplete")).toBe("review");
+    expect(documentGroup("Generation Failed")).toBe("review");
+    expect(documentStatusLabel("Generated")).toBe("Generated");
+    expect(documentStatusLabel("Generation Incomplete")).toBe("Generation Incomplete");
+    expect(documentStatusLabel("Generation Failed")).toBe("Generation Failed");
+    expect(documentStatusLabel("Pending Review")).toBe("Pending review");
+    expect(documentStatusLabel("Ready")).toBe("Documents ready");
+    expect(documentStatusLabel("Complete")).toBe("Documents ready");
+  });
 });
 
 describe("due dates", () => {

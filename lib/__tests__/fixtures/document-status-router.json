@@ -1,0 +1,3628 @@
+{
+  "nodes": [
+    {
+      "name": "Webhook Input",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {}
+    },
+    {
+      "name": "Normalize & Route Data",
+      "type": "n8n-nodes-base.code",
+      "parameters": {}
+    },
+    {
+      "name": "State Router",
+      "type": "n8n-nodes-base.switch",
+      "parameters": {}
+    },
+    {
+      "name": "Prepare Status Update",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "jsCode": "const route = $('Normalize & Route Data').first().json;\nconst specs = [{\"name\": \"AL - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"AL - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"AL - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"AL - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"AL - TOPO\", \"key\": \"topo\", \"label\": \"TOPO\"}, {\"name\": \"AZ - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"AZ - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"AZ - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"AZ - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"AR-LG - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"AR-LG - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"AR-LG - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"AR-LG - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"AR-SM - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"AR-SM - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"AR-SM - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"AR-SM - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"CO - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"CO - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"CO - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"CO - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"CO - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"FL - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"FL - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"FL - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"FL - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"FL - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"GA - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"GA - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"GA - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"GA - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"ID - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"ID - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"ID - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"ID - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"ID - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"ID - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"IL - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"IL - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"IL - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"IL - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"IL - ECOCAT\", \"key\": \"ecocat\", \"label\": \"ECOCAT\"}, {\"name\": \"IL - SHPO\", \"key\": \"shpo\", \"label\": \"SHPO\"}, {\"name\": \"IN - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"IN - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"IN - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"IN - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"KY - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"KY - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"KY - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"KY - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"LA-LG - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"LA-LG - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"LA-LG - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"LA-LG - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"LA-LG - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"LA-LG - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"LA-SM - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"LA-SM - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"LA-SM - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"LA-SM - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"LA-SM - SCACR\", \"key\": \"scacr\", \"label\": \"SCACR\"}, {\"name\": \"LA-SM - SCACR-LDEQ\", \"key\": \"scacr-ldeq\", \"label\": \"SCACR-LDEQ\"}, {\"name\": \"MS-LG - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"MS-LG - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"MS-LG - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"MS-LG - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"MS-LG - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"MO - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"MO - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"MO - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"MO - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"MO - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"NE - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"NE - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"NE - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"NE - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"NE - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"NE - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"NV - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"NV - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"NV - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"NV - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"NV - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"NV - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"NM - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"NM - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"NM - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"NM - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"NM - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"NY - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"NY - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"NY - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"NY - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"NC - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"NC - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"NC - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"NC - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"ND - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"ND - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"ND - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"ND - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"OH - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"OH - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"OH - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"OH - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"OH - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"OK - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"OK - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"OK - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"OK - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"OK - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"PA - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"PA - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"PA - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"PA - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"SC - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"SC - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"SC - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"SC - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"SD - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"SD - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"SD - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"SD - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"TN - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"TN - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"TN - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"TN - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"TN - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"TX-LG - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"TX-LG - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"TX-LG - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"TX-LG - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"TX-LG - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"TX-LG - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"TX-SM - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"TX-SM - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"TX-SM - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"TX-SM - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"UT - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"UT - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"UT - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"UT - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"UT - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"VA - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"VA - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"VA - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"VA - REG\", \"key\": \"reg\", \"label\": \"REG\"}, {\"name\": \"WY - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"WY - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"WY - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"WY - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"WI - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"WI - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"WI - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"MT - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"MT - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"MT - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"KS - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"KS - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"KS - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"JO-ONLY - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}];\nconst missingCoverTemplates = {\"West Virginia\": \"WV\", \"Washington\": \"WA\", \"Pennsylvania\": \"PA\", \"Oregon\": \"OR\", \"Oklahoma\": \"OK\", \"Nebraska\": \"NE\", \"Minnesota\": \"MN\", \"Michigan\": \"MI\", \"Iowa\": \"IA\", \"California\": \"CA\"};\nconst results = [];\nfor (const spec of specs) {\n  const source = $(spec.name);\n  if (!source.isExecuted) continue;\n  let rows = [];\n  try { rows = source.all().map(item => item.json); } catch (_) { /* unavailable output is not a receipt */ }\n  const receipt = rows.find(row => row.documentOutput?.documentKey === spec.key)?.documentOutput;\n  const valid = receipt && receipt.validatedPdf === true && typeof receipt.id === 'string' && receipt.id.startsWith('id:') &&\n    typeof receipt.path === 'string' && receipt.path.startsWith('/') && /\\.pdf$/i.test(receipt.path) &&\n    Number.isSafeInteger(receipt.size) && receipt.size > 0 && /^[a-f0-9]{64}$/.test(receipt.contentHash || '');\n  const marker = rows.length === 1 && !rows[0].error && !rows[0].documentOutput ? rows[0].documentSkipped : null;\n  const skipped = spec.key === 'cover-letter' && Object.prototype.hasOwnProperty.call(missingCoverTemplates, route.stateTemplate) &&\n    spec.name === missingCoverTemplates[route.stateTemplate] + ' - CL' && marker?.documentKey === 'cover-letter' &&\n    marker.state === route.stateTemplate && marker.reason === 'template_not_configured';\n  results.push({spec, rows, receipt: valid ? receipt : null, skipped});\n}\nconst jo = results.find(result => result.spec.key === 'job-order');\nconst lookupStatus = jo?.rows.find(row => row.environmentLookupStatus)?.environmentLookupStatus;\nconst lookupNotes = jo?.rows.find(row => row.environmentLookupNotes)?.environmentLookupNotes;\nconst warnings = [];\nconst missing = results.filter(result => !result.receipt && !result.skipped).map(result => result.spec.label);\nif (!jo?.receipt) warnings.push('Job-order PDF was not verified.');\nif (missing.length) warnings.push('Document outputs need review: ' + [...new Set(missing)].join(', ') + '.');\nif (!results.length) warnings.push('No document output was verified.');\nconst requiredKey = name => /job order/i.test(name) ? 'job-order' : /cover letter/i.test(name) ? 'cover-letter' : /construction site notice/i.test(name) ? 'site-notice' : /SWPPP/i.test(name) ? 'swppp' : /\\bNOI\\b/i.test(name) ? 'noi' : /\\bNOT\\b/i.test(name) ? 'not' : name.toLowerCase();\nconst remaining = Array.isArray(route.requiredDocuments) ? route.requiredDocuments.filter(name => typeof name === 'string' && !results.some(result => result.spec.key === requiredKey(name) && (result.receipt || result.skipped))) : [];\nif (remaining.length) warnings.push('Remaining package documents need OPS review: ' + remaining.join(', ') + '.');\n\nif (lookupStatus && Object.values(lookupStatus).some(status => ['inferred', 'review-required', 'no-operator-found', 'no-qualifying-results', 'failed'].includes(status))) {\n  warnings.push('Environmental lookup notes need staff review.');\n}\nif (route.templatesMissing) warnings.push('State templates are missing; review the remaining document package.');\nconst folder = jo?.receipt?.path ? jo.receipt.path.slice(0, jo.receipt.path.lastIndexOf('/')) : '';\nconst skipNotes = results.some(result => result.skipped) ? ['Cover letter skipped: no ' + route.stateTemplate + ' template configured.'] : [];\nconst data = { projectId: route.id, status: warnings.length ? 'Pending Review' : 'Ready', generationNote: [...warnings, ...skipNotes].join(' ').slice(0, 300) };\nif (folder) data.folderLink = 'https://www.dropbox.com/home' + encodeURIComponent(folder).replace(/%2F/g, '/');\nif (lookupStatus && typeof lookupStatus === 'object' && !Array.isArray(lookupStatus)) {\n  data.environmentLookupStatus = lookupStatus;\n  data.environmentLookupNotes = lookupNotes || {};\n}\nconst card = $('Call Trello Card ').first().json;\nif (typeof card.idCard === 'string' && /^[a-zA-Z0-9]+$/.test(card.idCard)) data.trelloLink = 'https://trello.com/c/' + card.idCard;\nif (route.callbackBase) data.__expectedValues = Object.fromEntries(Object.keys(data).filter(key => key !== 'projectId').map(key => [key, route.callbackBase[key] ?? null]));\nreturn [{ json: data }];\n"
+      }
+    },
+    {
+      "name": "Update Project Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {}
+    },
+    {
+      "name": "AL - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AL - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AL - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AL - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AL - TOPO",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AZ - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AZ - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AZ - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AZ - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AR-LG - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AR-LG - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AR-LG - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AR-LG - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AR-SM - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AR-SM - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AR-SM - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "AR-SM - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "CO - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "CO - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "CO - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "CO - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "CO - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "FL - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "FL - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "FL - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "FL - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "FL - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "GA - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "GA - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "GA - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "GA - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "ID - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "ID - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "ID - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "ID - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "ID - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "ID - NOT",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "IL - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "IL - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "IL - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "IL - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "IL - ECOCAT",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "IL - SHPO",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "IN - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "IN - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "IN - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "IN - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "KY - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "KY - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "KY - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "KY - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-LG - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-LG - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-LG - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-LG - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-LG - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-LG - NOT",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-SM - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-SM - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-SM - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-SM - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-SM - SCACR",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "LA-SM - SCACR-LDEQ",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MS-LG - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MS-LG - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MS-LG - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MS-LG - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MS-LG - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MO - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MO - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MO - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MO - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MO - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NE - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NE - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NE - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NE - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NE - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NE - NOT",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NV - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NV - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NV - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NV - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NV - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NV - NOT",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NM - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NM - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NM - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NM - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NM - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NY - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NY - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NY - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NY - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NC - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NC - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NC - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "NC - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "ND - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "ND - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "ND - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "ND - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "OH - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "OH - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "OH - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "OH - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "OH - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "OK - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "OK - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "OK - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "OK - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "OK - NOT",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "PA - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "PA - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "PA - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "PA - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "SC - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "SC - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "SC - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "SC - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "SD - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "SD - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "SD - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "SD - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TN - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TN - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TN - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TN - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TN - NOT",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TX-LG - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TX-LG - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TX-LG - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TX-LG - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TX-LG - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TX-LG - NOT",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TX-SM - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TX-SM - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TX-SM - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "TX-SM - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "UT - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "UT - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "UT - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "UT - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "UT - NOI",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "VA - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "VA - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "VA - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "VA - REG",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "WY - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "WY - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "WY - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "WY - SWPPP",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "Call Trello Card ",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "Scan Civil Plans",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "parameters": {}
+    },
+    {
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields1",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields2",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields3",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields4",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields5",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields6",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields7",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields8",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields9",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields10",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields11",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields12",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields13",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields14",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields15",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields16",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields17",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields18",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields19",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields20",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields21",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields22",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields23",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields24",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields25",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields26",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields27",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields28",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields29",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields30",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields31",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "WI - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "WI - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "WI - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields32",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "MT - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MT - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "MT - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields33",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "KS - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "KS - CSN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "KS - CL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields34",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Get all cards in a list1",
+      "type": "n8n-nodes-base.trello",
+      "parameters": {}
+    },
+    {
+      "name": "Find Right Template1",
+      "type": "n8n-nodes-base.code",
+      "parameters": {}
+    },
+    {
+      "name": "JO-ONLY - JOB-ORDER",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "parameters": {}
+    },
+    {
+      "name": "Edit Fields JO-ONLY",
+      "type": "n8n-nodes-base.set",
+      "parameters": {}
+    },
+    {
+      "name": "Prepare Status Update JO-ONLY",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "jsCode": "const route = $('Normalize & Route Data').first().json;\nconst specs = [{\"name\": \"AL - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"AL - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"AL - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"AL - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"AL - TOPO\", \"key\": \"topo\", \"label\": \"TOPO\"}, {\"name\": \"AZ - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"AZ - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"AZ - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"AZ - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"AR-LG - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"AR-LG - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"AR-LG - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"AR-LG - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"AR-SM - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"AR-SM - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"AR-SM - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"AR-SM - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"CO - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"CO - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"CO - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"CO - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"CO - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"FL - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"FL - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"FL - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"FL - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"FL - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"GA - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"GA - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"GA - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"GA - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"ID - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"ID - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"ID - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"ID - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"ID - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"ID - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"IL - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"IL - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"IL - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"IL - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"IL - ECOCAT\", \"key\": \"ecocat\", \"label\": \"ECOCAT\"}, {\"name\": \"IL - SHPO\", \"key\": \"shpo\", \"label\": \"SHPO\"}, {\"name\": \"IN - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"IN - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"IN - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"IN - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"KY - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"KY - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"KY - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"KY - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"LA-LG - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"LA-LG - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"LA-LG - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"LA-LG - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"LA-LG - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"LA-LG - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"LA-SM - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"LA-SM - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"LA-SM - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"LA-SM - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"LA-SM - SCACR\", \"key\": \"scacr\", \"label\": \"SCACR\"}, {\"name\": \"LA-SM - SCACR-LDEQ\", \"key\": \"scacr-ldeq\", \"label\": \"SCACR-LDEQ\"}, {\"name\": \"MS-LG - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"MS-LG - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"MS-LG - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"MS-LG - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"MS-LG - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"MO - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"MO - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"MO - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"MO - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"MO - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"NE - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"NE - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"NE - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"NE - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"NE - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"NE - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"NV - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"NV - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"NV - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"NV - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"NV - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"NV - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"NM - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"NM - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"NM - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"NM - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"NM - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"NY - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"NY - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"NY - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"NY - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"NC - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"NC - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"NC - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"NC - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"ND - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"ND - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"ND - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"ND - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"OH - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"OH - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"OH - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"OH - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"OH - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"OK - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"OK - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"OK - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"OK - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"OK - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"PA - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"PA - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"PA - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"PA - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"SC - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"SC - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"SC - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"SC - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"SD - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"SD - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"SD - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"SD - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"TN - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"TN - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"TN - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"TN - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"TN - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"TX-LG - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"TX-LG - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"TX-LG - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"TX-LG - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"TX-LG - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"TX-LG - NOT\", \"key\": \"not\", \"label\": \"NOT\"}, {\"name\": \"TX-SM - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"TX-SM - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"TX-SM - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"TX-SM - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"UT - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"UT - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"UT - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"UT - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"UT - NOI\", \"key\": \"noi\", \"label\": \"NOI\"}, {\"name\": \"VA - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"VA - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"VA - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"VA - REG\", \"key\": \"reg\", \"label\": \"REG\"}, {\"name\": \"WY - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"WY - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"WY - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"WY - SWPPP\", \"key\": \"swppp\", \"label\": \"SWPPP\"}, {\"name\": \"WI - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"WI - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"WI - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"MT - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"MT - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"MT - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"KS - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}, {\"name\": \"KS - CSN\", \"key\": \"site-notice\", \"label\": \"Site notice\"}, {\"name\": \"KS - CL\", \"key\": \"cover-letter\", \"label\": \"Cover letter\"}, {\"name\": \"JO-ONLY - JOB-ORDER\", \"key\": \"job-order\", \"label\": \"Job order\"}];\nconst missingCoverTemplates = {\"West Virginia\": \"WV\", \"Washington\": \"WA\", \"Pennsylvania\": \"PA\", \"Oregon\": \"OR\", \"Oklahoma\": \"OK\", \"Nebraska\": \"NE\", \"Minnesota\": \"MN\", \"Michigan\": \"MI\", \"Iowa\": \"IA\", \"California\": \"CA\"};\nconst results = [];\nfor (const spec of specs) {\n  const source = $(spec.name);\n  if (!source.isExecuted) continue;\n  let rows = [];\n  try { rows = source.all().map(item => item.json); } catch (_) { /* unavailable output is not a receipt */ }\n  const receipt = rows.find(row => row.documentOutput?.documentKey === spec.key)?.documentOutput;\n  const valid = receipt && receipt.validatedPdf === true && typeof receipt.id === 'string' && receipt.id.startsWith('id:') &&\n    typeof receipt.path === 'string' && receipt.path.startsWith('/') && /\\.pdf$/i.test(receipt.path) &&\n    Number.isSafeInteger(receipt.size) && receipt.size > 0 && /^[a-f0-9]{64}$/.test(receipt.contentHash || '');\n  const marker = rows.length === 1 && !rows[0].error && !rows[0].documentOutput ? rows[0].documentSkipped : null;\n  const skipped = spec.key === 'cover-letter' && Object.prototype.hasOwnProperty.call(missingCoverTemplates, route.stateTemplate) &&\n    spec.name === missingCoverTemplates[route.stateTemplate] + ' - CL' && marker?.documentKey === 'cover-letter' &&\n    marker.state === route.stateTemplate && marker.reason === 'template_not_configured';\n  results.push({spec, rows, receipt: valid ? receipt : null, skipped});\n}\nconst jo = results.find(result => result.spec.key === 'job-order');\nconst lookupStatus = jo?.rows.find(row => row.environmentLookupStatus)?.environmentLookupStatus;\nconst lookupNotes = jo?.rows.find(row => row.environmentLookupNotes)?.environmentLookupNotes;\nconst warnings = [];\nconst missing = results.filter(result => !result.receipt && !result.skipped).map(result => result.spec.label);\nif (!jo?.receipt) warnings.push('Job-order PDF was not verified.');\nif (missing.length) warnings.push('Document outputs need review: ' + [...new Set(missing)].join(', ') + '.');\nif (!results.length) warnings.push('No document output was verified.');\nconst requiredKey = name => /job order/i.test(name) ? 'job-order' : /cover letter/i.test(name) ? 'cover-letter' : /construction site notice/i.test(name) ? 'site-notice' : /SWPPP/i.test(name) ? 'swppp' : /\\bNOI\\b/i.test(name) ? 'noi' : /\\bNOT\\b/i.test(name) ? 'not' : name.toLowerCase();\nconst remaining = Array.isArray(route.requiredDocuments) ? route.requiredDocuments.filter(name => typeof name === 'string' && !results.some(result => result.spec.key === requiredKey(name) && (result.receipt || result.skipped))) : [];\nif (remaining.length) warnings.push('Remaining package documents need OPS review: ' + remaining.join(', ') + '.');\n\nif (lookupStatus && Object.values(lookupStatus).some(status => ['inferred', 'review-required', 'no-operator-found', 'no-qualifying-results', 'failed'].includes(status))) {\n  warnings.push('Environmental lookup notes need staff review.');\n}\nif (route.templatesMissing) warnings.push('State templates are missing; review the remaining document package.');\nconst folder = jo?.receipt?.path ? jo.receipt.path.slice(0, jo.receipt.path.lastIndexOf('/')) : '';\nconst skipNotes = results.some(result => result.skipped) ? ['Cover letter skipped: no ' + route.stateTemplate + ' template configured.'] : [];\nconst data = { projectId: route.id, status: warnings.length ? 'Pending Review' : 'Ready', generationNote: [...warnings, ...skipNotes].join(' ').slice(0, 300) };\nif (folder) data.folderLink = 'https://www.dropbox.com/home' + encodeURIComponent(folder).replace(/%2F/g, '/');\nif (lookupStatus && typeof lookupStatus === 'object' && !Array.isArray(lookupStatus)) {\n  data.environmentLookupStatus = lookupStatus;\n  data.environmentLookupNotes = lookupNotes || {};\n}\nconst card = $('Call Trello Card ').first().json;\nif (typeof card.idCard === 'string' && /^[a-zA-Z0-9]+$/.test(card.idCard)) data.trelloLink = 'https://trello.com/c/' + card.idCard;\nif (route.callbackBase) data.__expectedValues = Object.fromEntries(Object.keys(data).filter(key => key !== 'projectId').map(key => [key, route.callbackBase[key] ?? null]));\nreturn [{ json: data }];\n"
+      }
+    },
+    {
+      "name": "Update Project Status JO-ONLY",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {}
+    },
+    {
+      "name": "Trello Comment JO-ONLY",
+      "type": "n8n-nodes-base.trello",
+      "parameters": {}
+    },
+    {
+      "name": "Prepare Routing Review",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "jsCode": "const input = $('Webhook Input').first().json;\nconst body = input.body || input;\nconst projectId = body.id;\nif (typeof projectId !== 'string' || !projectId.trim()) throw new Error('routing_project_identity_required');\nreturn [{json:{projectId,status:'Pending Review',generationNote:'Document generation held. Confirm the project state, matching template and disturbed acreage before approving again.',__expectedValues:{status:body.status ?? null,generationNote:body.generationNote ?? null}}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Prepare Status Update": {
+      "main": [
+        [
+          {
+            "node": "Update Project Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Input": {
+      "main": [
+        [
+          {
+            "node": "Get all cards in a list1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize & Route Data": {
+      "main": [
+        [
+          {
+            "node": "State Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AL - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "AL - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AL - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AL - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "AL - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AL - NOI": {
+      "main": [
+        [
+          {
+            "node": "AL - TOPO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AL - TOPO": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AZ - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "AZ - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AZ - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AZ - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "AZ - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AZ - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AR-LG - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "AR-LG - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AR-LG - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AR-LG - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "AR-LG - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AR-LG - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AR-SM - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "AR-SM - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AR-SM - CSN": {
+      "main": [
+        [
+          {
+            "node": "AR-SM - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AR-SM - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AR-SM - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CO - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "CO - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CO - CSN": {
+      "main": [
+        [
+          {
+            "node": "CO - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CO - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CO - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "CO - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CO - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FL - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "FL - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FL - CSN": {
+      "main": [
+        [
+          {
+            "node": "FL - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FL - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FL - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "FL - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FL - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GA - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "GA - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GA - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GA - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "GA - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GA - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ID - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "ID - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ID - CSN": {
+      "main": [
+        [
+          {
+            "node": "ID - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ID - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ID - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "ID - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ID - NOI": {
+      "main": [
+        [
+          {
+            "node": "ID - NOT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ID - NOT": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IL - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "IL - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IL - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IL - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "IL - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IL - NOI": {
+      "main": [
+        [
+          {
+            "node": "IL - ECOCAT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IL - ECOCAT": {
+      "main": [
+        [
+          {
+            "node": "IL - SHPO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IL - SHPO": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IN - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "IN - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IN - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields9",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IN - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "IN - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IN - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KY - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "KY - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KY - CSN": {
+      "main": [
+        [
+          {
+            "node": "KY - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KY - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KY - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-LG - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "LA-LG - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-LG - CSN": {
+      "main": [
+        [
+          {
+            "node": "LA-LG - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-LG - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields11",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-LG - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "LA-LG - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-LG - NOI": {
+      "main": [
+        [
+          {
+            "node": "LA-LG - NOT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-LG - NOT": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-SM - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "LA-SM - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-SM - CSN": {
+      "main": [
+        [
+          {
+            "node": "LA-SM - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-SM - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields12",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-SM - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "LA-SM - SCACR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-SM - SCACR": {
+      "main": [
+        [
+          {
+            "node": "LA-SM - SCACR-LDEQ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LA-SM - SCACR-LDEQ": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MS-LG - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "MS-LG - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MS-LG - CSN": {
+      "main": [
+        [
+          {
+            "node": "MS-LG - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MS-LG - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields13",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MS-LG - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "MS-LG - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MS-LG - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MO - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "MO - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MO - CSN": {
+      "main": [
+        [
+          {
+            "node": "MO - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MO - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields14",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MO - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "MO - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MO - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NE - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "NE - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NE - CSN": {
+      "main": [
+        [
+          {
+            "node": "NE - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NE - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields15",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NE - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "NE - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NE - NOI": {
+      "main": [
+        [
+          {
+            "node": "NE - NOT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NE - NOT": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NV - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "NV - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NV - CSN": {
+      "main": [
+        [
+          {
+            "node": "NV - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NV - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields16",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NV - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "NV - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NV - NOI": {
+      "main": [
+        [
+          {
+            "node": "NV - NOT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NV - NOT": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NM - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "NM - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NM - CSN": {
+      "main": [
+        [
+          {
+            "node": "NM - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NM - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields17",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NM - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "NM - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NM - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NY - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "NY - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NY - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields18",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NY - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "NY - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NY - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NC - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "NC - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NC - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields19",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NC - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "NC - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NC - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ND - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "ND - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ND - CSN": {
+      "main": [
+        [
+          {
+            "node": "ND - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ND - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields20",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ND - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OH - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "OH - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OH - CSN": {
+      "main": [
+        [
+          {
+            "node": "OH - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OH - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields21",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OH - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "OH - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OH - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OK - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "OK - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OK - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields22",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OK - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "OK - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OK - NOI": {
+      "main": [
+        [
+          {
+            "node": "OK - NOT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OK - NOT": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PA - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "PA - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PA - CSN": {
+      "main": [
+        [
+          {
+            "node": "PA - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PA - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields23",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PA - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SC - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "SC - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SC - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields24",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SC - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "SC - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SC - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SD - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "SD - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SD - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields25",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SD - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "SD - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SD - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TN - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "TN - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TN - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields26",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TN - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "TN - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TN - NOI": {
+      "main": [
+        [
+          {
+            "node": "TN - NOT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TN - NOT": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TX-LG - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "TX-LG - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TX-LG - CSN": {
+      "main": [
+        [
+          {
+            "node": "TX-LG - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TX-LG - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields27",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TX-LG - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "TX-LG - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TX-LG - NOI": {
+      "main": [
+        [
+          {
+            "node": "TX-LG - NOT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TX-LG - NOT": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TX-SM - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "TX-SM - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TX-SM - CSN": {
+      "main": [
+        [
+          {
+            "node": "TX-SM - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TX-SM - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields28",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TX-SM - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UT - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "UT - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UT - CSN": {
+      "main": [
+        [
+          {
+            "node": "UT - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UT - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields29",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UT - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "UT - NOI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UT - NOI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VA - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "VA - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VA - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields30",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VA - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "VA - REG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VA - REG": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WY - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "WY - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WY - CSN": {
+      "main": [
+        [
+          {
+            "node": "WY - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WY - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields31",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WI - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "WI - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WI - CSN": {
+      "main": [
+        [
+          {
+            "node": "WI - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WI - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields32",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MT - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "MT - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MT - CSN": {
+      "main": [
+        [
+          {
+            "node": "MT - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MT - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields33",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KS - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "KS - CSN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KS - CSN": {
+      "main": [
+        [
+          {
+            "node": "KS - CL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KS - CL": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields34",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WY - SWPPP": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "State Router": {
+      "main": [
+        [
+          {
+            "node": "AL - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AZ - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AR-LG - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AR-SM - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CO - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "FL - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GA - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ID - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IL - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IN - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "KY - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LA-LG - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LA-SM - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MS-LG - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MO - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NE - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NV - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NM - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NY - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NC - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ND - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OH - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OK - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PA - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SC - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SD - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TN - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TX-LG - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TX-SM - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "UT - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VA - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "WY - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "WI - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MT - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "KS - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "JO-ONLY - JOB-ORDER",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Trello Card ": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Normalize & Route Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields4": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields5": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields6": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields7": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields8": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields9": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields10": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields11": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields12": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields13": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields14": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields15": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields16": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields17": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields18": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields19": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields20": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields21": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields22": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields23": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields24": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields25": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields26": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields27": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields28": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields29": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields30": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields31": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields32": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields33": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields34": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get all cards in a list1": {
+      "main": [
+        [
+          {
+            "node": "Find Right Template1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Right Template1": {
+      "main": [
+        [
+          {
+            "node": "Call Trello Card ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Routing Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JO-ONLY - JOB-ORDER": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields JO-ONLY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields JO-ONLY": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update JO-ONLY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Status Update JO-ONLY": {
+      "main": [
+        [
+          {
+            "node": "Update Project Status JO-ONLY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Project Status JO-ONLY": {
+      "main": [
+        [
+          {
+            "node": "Trello Comment JO-ONLY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Routing Review": {
+      "main": [
+        [
+          {
+            "node": "Update Project Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

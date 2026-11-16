@@ -115,7 +115,7 @@ export function prepareRetriggerSave(base: Project, requested: Project, current:
       }
     }
   }
-  if (current.status === requested.status) submitted.status = 'Pending Review';
+  if (current.status === requested.status && current.status === 'New') submitted.status = 'Pending Review';
   return { submitted, provenance: { metadata, expected: {
     environmentLookupStatus: base.environmentLookupStatus ?? null,
     environmentLookupNotes: base.environmentLookupNotes ?? null,
