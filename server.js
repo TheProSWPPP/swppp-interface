@@ -4735,6 +4735,10 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     const schedule=checkDraftSchedule(draft);
     if(!schedule.allowed)return res.status(409).json({code:schedule.code,error:'This draft is scheduled for a future time. Change its schedule and review the new revision before sending.'});
     if(req.sdrUser?.machine) {
+      // Legacy queued drafts may still carry the previous cold copy. A sequence approval
+      // does not prove a bid was sent or calls took place. Leave that wording for staff review.
+      if (/\b(?:(?:carry(?:ing)?|use) our number|should have (?:a|our) bid|we sent you a bid|called (?:a few|several) times)\b/i.test(draft.body || ''))
+        return res.status(409).json({code:'copy_review_required',error:'This draft assumes a previous bid or call. Review the conversation and refresh or edit the draft before sending.'});
       const approval=await checkApprovedDraft(pool,draft);
       if(!approval.allowed && (draft.status!=='pending'||draft.content_origin!=='machine'))return res.status(409).json({code:approval.code,error:'Reviewed or unknown-origin draft requires current approval.'});
     } else {
