@@ -15,12 +15,13 @@ describe('explicit project retrigger persistence',()=>{
   const prepared=prepareRetriggerSave(base,base,base,result);const request=changedProjectFields(base,prepared.submitted,prepared.provenance);
   vi.stubGlobal('window',{fetch:async(url:string,init:RequestInit)=>{
    expect(url).toBe('/api/projects/fixture');expect(init.method).toBe('PUT');expect(init.credentials).toBe('include');
-   const body=JSON.parse(String(init.body));expect(body.__expectedValues).toEqual({environmentLookupStatus:{soil:'complete',species:'no-qualifying-results'},environmentLookupNotes:{species:'Earlier selected county scope.'}});
+   const body=JSON.parse(String(init.body));expect(body.__expectedValues).toMatchObject({status:'Pending Review',projectAddress:'Fixture address',environmentLookupStatus:{soil:'complete',species:'no-qualifying-results'},environmentLookupNotes:{species:'Earlier selected county scope.'}});
    return Response.json(mergeProjectPatch(base,body,body.__expectedValues));
   }});
   const saved=await requestProjectSave(request.patch,request.expected);
   expect(saved).toMatchObject({status:'Pending Review',soilData:'Staff soil',waterway:'Staff river',environmentLookupStatus:{soil:'complete',species:'no-qualifying-results',waterway:'failed',overall:'failed'},environmentLookupNotes:{species:'Earlier selected county scope.',overall:'Provider unavailable; review needed.'}});
-  expect(Object.keys(request.patch).sort()).toEqual(['environmentLookupNotes','environmentLookupStatus','id']);
+  expect(request.patch).toMatchObject({id:base.id,status:base.status,projectAddress:base.projectAddress});
+  expect(request.patch).not.toHaveProperty('soilData');expect(request.patch).not.toHaveProperty('phone');
   expect(result.failed).toBe(true);
  });
  it('successful retrigger saves typed field changes and provenance with complete CAS expectations',async()=>{
@@ -37,25 +38,42 @@ describe('explicit project retrigger persistence',()=>{
  });
  it('preserves staff text and coordinate pairs edited during lookup and keeps new typing after the save',()=>{
   const current={...base,soilData:'Typed soil',latitude:'31',phone:'Typed phone'};const prepared=prepareRetriggerSave(base,base,current,readRetriggerResult(success));
-  expect(prepared.submitted).toMatchObject({soilData:'Typed soil',latitude:'31',longitude:'-97',waterway:'New river',phone:'Typed phone'});
+  expect(prepared.submitted).toMatchObject({soilData:'Typed soil',latitude:'31',longitude:'-97',waterway:'Staff river',phone:'Typed phone'});
   const {expected}=changedProjectFields(base,prepared.submitted,prepared.provenance);expect(expected.phone).toBe('old');
   const latestTyping={...current,phone:'Still typing'};const server={...prepared.submitted,...prepared.provenance.metadata};
-  expect(reconcileProjectSave(latestTyping,prepared.submitted,server,current)).toMatchObject({phone:'Still typing',environmentLookupStatus:{overall:'complete'}});
+  expect(reconcileProjectSave(latestTyping,prepared.submitted,server,current)).toMatchObject({phone:'Still typing',environmentLookupStatus:{overall:'review-required'}});
  });
  it('omits stale lookup business changes when lookup inputs changed during the request',()=>{
   const current={...base,projectAddress:'New address'};const prepared=prepareRetriggerSave(base,base,current,readRetriggerResult(success));
   expect(prepared.submitted).toMatchObject({projectAddress:'New address',soilData:'Staff soil',waterway:'Staff river'});expect(prepared.provenance.metadata.environmentLookupStatus.overall).toBe('review-required');expect(prepared.needsReview).toBe(true);
  });
- it('does not replace business data or status approved by staff while the lookup was pending',()=>{
-  const current={...base,status:'Approved for Generation' as const};const prepared=prepareRetriggerSave(base,base,current,readRetriggerResult(success));
-  expect(prepared.submitted).toMatchObject({status:'Approved for Generation',soilData:'Staff soil',waterway:'Staff river'});expect(prepared.needsReview).toBe(true);
+ it.each([
+  ['latitude','31'],['longitude','-96'],['state','Oklahoma'],['county','Other county'],['countyFips','12345'],['city','Other city'],
+ ] as const)('does not adopt old-location results after a local %s edit', (key,value)=>{
+  const current={...base,[key]:value};
+  const prepared=prepareRetriggerSave(base,base,current,readRetriggerResult(success));
+  expect(prepared.submitted).toMatchObject({[key]:value,soilData:'Staff soil',waterway:'Staff river'});
+  expect(prepared.needsReview).toBe(true);
+  expect(prepared.provenance.metadata.environmentLookupStatus.overall).toBe('review-required');
+ });
+ it('still adopts lookup values while preserving unrelated locally typed soil and phone',()=>{
+  const current={...base,soilData:'Typed soil',phone:'Typed phone'};
+  const prepared=prepareRetriggerSave(base,base,current,readRetriggerResult(success));
+  expect(prepared.submitted).toMatchObject({soilData:'Typed soil',phone:'Typed phone',waterway:'New river'});
+  const {patch,expected}=changedProjectFields(base,prepared.submitted,prepared.provenance);
+  expect(mergeProjectPatch(base,patch,expected)).toMatchObject({soilData:'Typed soil',phone:'Typed phone',waterway:'New river'});
+ });
+ it.each(['Approved for Generation','Manual Processing','Processing'] as const)('does not prepare any provenance save when staff began %s during lookup',status=>{
+  const current={...base,status};
+  expect(()=>prepareRetriggerSave(base,base,current,readRetriggerResult(success))).toThrow('Project processing began during the lookup. Wait for it to finish, then check environmental data again.');
+  expect(current).toMatchObject({status,soilData:'Staff soil',waterway:'Staff river'});
  });
  it.each(['Generation Incomplete','Generation Failed'] as const)('refresh preserves %s status while saving lookup provenance',async status=>{
   const project={...base,status} as Project;
   const prepared=prepareRetriggerSave(project,project,project,readRetriggerResult(success));
   expect(prepared.submitted.status).toBe(status);
   const {patch,expected}=changedProjectFields(project,prepared.submitted,prepared.provenance);
-  expect(patch).not.toHaveProperty('status');
+  expect(patch.status).toBe(status);
   const concurrent={...project,phone:'Changed by staff'};
   const saved=mergeProjectPatch(concurrent,patch,expected);
   expect(saved).toMatchObject({status,phone:'Changed by staff',soilData:'New soil',environmentLookupStatus:{overall:'complete'}});
@@ -66,7 +84,7 @@ describe('explicit project retrigger persistence',()=>{
   const {patch,expected}=changedProjectFields(project,prepared.submitted,prepared.provenance);
   const saved=mergeProjectPatch(project,patch,expected);
   expect(saved).toMatchObject({status,soilData:'Staff soil',waterway:'Staff river',latitude:'30',longitude:'-97'});
-  expect(patch).not.toHaveProperty('soilData');expect(patch).not.toHaveProperty('landDisturbanceArea');
+  expect(patch).not.toHaveProperty('soilData');expect(patch.landDisturbanceArea).toBeNull();
   expect(prepared.keptGenerationInputs).toBe(true);expect(prepared.needsReview).toBe(true);
   expect(saved.environmentLookupStatus.overall).toBe('review-required');
   expect(saved.environmentLookupNotes.overall).toContain('generation inputs and PDFs were kept');
@@ -90,6 +108,38 @@ describe('explicit project retrigger persistence',()=>{
  it('refresh promotes New intake to Pending Review',()=>{
   const project={...base,status:'New'} as Project;
   expect(prepareRetriggerSave(project,project,project,readRetriggerResult(success)).submitted.status).toBe('Pending Review');
+ });
+ it.each([
+  ['approval',{status:'Approved for Generation'},'status'],
+  ['address',{projectAddress:'Other staff address'},'projectAddress'],
+  ['template',{stateTemplateId:'other-template'},'stateTemplateId'],
+  ['area',{landDisturbanceArea:12},'landDisturbanceArea'],
+  ['coordinates',{latitude:'35'},'latitude'],
+ ] as const)('rejects an unseen remote %s change before saving lookup results',(_name,remote,key)=>{
+  const prepared=prepareRetriggerSave(base,base,base,readRetriggerResult(success));
+  const {patch,expected}=changedProjectFields(base,prepared.submitted,prepared.provenance);
+  const server={...base,...remote};
+  expect(()=>mergeProjectPatch(server,patch,expected)).toThrow('These fields changed');
+  try { mergeProjectPatch(server,patch,expected); } catch (error) {
+   expect(error).toMatchObject({status:409,conflicts:expect.arrayContaining([key])});
+  }
+  expect(server.soilData).toBe('Staff soil');
+ });
+ it('guards unchanged status and lookup source values on metadata-only failure saves',()=>{
+  const prepared=prepareRetriggerSave(base,base,base,readRetriggerResult({}));
+  const {patch,expected}=changedProjectFields(base,prepared.submitted,prepared.provenance);
+  expect(patch).toMatchObject({status:base.status,projectAddress:base.projectAddress,stateTemplateId:null,landDisturbanceArea:null,latitude:base.latitude});
+  expect(expected).toMatchObject({status:base.status,projectAddress:base.projectAddress,stateTemplateId:null,landDisturbanceArea:null,latitude:base.latitude});
+  expect(()=>mergeProjectPatch({...base,status:'Approved for Generation'},patch,expected)).toThrow('These fields changed');
+ });
+ it('saves an intentional local source edit with review notes without restoring its old value',()=>{
+  const current={...base,projectAddress:'New local address'};
+  const prepared=prepareRetriggerSave(base,base,current,readRetriggerResult(success));
+  const {patch,expected}=changedProjectFields(base,prepared.submitted,prepared.provenance);
+  const saved=mergeProjectPatch(base,patch,expected);
+  expect(saved).toMatchObject({projectAddress:'New local address',soilData:'Staff soil',waterway:'Staff river'});
+  expect(saved.environmentLookupStatus.overall).toBe('review-required');
+  expect(expected.projectAddress).toBe('Fixture address');
  });
  it('ordinary manual saves continue excluding lookup history',()=>{
   expect(changedProjectFields(base,{...base,soilData:'Manual',environmentLookupStatus:{overall:'failed'}})).toEqual({patch:{id:'fixture',soilData:'Manual'},expected:{soilData:'Staff soil'}});

@@ -366,7 +366,9 @@ export default function ProjectDetail({
           : "Environmental data saved. Review the updated information.");
     } catch (error) {
       console.error("Environmental data refresh failed:", error);
-      alert("Environmental data refresh failed. Please check your connection.");
+      alert(error instanceof Error && error.message === "Project processing began during the lookup. Wait for it to finish, then check environmental data again."
+        ? error.message
+        : "Environmental data refresh failed. Please check your connection.");
     } finally {
       setIsRetriggering(false);
     }

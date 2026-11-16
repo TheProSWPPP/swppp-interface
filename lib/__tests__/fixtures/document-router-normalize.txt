@@ -1,0 +1,97 @@
+const STATE_TEMPLATES = {
+  "64cd2733aeed6b8d990806ea": { name: "Alabama", documents: ["SWPPP","Job Cover Letter","NOI","USGS Topo Map"] },
+  "64a852634ca26165d8e0fd7c": { name: "Arizona", documents: ["SWPPP","Job Cover Letter","NOI (AZDEQ portal)"] },
+  "64a85225f20295c08c40ceb5": { name: "Arkansas Large", documents: ["SWPPP","Job Cover Letter","NOI"] },
+  "64ca92fc0f053b9e3f04c368": { name: "Arkansas Small", documents: ["SWPPP","Job Cover Letter","Construction Site Notice"] },
+  "64a852a934449c11316e36d4": { name: "Colorado", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI (CEOS Portal)"] },
+  "64a85159def12cfae605dfc7": { name: "Florida", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI"] },
+  "6512936e68837bf90d658eba": { name: "Georgia", documents: ["SWPPP","Job Cover Letter","NOI (GEOS)"] },
+  "6717db7dad39071ce06debfa": { name: "Idaho", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI","NOT"] },
+  "6541acb5a7b779c0ddb59920": { name: "Illinois", documents: ["SWPPP","Job Cover Letter","NOI (CDX Portal)","EcoCat Letter","SHPO Letter"] },
+  "66e1b1acab871ae3b9d60003": { name: "Indiana", documents: ["SWPPP","Job Cover Letter","NOI (IDEM)"] },
+  "6751c1aa26054e07f6fb32c2": { name: "Kentucky", documents: ["SWPPP","Job Cover Letter","Construction Site Notice"] },
+  "64c031eb140e1cf59455153e": { name: "Louisiana Large", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI","NOT"] },
+  "64becfb6fca4026911948fdf": { name: "Louisiana Small", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","SCACR Form","SCACR LDEQ"] },
+  "65d4ca3a02598b72ab2fd9c6": { name: "Mississippi Large", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI Packet"] },
+  "6512a695b32b8ea85e86fe1d": { name: "Missouri", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI (MOGEM)"] },
+  "6717bc827a507b3bc114a869": { name: "Nebraska", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI","NOT"] },
+  "66e30eb53756a712d2496ea8": { name: "Nevada", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI","NOT"] },
+  "6512a4761c0734188c7680ff": { name: "New Mexico", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI/LREW (CDX Portal)"] },
+  "6512a437b871e632560e1545": { name: "New York", documents: ["SWPPP","Job Cover Letter","NOI"] },
+  "6541af58e95df0a6f77802e8": { name: "North Carolina", documents: ["SWPPP","Job Cover Letter","NOI"] },
+  "6660a16934a239ee65530a59": { name: "North Dakota", documents: ["SWPPP","Job Cover Letter","Construction Site Notice"] },
+  "6659273cc25b77f93f4a1a7f": { name: "Ohio", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI"] },
+  "64a848de70888d805f4d5097": { name: "Oklahoma", documents: ["SWPPP","Job Cover Letter","NOI PDF Form","NOT PDF Form"] },
+  "68e7f665af102d93f751e93f": { name: "Pennsylvania", documents: ["SWPPP","Job Cover Letter","Construction Site Notice"] },
+  "64b6b858e75c608e42fa1a83": { name: "South Carolina", documents: ["SWPPP","Job Cover Letter","NOI"] },
+  "67b7115f07a4de27d6560d7c": { name: "South Dakota", documents: ["SWPPP","Job Cover Letter","NOI"] },
+  "65284bbb802560e6c4c0e693": { name: "Tennessee", documents: ["SWPPP","Job Cover Letter","NOI PDF Form","NOT PDF Form"] },
+  "67111b5c8ae11012df549b42": { name: "Texas Large", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI","NOT"] },
+  "64a5d4a9b39dd4b060d9cb07": { name: "Texas Small", documents: ["SWPPP","Job Cover Letter","Construction Site Notice"] },
+  "6512a0af73c2ec06946e3f1a": { name: "Utah", documents: ["SWPPP","Job Cover Letter","Construction Site Notice","NOI/LREW (CDX Portal)"] },
+  "6541b076598234cb67205a81": { name: "Virginia", documents: ["SWPPP","Job Cover Letter","Registration Statement"] },
+  "66685b9296be15f4f0636667": { name: "Wyoming", documents: ["SWPPP","Job Cover Letter","Construction Site Notice"] },
+  "6a3c3a983f8c4b437179d5bc": { name: "Wisconsin", documents: ["Job Order","Construction Site Notice","Job Cover Letter"] },
+  "6a3c233494daf8cc34337d94": { name: "Montana", documents: ["Job Order","Construction Site Notice","Job Cover Letter"] },
+  "6a3be01b442aefd00d3b0b9e": { name: "Kansas", documents: ["Job Order","Construction Site Notice","Job Cover Letter"] }
+};
+
+// Get template ID from FindRightTemplate1 node
+const templateResult = $('Find Right Template1').first().json;
+const templateId = templateResult.topCardId;
+
+// Get webhook data for other fields
+const input = $('Webhook Input').first().json;
+
+// Unknown template card (state added to Trello but not wired here / no Google Doc templates yet):
+// don't fail — route to the Job Order Only branch so the JO still ships. (2026-09-08)
+const template = STATE_TEMPLATES[templateId] || {
+  name: "Job Order Only",
+  documents: ["Job Order"],
+  missingTemplates: true
+};
+
+// Use isLargeAreaDetected from FindRightTemplate1 instead of parsing template name
+const isLarge = templateResult.isLargeAreaDetected || false;
+
+return { json: {
+  id: input.body?.id || input.id || "",
+  stateTemplate: template.name,
+  stateTemplateId: templateId,
+  stateCardName: templateResult.topCardName || "",
+  templatesMissing: !!template.missingTemplates,
+  requiredDocuments: template.documents,
+  isLarge: isLarge,
+  companyName: input.body?.companyName || input.companyName || "",
+  contact: input.body?.contactName || input.contactName || "",
+  phone: input.body?.phone || input.phone || "",
+  email: input.body?.email || input.email || "",
+  customerAddress: input.body?.customerAddress || input.customerAddress || "",
+  projectTitle: input.body?.projectName || input.projectName || "",
+  projectAddress: input.body?.projectAddress || input.projectAddress || "",
+  projectDescription: input.body?.projectDescription || input.projectDescription || "",
+  dueDate: input.body?.dueDate || input.dueDate || "",
+  startDate: input.body?.projectStartDate || input.projectStartDate || "",
+  finishDate: input.body?.projectFinishDate || input.projectFinishDate || "",
+  dateReceived: input.body?.dateReceived || input.dateReceived || "",
+  county: input.body?.county || input.county || "",
+  countyFips: input.body?.countyFips || input.countyFips || "",
+  latitude: input.body?.latitude || input.latitude || "",
+  longitude: input.body?.longitude || input.longitude || "",
+  soilData: input.body?.soilData || input.soilData || "",
+  waterway: input.body?.waterway || input.waterway || "",
+  endangeredSpecies: input.body?.endangeredSpecies || input.endangeredSpecies || "",
+  ms4Operator: input.body?.ms4Operator || input.ms4Operator || "",
+  environmentLookupStatus: input.body?.environmentLookupStatus ?? input.environmentLookupStatus,
+  environmentLookupNotes: input.body?.environmentLookupNotes ?? input.environmentLookupNotes,
+  callbackBase: Object.fromEntries(["status","folderLink","trelloLink","generationNote","environmentLookupStatus","environmentLookupNotes"].map(key => [key, (input.body || input)[key] ?? null])),
+  area: input.body?.landDisturbanceArea || input.landDisturbanceArea || "",
+  sequenceActivities: input.body?.sequenceActivities || input.sequenceActivities || "",
+  specialRequirements: input.body?.specialRequirements || input.specialRequirements || "",
+  folderLink: input.body?.folderLink || input.folderLink || "",
+  trelloLink: input.body?.trelloLink || input.trelloLink || "",
+  invoiceLink: input.body?.invoiceLink || input.invoiceLink || "",
+  jobOrderLink: input.body?.jobOrderLink || input.jobOrderLink || "",
+  status: input.body?.status || input.status || "",
+  plansUploaded: input.body?.plansUploaded || input.plansUploaded || false
+}};

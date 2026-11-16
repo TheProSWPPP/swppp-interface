@@ -1,5 +1,5 @@
 import type {Project} from './data';
-import {validateLookupMetadata,type LookupProvenance} from './projectRetrigger';
+import {lookupSourceFields,validateLookupMetadata,type LookupProvenance} from './projectRetrigger';
 export type ProjectPatch = Partial<Project> & {id:string};
 export type ProjectSaver = (patch:ProjectPatch,expected?:Record<string,unknown>) => Promise<Project | void> | Project | void;
 const serverFields = new Set(['id','generation','generationState','generationRunId','generationContextDigest','runId','contextDigest','environmentLookupStatus','environmentLookupNotes','generationNote']);
@@ -9,6 +9,13 @@ export function changedProjectFields(base:Project,current:Project,provenance?:Lo
  for(const key of Object.keys(current) as (keyof Project)[]){if(!serverFields.has(key)&&!equal(base[key],current[key])){(patch as Record<string,unknown>)[key]=current[key]??null;expected[key]=base[key]??null;}}
  if(provenance){
   const metadata=validateLookupMetadata(provenance.metadata);
+  // The server checks expected values only for fields included in the patch.
+  // Keep unchanged lookup inputs in this atomic write so another tab cannot
+  // approve or relocate the project while an older lookup is being saved.
+  for(const key of lookupSourceFields){
+   (patch as Record<string,unknown>)[key]=current[key]??null;
+   expected[key]=base[key]??null;
+  }
   Object.assign(patch,metadata);
   for(const key of ['environmentLookupStatus','environmentLookupNotes'] as const){
    if(!Object.hasOwn(provenance.expected,key))throw new Error('Missing expected lookup history');
