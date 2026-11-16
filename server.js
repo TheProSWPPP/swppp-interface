@@ -52,7 +52,7 @@ import {withProviderContactLock,reserveEnrollment,advanceEnrollmentPhase,assertF
 import {JOB_CHANGE_SKIP} from './lib/outreachHistory.js';
 import {reconcileStuckSends,raiseRefusedSendTask} from './lib/sdrSendReconcile.js';
 import {canonicalMailbox} from './lib/mailboxAliases.js';
-import {claimSoftEnrollment} from './lib/softEnrollmentPacing.js';
+import {claimSoftEnrollment,softEnrollmentUsage} from './lib/softEnrollmentPacing.js';
 import {softGuardState,softEnrolledToday} from './lib/softVerdictGuard.js';
 import * as emailVerify from "./lib/emailVerify.js";
 import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
@@ -1680,6 +1680,7 @@ if (process.env.DATABASE_URL && process.env.PIPEDRIVE_API_TOKEN) {
     const to = String(process.env.SDR_VOLUME_ALERT_TO || "").split(",").map((v) => v.trim()).filter(Boolean);
     void trackSdrJob("volume_watch", () => runVolumeWatch(pool, {
       getSequenceDetail: apolloClient.getSequenceDetail,
+      getSoftBatchUsage: sequence => softEnrollmentUsage(pool,sequence),
       notify: to.length ? createVolumeAlertNotifier({ pool, gmail: gmailInbox, getToken: accessTokenForMailbox, to,
         notifyOwner: process.env.SDR_VOLUME_ALERT_NOTIFY_OWNER === "true" }) : null,
     })).catch(() => console.error("[volume-watch] run failed; see run health"));
