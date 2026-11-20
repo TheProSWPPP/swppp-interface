@@ -31,7 +31,7 @@ describe("recorded import history", () => {
     const row: LeadImportRow = {
       id: "row-2", row_index: 1, status: "error", pipedrive_lead_id: null,
       raw_data: { "Project Title": "<script>alert(1)</script>", Email: null },
-      cleaned_data: null, error_message: "Source parse failed",
+      cleaned_data: null, error_message: "Source parse failed", lookup_message: "Waiting for Apollo lead credits.",
       updated_at: "2026-10-08T10:00:00Z",
     };
     const html = renderToStaticMarkup(createElement(StoredRow, { row, expanded: true, onToggle: () => {} }));
@@ -39,6 +39,7 @@ describe("recorded import history", () => {
     expect(html).not.toContain("<script>");
     expect(html).toContain("Stored source email: Missing");
     expect(html).toContain("Recorded row error: Source parse failed");
+    expect(html).toContain("Waiting for Apollo lead credits.");
     expect(html).toMatch(/Stored cleaned values<\/h4><p[^>]*>Missing<\/p>/);
   });
 

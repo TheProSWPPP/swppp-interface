@@ -49,6 +49,7 @@ export function StoredRow({ row, expanded, onToggle }: { row: LeadImportRow; exp
           <p className="break-all">Stored source email: {sourceValue(row, ["Email", "Contact Email"])}</p>
           <p className="break-words">Stored source company: {sourceValue(row, ["Winning Bidder", "Company", "Company Name", "Organization", "Org"])}</p>
           <p className="mt-1 break-all">Recorded result: {row.status} · Recorded lead ID: {storedValue(row.pipedrive_lead_id)}</p>
+          {row.lookup_message && <p className="mt-1 break-words">{row.lookup_message}</p>}
           {row.error_message && <p className="mt-1 text-red-700 break-words">Recorded row error: {row.error_message}</p>}
         </div>
         <button type="button" aria-expanded={expanded} aria-label={`${expanded ? "Hide" : "Show"} stored fields for row ${row.row_index + 1}`}

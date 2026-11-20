@@ -92,6 +92,7 @@ export type LeadImportRowStatus =
   | "error";
 
 export interface LeadImportRow {
+  lookup_message?: string | null;
   id: string;
   row_index: number;
   raw_data: Record<string, unknown>;
