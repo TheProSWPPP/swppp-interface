@@ -1,3 +1,4 @@
+import {ensureContactLookups,registerImportContactLookup,lookupMessages} from './lib/importContactLookup.js';
 import {ensureImportReceipts,claimImportRow,completeImportRow,finalizeImportJob} from './lib/leadImportReceipts.js';
 import {fetchPublishedWordpressPosts} from './lib/wpPublishedInventory.js';
 import {stripGenerationMetadata,projectGenerationView,updateProject,mergeProjectPatch,mergePlanAnalysis,registerGenerationResultRoute} from './lib/projectGenerationResults.js';
@@ -57,7 +58,7 @@ import {canonicalMailbox} from './lib/mailboxAliases.js';
 import {claimSoftEnrollment,softEnrollmentUsage} from './lib/softEnrollmentPacing.js';
 import {softGuardState,softEnrolledToday} from './lib/softVerdictGuard.js';
 import * as emailVerify from "./lib/emailVerify.js";
-import { readVerifyCache, writeVerifyCache, STALE_MS } from "./lib/emailVerifyRefresh.js";
+import { checkSdrAddress, checkSdrAddressInTransaction } from "./lib/sdrAddressVerification.js";
 import { sdrDraftVerifyEnabled, checkDraftEmail } from "./lib/sdrDraftVerify.js";
 import { runAutoSwitch, autoSwitchEnabled } from "./lib/sdrAutoSwitch.js";
 import { readContactSendDaysAgo } from "./lib/apolloCollision.js";
@@ -124,7 +125,7 @@ import {createLinkedinProspectFreshContext} from "./lib/sdrLinkedinProspectFresh
 import {createApifyClient} from "./lib/apifyClient.js";
 import {createLinkedinInboundHandler} from "./lib/sdrLinkedinInbound.js";
 import {chargeLinkedinRead} from "./lib/sdrLinkedinReadBudget.js";
-import { runAutoOutreach, pruneStaleQueuedDrafts, expireStaleQueuedDrafts, adoptPendingAutomaticDrafts, emailConfirmedValid } from "./lib/autoOutreach.js";
+import { runAutoOutreach, pruneStaleQueuedDrafts, expireStaleQueuedDrafts, adoptPendingAutomaticDrafts } from "./lib/autoOutreach.js";
 import { injectTracking, TRANSPARENT_GIF, trackEventId } from "./lib/sdrTracking.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -675,6 +676,7 @@ async function initDB() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_lead_import_rows_status ON lead_import_rows(status)`);
     console.log("Table 'lead_import_rows' verified/created.");
     await ensureImportReceipts(pool);
+    await ensureContactLookups(pool);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS abbreviation_cache (
@@ -2826,36 +2828,14 @@ app.post("/api/sdr/verify/lead", async (req, res) => {
     if (!pipedrive_lead_id) return res.json({ skipped: true });
 
     const { rows } = await pool.query(
-      `SELECT person_email, pipedrive_person_id, pipedrive_org_id,
-              email_verify_status, email_verified_at, email_verified_value, resolved_email, email_flag
+      `SELECT person_email, pipedrive_person_id, pipedrive_org_id
          FROM sdr_lead_state WHERE pipedrive_lead_id = $1`,
       [String(pipedrive_lead_id)],
     );
     if (!rows.length || !rows[0].person_email) return res.json({ skipped: true });
     const row = rows[0];
 
-    const { verifyOneLead, STALE_MS } = await import("./lib/emailVerifyRefresh.js");
-    const { verifyEmail } = await import("./lib/emailVerify.js");
-
-    // Fresh cached verdict for this exact address → answer from cache. Without this,
-    // every .com-triggered lead burned a NeverBounce credit even when verified days ago.
-    const verifiedAt = row.email_verified_at ? new Date(row.email_verified_at).getTime() : null;
-    if (row.email_verified_value === row.person_email && verifiedAt && Date.now() - verifiedAt <= STALE_MS) {
-      return res.json({
-        email_verify_status: row.email_verify_status,
-        email_flag: row.email_flag,
-        resolved_email: row.resolved_email,
-        cached: true,
-      });
-    }
-
-    const memo = new Map();
-    const verify = async (email) => {
-      if (memo.has(email)) return memo.get(email);
-      const v = await verifyEmail(email);
-      memo.set(email, v);
-      return v;
-    };
+    const { verifyOneLead } = await import("./lib/emailVerifyRefresh.js");
 
     let apolloUsed = 0;
     const APOLLO_CAP = 5;
@@ -2869,7 +2849,6 @@ app.post("/api/sdr/verify/lead", async (req, res) => {
         email: row.person_email,
       },
       {
-        verify,
         canUseApollo: () => apolloUsed < APOLLO_CAP,
         searchPeopleByDomain: async (domain, opts) => {
           apolloUsed++;
@@ -2881,6 +2860,7 @@ app.post("/api/sdr/verify/lead", async (req, res) => {
 
     return res.json({
       email_verify_status: result.status,
+      ...(result.cached ? { cached: true } : {}),
       email_flag: result.email_flag,
       resolved_email: result.resolved_email,
     });
@@ -4953,41 +4933,11 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
     // (2026-09-16, 2026-10-10); an address with no verdict at all still waits for a rep.
     if (emailVerify.verifyEnabled() && (req.body?.skip_verify !== true || req.sdrUser?.machine)) {
       const adminForcing = req.body?.override === true && req.sdrUser?.role === "admin" && !req.sdrUser?.machine;
-      let verdict = "skipped";
       const targetEmail = draft.contact_email_snapshot;
 
-      // Prefer a fresh cached verdict for this exact address (set by the refresh pass) — no API spend.
-      const cache = draft.pipedrive_lead_id ? await readVerifyCache(pool, draft.pipedrive_lead_id) : null;
-      const cacheFresh =
-        cache && cache.email_verified_value === targetEmail && cache.email_verified_at &&
-        Date.now() - new Date(cache.email_verified_at).getTime() < STALE_MS;
-
-      let blocked = null; // { status, sub_status, suggestion }
-      if (cacheFresh) {
-        // Gate on the CANONICAL verdict, not a hard-coded NeverBounce-shaped denylist — a raw
-        // ["invalid","disposable"].includes(...) check silently misses ZeroBounce's own
-        // confident-bad verdicts (spamtrap/abuse/do_not_mail), letting a cached hard-fail
-        // through. canonicalVerdict() normalizes any of the three providers' vocabularies (and
-        // is idempotent on values already canonical) — see lib/emailVerify.js.
-        verdict = emailVerify.canonicalVerdict(cache.email_verify_status);
-        if (verdict === "hard_fail") {
-          blocked = { status: cache.email_verify_status, sub_status: null, suggestion: null };
-        }
-      } else {
-        const v = await emailVerify.verifyEmail(targetEmail);
-        if (v && !v.skipped && draft.pipedrive_lead_id) {
-          // Persist the CANONICAL verdict, not the raw provider string — same rule as the
-          // cache-read branch just above (canonicalVerdict() normalizes MillionVerifier /
-          // NeverBounce / ZeroBounce's differing vocabularies into the closed
-          // valid|soft|hard_fail|skipped set). v.status is always set here (we're in the
-          // !v.skipped branch), but canonicalVerdict() is idempotent/fail-open on any input.
-          await writeVerifyCache(pool, draft.pipedrive_lead_id, {
-            status: emailVerify.canonicalVerdict(v.status || (v.ok ? "valid" : "invalid")), verifiedValue: targetEmail,
-          }).catch((e) => console.error("send-gate cache write failed:", e.message));
-        }
-        if (!v.ok) blocked = { status: v.status, sub_status: v.sub_status, suggestion: v.suggestion };
-        verdict = !v || v.skipped ? "skipped" : !v.ok ? "hard_fail" : v.soft ? "soft" : "valid";
-      }
+      const v = await checkSdrAddress(pool, { leadId: draft.pipedrive_lead_id, email: targetEmail });
+      const verdict = v.skipped ? "skipped" : emailVerify.canonicalVerdict(v.status);
+      const blocked = !v.ok && { status: v.status, sub_status: v.sub_status ?? null, suggestion: v.suggestion ?? null };
 
       if (blocked && !adminForcing) {
         await mutateViewedDraft(pool,{draft,expectedRevision:req.body.expectedRevision,expectedContextHash:req.body.expectedContextHash,fields:{status:'rejected',reject_reason:'Email verification failed'}});
@@ -5223,10 +5173,10 @@ app.post("/api/sdr/drafts/:id/approve-and-send", async (req, res) => {
         // there: ask once more with sequence_job_change. Otherwise a rep confirms the contact.
         let jobChangeReview = false;
         if (!addedOk(enrollResponse) && String(skipReason || "").includes(JOB_CHANGE_SKIP)) {
-          const verdict = (await client.query(
-            "SELECT email_verify_status,email_verified_at,email_verified_value FROM sdr_lead_state WHERE pipedrive_lead_id=$1",
-            [draft.pipedrive_lead_id])).rows[0];
-          if (emailConfirmedValid(verdict, draft.contact_email_snapshot)) {
+          const verdict = await checkSdrAddressInTransaction(client, {
+            leadId: draft.pipedrive_lead_id, email: draft.contact_email_snapshot,
+          }, { readOnly: true, requireCurrent: true });
+          if (emailVerify.canonicalVerdict(verdict.status) === "valid") {
             await assertCurrentEnrollment();
             // A second add: a follow-on is proven again first (nothing for any other draft).
             await assertFollowOnCurrent({pool:client,reservation});
@@ -5484,6 +5434,7 @@ app.post("/api/projects", async (req, res) => {
 });
 
 // This route remains behind the existing Basic authentication wall.
+registerImportContactLookup(app, process.env.DATABASE_URL ? pool : null);
 registerGenerationResultRoute(app, { pool: process.env.DATABASE_URL ? pool : null, secret: N8N_CALLBACK_SECRET });
 app.put("/api/projects/:id", async (req, res) => {
   const { id } = req.params;
@@ -7088,7 +7039,11 @@ app.get("/api/leads/upload/:job_id/rows", async (req, res) => {
     params.push(pageSize);
     params.push(page * pageSize);
     const result = await pool.query(
-      `SELECT id, row_index, raw_data, cleaned_data, status, pipedrive_lead_id, error_message, updated_at
+      `SELECT id, row_index, raw_data, cleaned_data, status, pipedrive_lead_id, error_message, updated_at,
+         COALESCE((SELECT CASE WHEN cl.lookup_status='running' THEN 'lookup_uncertain' ELSE cl.lookup_status END
+                   FROM lead_contact_lookups cl WHERE cl.company_id='13105180' AND cl.lead_id::text=lead_import_rows.pipedrive_lead_id::text),
+                  (SELECT c.result->>'lookup_status' FROM lead_import_receipts c WHERE c.row_id=lead_import_rows.id
+                   AND c.job_id=lead_import_rows.job_id)) AS lookup_status
        FROM lead_import_rows ${whereClause}
        ORDER BY (cleaned_data->>'abbreviation_fallback')::boolean DESC NULLS LAST, row_index ASC
        LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -7096,7 +7051,8 @@ app.get("/api/leads/upload/:job_id/rows", async (req, res) => {
     );
 
     res.json({
-      rows: result.rows,
+      rows: result.rows.map(row => ({...row, lookup_message: Object.hasOwn(lookupMessages,row.lookup_status)
+        ? lookupMessages[row.lookup_status] : null})),
       page,
       page_size: pageSize,
       filtered_count: filtered.rows[0].count,
