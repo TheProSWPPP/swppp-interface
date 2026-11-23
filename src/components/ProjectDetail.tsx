@@ -1013,7 +1013,7 @@ export default function ProjectDetail({
 
                       {/* Analysis Result */}
                       {formData.planAnalysisSummary ? (
-                        <PlanResult className="order-plan-result rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-3">
+                        <PlanResult open={newVersion || undefined} className="order-plan-result rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-3">
                           {newVersion && <summary>Recorded plan analysis</summary>}
                           <h5 className="text-xs font-bold text-violet-700 uppercase tracking-wider flex items-center gap-1.5">
                             <Sparkles className="h-3.5 w-3.5" />
