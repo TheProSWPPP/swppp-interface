@@ -104,16 +104,18 @@ export default function Dashboard({
     <div className="space-y-8">
       {selectedProject ? (
         <ProjectDetail
+          key={selectedProject.id}
           project={selectedProject}
           onBack={closeProject}
           onUpdate={async (updated, expected) => {
             try {
               const authoritative = await onUpdateProject(updated, expected);
-              if (authoritative) setSelectedProject(authoritative);
+              if (authoritative) setSelectedProject(current => current?.id === updated.id ? authoritative : current);
               return authoritative;
             } catch (error) {
               const failure = error as Error & { project?: Project };
-              if (failure.project?.id === updated.id) setSelectedProject(failure.project);
+              const latest = failure.project;
+              if (latest?.id === updated.id) setSelectedProject(current => current?.id === updated.id ? latest : current);
               throw error;
             }
           }}

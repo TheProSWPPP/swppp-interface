@@ -14,7 +14,7 @@
     },
     {
       "path": "src/components/Dashboard.tsx",
-      "sha256": "7e90a904c10d6c28fdf010a26280fa9a8732ef2def96618054c7bb8a4dcc1a96"
+      "sha256": "b0ec27a4146388aa9e7f66a30036b5bcf76745dd4e1f1996056c6963099133ac"
     },
     {
       "path": "src/components/ProjectList.tsx",
@@ -22,7 +22,7 @@
     },
     {
       "path": "src/components/ProjectDetail.tsx",
-      "sha256": "e6b7855f8c4c71f48f429be89c7a866fafc760ca9756b18feb2a2b4646a94f50"
+      "sha256": "83e30255e28c8ca6c59e6294fd94ce6f1fd49009960056cb30b0666a22271199"
     },
     {
       "path": "src/components/ArchiveList.tsx",
@@ -66,7 +66,7 @@
     },
     {
       "path": "src/utils.ts",
-      "sha256": "1c62f0e642a689c8901216fda36cd6bb87699dccbd9482cd292f0ad2a48a4be8"
+      "sha256": "f2a657a568794f2980d4727451c4b3a211bdc162abba1bf64a7777e591b83d8f"
     },
     {
       "path": "src/components/Toast.tsx",
@@ -91,6 +91,46 @@
     {
       "path": "src/projectRetrigger.ts",
       "sha256": "59bcc1d898fbf2fbfdf3bd56a660a2f0e5426c10fe63c079b52ade456725fa8c"
+    },
+    {
+      "path": "src/documentQueue.ts",
+      "sha256": "46ed00f12f72148bf5d6bed3ca5283fa4c52e35ac70273b871d2f011168d3e32"
+    },
+    {
+      "path": "src/components/OrderFieldControl.tsx",
+      "sha256": "0857d02556047492d7d8a4215d589493d7a1b24ffcbb1e10ee50d6b5638a5926"
+    },
+    {
+      "path": "src/components/OrderHeaderAlerts.tsx",
+      "sha256": "3c5b6303ba8a188837224ab4e4bb22ad016f3aed0bcbeb6e918227b5245e8807"
+    },
+    {
+      "path": "src/components/OrderReviewStatus.tsx",
+      "sha256": "a430d505268ccb64468caea5dbba20f01928e00b1c163140b9a169a1d7d6b075"
+    },
+    {
+      "path": "src/components/OrderReviewStatus.css",
+      "sha256": "dfa4d933ce88453822550c62aed848cf4f2b9120be6c5eed8aa6ae7a4ec77e19"
+    },
+    {
+      "path": "src/components/order-detail-navigation.css",
+      "sha256": "6878cad2da5e6e0f967c1a7e7bb243b747eaa5b7e76653e443e56109b90094d6"
+    },
+    {
+      "path": "src/components/order-detail-sections.css",
+      "sha256": "82c8a27085fb8aa67bb2034bcd52fe2802eaa0875c970d4832e39b0ae07752c7"
+    },
+    {
+      "path": "src/orderFiles.ts",
+      "sha256": "0a04b54c7c50fe9268740b8dd25e662739b3f00723d08b6bad4f54b45430b94a"
+    },
+    {
+      "path": "src/orderReview.ts",
+      "sha256": "2c825933ef8cb108514febb3715ffffaa1e86cdaf7c38e2810c21159f10c8cc2"
+    },
+    {
+      "path": "src/orderSectionFocus.ts",
+      "sha256": "b715753c8e84c4caee3e9b730ed85894cc75b2aa249d4cd0599dc56ef5b0589f"
     }
   ],
   "protectedServerRoutes": [

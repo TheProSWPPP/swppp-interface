@@ -87,11 +87,11 @@ export function parseWallDate(value: string | undefined | null): Date | null {
 }
 
 // "Oct 29, 2026" or "Oct 29, 2026, 10:29 AM". Unreadable input is shown as typed, never hidden.
-export function formatDueDate(value: string | undefined | null): string {
+export function formatDueDate(value: string | undefined | null, showExplicitTime = false): string {
   const d = parseWallDate(value);
   if (!d) return value ? String(value) : "No due date";
   const day = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  if (d.getHours() === 0 && d.getMinutes() === 0) return day;
+  if (d.getHours() === 0 && d.getMinutes() === 0 && !(showExplicitTime && /[T ]\d{2}:\d{2}/.test(value ?? ""))) return day;
   return `${day}, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 

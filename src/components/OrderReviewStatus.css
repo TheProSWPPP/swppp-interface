@@ -1,0 +1,32 @@
+.order-review-status { margin-block: .85rem 1rem; color: #23374d; }
+.order-review-status h5 { margin: 0; font-size: .95rem; font-weight: 700; }
+.order-progress { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); padding: 0; margin: .85rem 0 1.25rem; list-style: none; }
+.order-progress li { position: relative; display: flex; min-width: 0; flex-direction: column; align-items: center; gap: .12rem; padding: 0 .12rem; text-align: center; font-size: .81rem; }
+.order-progress li::before { content: ''; position: absolute; height: 2px; background: #d2dce3; top: .41rem; left: -50%; right: 50%; }
+.order-progress li:first-child::before { display: none; }
+.order-progress i { position: relative; z-index: 1; margin-bottom: .28rem; height: .92rem; width: .92rem; border: 2px solid #afbfcc; border-radius: 50%; background: white; }
+.order-progress [aria-current="step"] i { border: 4px solid #1470a5; }
+.order-progress span, .order-check-heading span { font-size: .78rem; color: #4b5c70; }
+.order-check-heading { border-top: 1px solid #dce4e9; padding-top: .85rem; display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: .3rem .8rem; }
+.order-site-warning-link { display: inline-flex; align-items: center; gap: .35rem; font-size: .85rem; color: #84510e; text-decoration: underline; text-underline-offset: 2px; padding: .4rem 0; }
+.order-check-list { padding: 0; list-style: none; margin: .35rem 0 0; }
+.order-check-list li + li { border-top: 1px solid #e2e8ee; }
+.order-check-list summary { display: grid; align-items: center; grid-template-columns: auto 1fr auto auto; gap: .45rem; min-height: 44px; font-size: .85rem; cursor: pointer; }
+.order-check-list summary::-webkit-details-marker { display: none; }
+.order-check-list summary span { padding: .15rem .4rem; border-radius: .3rem; text-align: right; font-size: .75rem; }
+.order-check-list summary > svg:last-child { color: #506177; }
+.order-check-list [open] summary > svg:last-child { transform: rotate(90deg); }
+.order-check-list .check-resolved summary span { color: #1c603e; background: #ecf6ee; }
+.order-check-list .check-unresolved summary span { color: #785111; background: #fff4d9; }
+.order-check-details { padding: .1rem .4rem .6rem 1.45rem; font-size: .84rem; color: #4b5c70; overflow-wrap: anywhere; }
+.order-check-details button, .order-lookup-warning button { display: inline-block; margin-block: .18rem; text-decoration: underline; text-underline-offset: 2px; color: #125d86; }
+.order-lookup-warning { margin-bottom: 1rem; padding: .75rem .9rem; background: #fff7e9; color: #6c4710; border: 1px solid #ecd19a; border-radius: .55rem; font-size: .87rem; overflow-wrap: anywhere; }
+.order-lookup-warning strong { display: flex; align-items: center; gap: .4rem; }
+.order-lookup-warning li { margin-top: .2rem; }
+.order-env-saved { color: #1c603e; font-size: .78rem; margin-top: .2rem; }
+.order-detail-new [id^="order-field-"]:focus-visible { outline: 2px solid #1470a5; outline-offset: 3px; }
+
+.order-check-provenance { margin: .25rem 0; font-size: .8rem; color: #4b5c70; }
+.order-env-concern { margin-top: .2rem; color: #785111; font-size: .82rem; overflow-wrap: anywhere; }
+
+.order-check-list .check-failed summary span { color: #932c23; background: #fff0ed; }
