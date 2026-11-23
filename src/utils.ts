@@ -23,10 +23,16 @@ export function formatDate(dateStr: string): string {
 }
 
 // Convert various date formats to YYYY-MM-DD for date input fields
-export function toDateInputFormat(dateStr: string | undefined): string {
+export function toDateInputFormat(dateStr: string | undefined, preserveCalendarDay = false): string {
   if (!dateStr) return "";
 
   try {
+    // Project dates are calendar days, including when an older order carries a time stamp.
+    if (preserveCalendarDay) {
+      const isoDay = dateStr.match(/^\d{4}-\d{2}-\d{2}(?=$|[T ])/);
+      if (isoDay) return isoDay[0];
+    }
+
     // If already YYYY-MM-DD, return as is
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
       return dateStr;
@@ -86,10 +92,14 @@ export function toDateInputFormat(dateStr: string | undefined): string {
 }
 
 // Convert YYYY-MM-DD from date input to MM/DD/YY for storage
-export function fromDateInputFormat(dateStr: string): string {
+export function fromDateInputFormat(dateStr: string, preserveCalendarDay = false): string {
   if (!dateStr) return "";
 
   try {
+    if (preserveCalendarDay) {
+      const parts = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (parts) return `${parts[2]}/${parts[3]}/${parts[1].slice(-2)}`;
+    }
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return dateStr;
 

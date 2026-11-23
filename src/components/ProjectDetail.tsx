@@ -1,7 +1,15 @@
+import "./order-detail-navigation.css";
+import "./order-detail-sections.css";
+import OrderFieldControl, { OrderMapLink } from "./OrderFieldControl";
+import { focusOrderSection } from "../orderSectionFocus";
+import { OrderHeaderAlerts } from "./OrderHeaderAlerts";
+import { orderFiles, documentReviewNote } from "../orderFiles";
 import {changedProjectFields,reconcileProjectSave,preserveDirtyBaseline,type ProjectSaver} from '../projectPersistence';
 import { useState, useEffect, useRef } from "react";
 import type { Project } from "../data";
 import { finishBeforeStart, formatDueDate } from "../documentQueue";
+import { OrderLookupWarnings, OrderReviewStatus } from './OrderReviewStatus';
+import { getOrderEnvironmentReview, recordedAreaText, hasRecordedAcreage, invalidateChangedPlanVerification, guardPlanVerification, orderActionConfirmation, planSourcesChanged } from '../orderReview';
 import { environmentLookupReview, boundedReviewNote } from '../environmentLookupReview';
 import { prepareRetriggerSave, requestProjectRetrigger, type LookupProvenance } from '../projectRetrigger';
 import {
@@ -71,12 +79,26 @@ export default function ProjectDetail({
   onUpdate: persistProject,
   onDelete,
 }: ProjectDetailProps) {
+  const [newVersion, setNewVersion] = useState(false);
+  const PlanResult = newVersion ? "details" : "div";
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRetriggering, setIsRetriggering] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const selectedDrawing = useRef<File | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  function selectDrawing(file: File | null) {
+    selectedDrawing.current = file;
+    setUploadedFile(file);
+  }
   const [savedToast, setSavedToast] = useState(false);
+  const [savedEnvironmental, setSavedEnvironmental] = useState<Partial<Project>>({});
   const [formData, setFormData] = useState<Project>(project);
+  const historicalArea = newVersion ? recordedAreaText(formData.landDisturbanceArea) : "";
   const currentForm = useRef(project);
   const baseline = useRef(project);
   const saving = useRef(false);
@@ -93,6 +115,8 @@ export default function ProjectDetail({
     }
     const {patch, expected} = changedProjectFields(baseline.current, submitted, provenance);
     if (Object.keys(patch).length === 1) return true;
+    const savedFields = newVersion ? ['id', ...['latitude', 'longitude', 'county', 'soilData', 'waterway', 'endangeredSpecies', 'ms4Operator'].filter(field => Object.hasOwn(patch, field))] : [];
+    if (newVersion) guardPlanVerification(baseline.current, submitted, patch, expected);
     const beforeSubmit = currentForm.current;
     saving.current = true;
     let releaseSave: () => void = () => {};
@@ -108,6 +132,7 @@ export default function ProjectDetail({
       setFormData((current) => reconcileProjectSave(current, submitted, authoritative, beforeSubmit));
       setConflictProject(null);
       setSaveError("");
+      if (newVersion) setSavedEnvironmental(Object.fromEntries(savedFields.map(field => [field, authoritative[field as keyof Project]])));
       setSavedToast(true);
       setTimeout(() => setSavedToast(false), 2000);
       return true;
@@ -122,6 +147,11 @@ export default function ProjectDetail({
       releaseSave();
       setIsSaving(false);
     }
+  };
+
+  const saveOnBlur = () => {
+    // An in-flight save reconciles newer edits and schedules their autosave.
+    if (!saving.current) void onUpdate(currentForm.current);
   };
 
   const currentSave = useRef(onUpdate);
@@ -145,26 +175,41 @@ export default function ProjectDetail({
     project.status === "Processing" ||
     project.status === "";
 
-  const documentTargets = [
+  const files = newVersion ? orderFiles(project) : undefined;
+  const documentTargets = files?.targets ?? [
     ...getDocumentsForTemplate(project.stateTemplateId || project.stateTemplateName),
     "Job Order PDF",
   ];
-  const documentKeys: Record<string, string> = {SWPPP:"swppp", "Job Cover Letter":"cover_letter", "Construction Site Notice":"site_notice", NOI:"noi", "NOI (IDEM)":"noi", NOT:"not", "Job Order PDF":"job_order"};
+  const documentKeys: Record<string, string> = files?.keys ?? {SWPPP:"swppp", "Job Cover Letter":"cover_letter", "Construction Site Notice":"site_notice", NOI:"noi", "NOI (IDEM)":"noi", NOT:"not", "Job Order PDF":"job_order"};
   const currentResults = project.generationState === "current" ? project.generation?.outputs : undefined;
-  const recordedFileCount = documentTargets.filter(doc => currentResults?.[documentKeys[doc]]?.outcome === "produced" || (doc === "Job Order PDF" && !currentResults?.job_order && getAvailableDocumentLink(project.jobOrderLink))).length;
-  const jobOrderFileLink = getAvailableDocumentLink(project.jobOrderLink);
+  const recordedFileCount = files?.count ?? documentTargets.filter(doc => currentResults?.[documentKeys[doc]]?.outcome === "produced" || (doc === "Job Order PDF" && !currentResults?.job_order && getAvailableDocumentLink(project.jobOrderLink))).length;
+  const jobOrderFileLink = files ? files.jobLink : getAvailableDocumentLink(project.jobOrderLink);
   const documentFolderLink = getAvailableDocumentLink(project.folderLink);
+  const review = newVersion ? getOrderEnvironmentReview(formData) : undefined;
+  const environmentalSaveHint = (field: keyof Project) =>
+    newVersion && savedToast && savedEnvironmental.id === project.id && Object.hasOwn(savedEnvironmental, field) && savedEnvironmental[field] === formData[field]
+      ? <p className="order-env-saved" role="status">Saved to order</p> : null;
+  const environmentalFieldNote = (field: keyof Project) => {
+    const check = review?.checks.find(item => item.field === field);
+    return check && !check.resolved ? <p className="order-env-concern">{check.detail}</p> : null;
+  };
   const lookupWarnings = environmentLookupReview(project.environmentLookupStatus, project.environmentLookupNotes);
-  const generationNote = boundedReviewNote(project.generationNote);
+  const generationNote = newVersion ? documentReviewNote(project.generationNote) : boundedReviewNote(project.generationNote);
 
   useEffect(() => {
-    setFormData((current) => project.id === baseline.current.id
-      ? reconcileProjectSave(current, baseline.current, project)
-      : project);
-    baseline.current = project.id === baseline.current.id
-      ? preserveDirtyBaseline(currentForm.current, baseline.current, project)
+    const previous = baseline.current;
+    setFormData(current => {
+      if (project.id !== previous.id) return project;
+      const next = reconcileProjectSave(current, previous, project);
+      if (newVersion && current.plansUploaded !== previous.plansUploaded) {
+        return invalidateChangedPlanVerification(current, next);
+      }
+      return next;
+    });
+    baseline.current = project.id === previous.id
+      ? preserveDirtyBaseline(currentForm.current, previous, project)
       : project;
-  }, [project]);
+  }, [project, newVersion]);
 
   useEffect(() => {
     if (isApproved || isSaving || saveError) return;
@@ -231,7 +276,7 @@ export default function ProjectDetail({
       if (prev.aiFilledFields?.includes(field as string)) {
         updated.aiFilledFields = prev.aiFilledFields.filter((f) => f !== field);
       }
-      return updated;
+      return newVersion ? invalidateChangedPlanVerification(prev, updated) : updated;
     });
   };
 
@@ -260,7 +305,8 @@ export default function ProjectDetail({
     const warning = missingFields.length
       ? `\n\nNote: The following fields are empty:\n• ${missingFields.join("\n• ")}\n\nProceed anyway?`
       : "";
-    if (!confirm(`Approve "${formData.projectName}" for document generation?${warning}`)) return;
+    if (newVersion && (saving.current || isGenerating || isRetriggering || isAnalyzing || (!currentForm.current.plansUploaded && !currentForm.current.isIndustrial))) return;
+    if (!confirm(newVersion ? orderActionConfirmation(currentForm.current, 'approve') : `Approve "${formData.projectName}" for document generation?${warning}`)) return;
     setIsGenerating(true);
     try {
       await onUpdate({
@@ -287,13 +333,15 @@ export default function ProjectDetail({
       : "Cancel generation and reset status to Pending Review? Existing files remain available.")) {
       onUpdate({
         ...formData,
+        ...(newVersion ? { plansUploaded: false } : {}),
         status: "Pending Review",
       });
     }
   };
 
   const handleGenerateAgain = async () => {
-    if (!confirm("Start a new document generation run? Existing files remain available; review the new output receipts before using them.")) return;
+    if (newVersion && (saving.current || isGenerating || isRetriggering || isAnalyzing || currentForm.current.status !== 'Generated')) return;
+    if (!confirm(newVersion ? orderActionConfirmation(currentForm.current, 'regenerate') : "Start a new document generation run? Existing files remain available; review the new output receipts before using them.")) return;
     setIsGenerating(true);
     try {
       await onUpdate({ ...currentForm.current, status: "Approved for Generation" });
@@ -352,7 +400,7 @@ export default function ProjectDetail({
       const result = await requestProjectRetrigger(retriggerData);
       if (saveCompletion.current) await saveCompletion.current;
       const prepared = prepareRetriggerSave(lookupBase, requested, currentForm.current, result);
-      const saved = await onUpdate(prepared.submitted, prepared.provenance);
+      const saved = await onUpdate(newVersion ? invalidateChangedPlanVerification(currentForm.current, prepared.submitted) : prepared.submitted, prepared.provenance);
       if (!saved) {
         alert("Lookup results could not be saved. Your edits are kept; review the save error before trying again.");
         return;
@@ -413,9 +461,10 @@ export default function ProjectDetail({
         const filledFields: string[] = [];
 
         // Fill if empty only — never overwrite existing data
-        if (!formData.landDisturbanceArea && raw.estimatedDisturbedArea?.value && raw.estimatedDisturbedArea.value !== "N/A") {
-          const parsed = parseFloat(raw.estimatedDisturbedArea.value);
-          if (!isNaN(parsed)) { updates.landDisturbanceArea = parsed; filledFields.push("landDisturbanceArea"); }
+        if ((newVersion ? !historicalArea && !hasRecordedAcreage(formData.landDisturbanceArea) : !formData.landDisturbanceArea) && raw.estimatedDisturbedArea?.value != null && raw.estimatedDisturbedArea.value !== "N/A") {
+          const rawArea = raw.estimatedDisturbedArea.value;
+          const parsed = newVersion ? (hasRecordedAcreage(rawArea) ? Number(rawArea) : NaN) : parseFloat(rawArea);
+          if (Number.isFinite(parsed)) { updates.landDisturbanceArea = parsed; filledFields.push("landDisturbanceArea"); }
         }
         if (!formData.soilData && raw.soilComposition && raw.soilComposition !== "N/A") {
           updates.soilData = raw.soilComposition;
@@ -509,14 +558,23 @@ export default function ProjectDetail({
           filledFields.push("endangeredSpecies");
         }
 
-        // Merge with existing aiFilledFields (union — previous badges persist)
-        const existing = formData.aiFilledFields || [];
-        updates.aiFilledFields = Array.from(new Set([...existing, ...filledFields]));
-
-        const updatedForm = { ...formData, ...updates };
-        setFormData(updatedForm);
-        onUpdate(updatedForm);
-        setUploadedFile(null);
+        if (saveCompletion.current) await saveCompletion.current;
+        if (!mounted.current) return;
+        const current = currentForm.current;
+        if (selectedDrawing.current !== uploadedFile || formData.id !== current.id || planSourcesChanged(formData, current) || formData.status !== current.status) {
+          alert("Order or drawing details changed during analysis. Review the order and analyze the current plans again.");
+          return;
+        }
+        const applicable = filledFields.filter(field => current[field as keyof Project] === formData[field as keyof Project]);
+        for (const field of filledFields) {
+          if (!applicable.includes(field)) delete updates[field as keyof Project];
+        }
+        updates.aiFilledFields = Array.from(new Set([...(current.aiFilledFields || []), ...applicable]));
+        const updatedForm = { ...current, ...updates };
+        const submitted = newVersion ? invalidateChangedPlanVerification(current, updatedForm) : updatedForm;
+        setFormData(submitted);
+        const saved = await onUpdate(submitted);
+        if (saved && selectedDrawing.current === uploadedFile) selectDrawing(null);
       } else {
         const err = await response.json().catch(() => ({}));
         alert(err.error || "Analysis failed. Please check the civil drawings link and try again.");
@@ -536,6 +594,10 @@ export default function ProjectDetail({
       </span>
     ) : null;
 
+  const startInputDay = toDateInputFormat(formData.projectStartDate, newVersion);
+  const finishInputDay = toDateInputFormat(formData.projectFinishDate, newVersion);
+  const invalidProjectDates = finishBeforeStart(startInputDay, finishInputDay);
+
   return (
     <>
     {saveError && <div role="alert" className="mx-6 mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
@@ -554,11 +616,12 @@ export default function ProjectDetail({
         Saved
       </div>
     )}
-    <div className="bg-white shadow-sm rounded-2xl border border-slate-200 overflow-hidden">
+    <div className={cn("bg-white shadow-sm rounded-2xl border border-slate-200 overflow-hidden",newVersion && "order-detail-new")}>
       {/* Header */}
-      <div className="px-4 py-4 sm:px-6 sm:py-5 border-b border-slate-100 flex items-center justify-between">
+      <div className="order-detail-header px-4 py-4 sm:px-6 sm:py-5 border-b border-slate-100 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 sm:gap-4">
           <button
+            aria-label="Back to orders"
             onClick={onBack}
             className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
           >
@@ -570,11 +633,12 @@ export default function ProjectDetail({
                 <div className="relative min-w-0 max-w-full group/title">
                   <input
                     type="text"
+                    aria-label="Project name"
                     value={formData.projectName || ""}
                     onChange={(e) =>
                       handleChange("projectName", e.target.value)
                     }
-                    onBlur={() => onUpdate(formData)}
+                    onBlur={saveOnBlur}
                     onKeyDown={(e) => e.key === "Enter" && onUpdate(formData)}
                     className="w-full min-w-0 max-w-full text-xl font-bold text-slate-900 leading-tight bg-transparent border-none p-0 focus:ring-0 focus:outline-none sm:min-w-[200px]"
                   />
@@ -674,179 +738,208 @@ export default function ProjectDetail({
                 )}
               </div>
             </div>
+            {newVersion && formData.projectAddress && <p className="order-header-address">{formData.projectAddress}</p>}
             <p className="text-sm text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
               <span className="min-w-0 break-all">{project.email}</span>
               <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:block" />
               <span className="flex items-center gap-1.5">
                 <Calendar className="h-3.5 w-3.5" />
-                Due {formatDueDate(project.dueDate)}
+                Due {formatDueDate(project.dueDate, newVersion)}
               </span>
             </p>
+            {newVersion && <OrderHeaderAlerts project={formData} />}
           </div>
         </div>
+        <button type="button" className="order-version-toggle" onClick={() => setNewVersion(showing => !showing)}>
+          {newVersion ? "Old version" : "New version"}
+        </button>
       </div>
+      {newVersion && <nav className="order-section-nav" aria-label="Order sections">
+        {Object.entries({"order-project":"Project details","order-environment":"Environmental","order-actions":"Actions","order-documents":"Documents"}).map(([id,label]) =>
+          <button type="button" key={id} onClick={() => focusOrderSection(id)}>{label}</button>)}
+      </nav>}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 p-6 lg:p-8 bg-slate-50/50">
+      <div className="order-detail-body grid grid-cols-1 lg:grid-cols-3 gap-8 p-6 lg:p-8 bg-slate-50/50">
         {/* Main Data Column */}
         <div className="lg:col-span-2 space-y-6">
           {/* Customer Details */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+          <section id="order-customer" aria-labelledby="order-customer-heading" tabIndex={newVersion ? -1 : undefined} className="order-sheet bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+            <h4 id="order-customer-heading" className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
               <User className="h-4 w-4" /> Customer Details
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="order-field-grid grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="order-input-companyName" className="text-sm font-medium text-slate-700">
                   Company Name
                 </label>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-companyName"
                   type="text"
                   value={formData.companyName || ""}
                   onChange={(e) => handleChange("companyName", e.target.value)}
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="order-input-contactName" className="text-sm font-medium text-slate-700">
                   Contact Name<AiBadge field="contactName" />
                 </label>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-contactName"
                   type="text"
                   value={formData.contactName || ""}
                   onChange={(e) => handleChange("contactName", e.target.value)}
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="order-input-phone" className="text-sm font-medium text-slate-700">
                   Phone<AiBadge field="phone" />
                 </label>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-phone"
                   type="text"
                   value={formData.phone || ""}
                   onChange={(e) => handleChange("phone", e.target.value)}
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="order-input-customerAddress" className="text-sm font-medium text-slate-700">
                   Customer Address<AiBadge field="customerAddress" />
                 </label>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-customerAddress"
                   type="text"
                   value={formData.customerAddress || ""}
                   onChange={(e) =>
                     handleChange("customerAddress", e.target.value)
                   }
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="order-input-email" className="text-sm font-medium text-slate-700">
                   Email
                 </label>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-email"
                   type="email"
                   value={formData.email || ""}
                   onChange={(e) => handleChange("email", e.target.value)}
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
               </div>
             </div>
-          </div>
+          </section>
 
           {/* Project Details */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+          <section id="order-project" aria-labelledby="order-project-heading" tabIndex={newVersion ? -1 : undefined} className="order-sheet bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+            <h4 id="order-project-heading" className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
               <Building className="h-4 w-4" /> Project Details
             </h4>
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="order-project-fields space-y-6">
+              <div className="order-field-grid grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="md:col-span-2 space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
+                  <label htmlFor="order-input-projectAddress" className="text-sm font-medium text-slate-700">
                     Project Address<AiBadge field="projectAddress" />
                   </label>
-                  <input
+                  <OrderFieldControl
+                    newVersion={newVersion}
+                    id="order-input-projectAddress"
                     type="text"
                     value={formData.projectAddress || ""}
                     onChange={(e) =>
                       handleChange("projectAddress", e.target.value)
                     }
-                    onBlur={() => onUpdate(formData)}
+                    onBlur={saveOnBlur}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     disabled={isApproved}
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
+                  <label htmlFor="order-input-projectStartDate" className="text-sm font-medium text-slate-700">
                     Start Date<AiBadge field="projectStartDate" />
                   </label>
-                  <input
+                  <OrderFieldControl
+                    newVersion={newVersion}
+                    id="order-input-projectStartDate"
+                    rawDate={formData.projectStartDate}
                     type="date"
-                    value={toDateInputFormat(formData.projectStartDate)}
+                    value={startInputDay}
                     onChange={(e) =>
                       handleChange(
                         "projectStartDate",
-                        fromDateInputFormat(e.target.value),
+                        fromDateInputFormat(e.target.value, newVersion),
                       )
                     }
-                    onBlur={() => onUpdate(formData)}
+                    onBlur={saveOnBlur}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     disabled={isApproved}
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
+                  <label htmlFor="order-input-projectFinishDate" className="text-sm font-medium text-slate-700">
                     Finish Date<AiBadge field="projectFinishDate" />
                   </label>
-                  <input
+                  <OrderFieldControl
+                    newVersion={newVersion}
+                    id="order-input-projectFinishDate"
+                    rawDate={formData.projectFinishDate}
                     type="date"
-                    value={toDateInputFormat(formData.projectFinishDate)}
+                    value={finishInputDay}
                     onChange={(e) =>
                       handleChange(
                         "projectFinishDate",
-                        fromDateInputFormat(e.target.value),
+                        fromDateInputFormat(e.target.value, newVersion),
                       )
                     }
-                    onBlur={() => onUpdate(formData)}
+                    onBlur={saveOnBlur}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     disabled={isApproved}
-                    aria-describedby={finishBeforeStart(formData.projectStartDate, formData.projectFinishDate) ? "finish-before-start" : undefined}
+                    aria-describedby={invalidProjectDates ? "finish-before-start" : undefined}
                   />
                 </div>
-                {finishBeforeStart(formData.projectStartDate, formData.projectFinishDate) && (
+                {invalidProjectDates && (
                   <p id="finish-before-start" role="status" className="md:col-span-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                     <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
                     The finish date is before the start date. Check both dates against the plans before generating documents.
                   </p>
                 )}
-                <div className="md:col-span-2 space-y-3">
-                  <label className="text-sm font-medium text-slate-700">
+                <div className="order-drawings md:col-span-2 space-y-3">
+                  <label htmlFor="order-input-civilDrawingsLink" className="text-sm font-medium text-slate-700">
                     Civil Drawings Link (from Web Order)
                   </label>
                   <div className="flex gap-2">
-                    <input
+                    <OrderFieldControl
+                      newVersion={newVersion}
+                      id="order-input-civilDrawingsLink"
                       type="text"
                       value={formData.civilDrawingsLink || ""}
                       onChange={(e) =>
                         handleChange("civilDrawingsLink", e.target.value)
                       }
-                      onBlur={() => onUpdate(formData)}
+                      onBlur={saveOnBlur}
                       placeholder="https://dropbox.com/path/to/drawings..."
                       className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                       disabled={isApproved}
                     />
-                    {formData.civilDrawingsLink && (
+                    {(newVersion ? getAvailableDocumentLink(formData.civilDrawingsLink) : formData.civilDrawingsLink) && (
                       <a
                         href={formData.civilDrawingsLink}
                         target="_blank"
@@ -868,9 +961,9 @@ export default function ProjectDetail({
                   )}
 
                   {/* AI Plan Analysis */}
-                  <div className="rounded-lg border border-slate-200 p-4 mt-1 space-y-3">
+                  <div className="order-plan-analysis rounded-lg border border-slate-200 p-4 mt-1 space-y-3">
                       {/* File Upload */}
-                      <div className="flex items-center gap-2">
+                      <div className="order-upload flex items-center gap-2">
                         <label className="flex items-center gap-2 px-3 py-2 text-sm border border-dashed border-slate-300 rounded-lg cursor-pointer hover:border-violet-400 hover:text-violet-600 transition-colors">
                           <Upload className="h-4 w-4 text-slate-400" />
                           <span className="text-slate-500">
@@ -880,13 +973,17 @@ export default function ProjectDetail({
                             type="file"
                             accept="application/pdf"
                             className="hidden"
-                            onChange={(e) => setUploadedFile(e.target.files?.[0] ?? null)}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] ?? null;
+                              selectDrawing(file);
+                              if (newVersion && file && formData.plansUploaded) handleChange("plansUploaded", false);
+                            }}
                             disabled={isApproved}
                           />
                         </label>
                         {uploadedFile && (
                           <button
-                            onClick={() => setUploadedFile(null)}
+                            onClick={() => selectDrawing(null)}
                             className="p-1.5 rounded text-slate-400 hover:text-red-500 transition-colors"
                             title="Remove file"
                           >
@@ -916,7 +1013,8 @@ export default function ProjectDetail({
 
                       {/* Analysis Result */}
                       {formData.planAnalysisSummary ? (
-                        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-3">
+                        <PlanResult className="order-plan-result rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-3">
+                          {newVersion && <summary>Recorded plan analysis</summary>}
                           <h5 className="text-xs font-bold text-violet-700 uppercase tracking-wider flex items-center gap-1.5">
                             <Sparkles className="h-3.5 w-3.5" />
                             AI Plan Analysis
@@ -1027,7 +1125,8 @@ export default function ProjectDetail({
                           )}
                           {/* Empty state hint when many fields not found */}
                           {(() => {
-                            const raw = formData.planAnalysisRaw!;
+                            const raw = formData.planAnalysisRaw;
+                            if (!raw) return null;
                             const notFoundCount = [raw.ownerName, raw.ownerPhone, raw.siteAddress, raw.projectStartDate, raw.projectFinishDate, raw.soilComposition, raw.nearestWaterbody]
                               .filter(v => !v || v === "N/A" || v === "null").length;
                             return notFoundCount >= 4 ? (
@@ -1054,9 +1153,9 @@ export default function ProjectDetail({
                               </span>
                             </div>
                           )}
-                        </div>
+                        </PlanResult>
                       ) : (
-                        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-2">
+                        <div className="order-plan-empty rounded-lg border border-violet-200 bg-violet-50/50 p-4 space-y-2">
                           <h5 className="text-xs font-bold text-violet-700 uppercase tracking-wider flex items-center gap-1.5">
                             <Sparkles className="h-3.5 w-3.5" />
                             AI Plan Analysis
@@ -1070,15 +1169,18 @@ export default function ProjectDetail({
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="order-input-projectDescription" className="text-sm font-medium text-slate-700">
                   Project Description<AiBadge field="projectDescription" />
                 </label>
-                <textarea
+                <OrderFieldControl
+                  multiline
+                  newVersion={newVersion}
+                  id="order-input-projectDescription"
                   value={formData.projectDescription || ""}
                   onChange={(e) =>
                     handleChange("projectDescription", e.target.value)
                   }
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   rows={3}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500"
                   disabled={isApproved}
@@ -1086,15 +1188,18 @@ export default function ProjectDetail({
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="order-input-sequenceActivities" className="text-sm font-medium text-slate-700">
                   Sequence of Major Activities<AiBadge field="sequenceActivities" />
                 </label>
-                <textarea
+                <OrderFieldControl
+                  multiline
+                  newVersion={newVersion}
+                  id="order-input-sequenceActivities"
                   value={formData.sequenceActivities || ""}
                   onChange={(e) =>
                     handleChange("sequenceActivities", e.target.value)
                   }
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   rows={6}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 font-mono"
                   placeholder="e.g., Site prep, utilities, paving, construction, landscaping..."
@@ -1103,16 +1208,19 @@ export default function ProjectDetail({
               </div>
 
               <div className="space-y-2 pt-4 border-t border-slate-100">
-                <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                <label htmlFor="order-input-specialRequirements" className="text-sm font-medium text-slate-700 flex items-center gap-2">
                   <ClipboardList className="h-4 w-4 text-slate-400" />
                   Notes / Special Requirements
                 </label>
-                <textarea
+                <OrderFieldControl
+                  multiline
+                  newVersion={newVersion}
+                  id="order-input-specialRequirements"
                   value={formData.specialRequirements || ""}
                   onChange={(e) =>
                     handleChange("specialRequirements", e.target.value)
                   }
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   rows={4}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50/50"
                   placeholder="Additional notes from job order..."
@@ -1121,33 +1229,38 @@ export default function ProjectDetail({
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="order-input-landDisturbanceArea" className="text-sm font-medium text-slate-700">
                   Est. Acres Disturbed<AiBadge field="landDisturbanceArea" />
                 </label>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-landDisturbanceArea"
                   type="number"
-                  value={formData.landDisturbanceArea ?? ""}
+                  value={historicalArea && !isApproved ? "" : formData.landDisturbanceArea ?? ""}
                   onChange={(e) =>
                     handleChange(
                       "landDisturbanceArea",
-                      parseFloat(e.target.value),
+                      e.target.value === "" ? null : parseFloat(e.target.value),
                     )
                   }
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   placeholder="e.g., 2.5"
                   disabled={isApproved}
                 />
+                {historicalArea && !isApproved && <p className="text-sm text-amber-800">
+                  Recorded acreage: {historicalArea}. Enter an exact number to replace it.
+                </p>}
               </div>
             </div>
-          </div>
+          </section>
 
           {/* Location & Environmental */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+          <section id="order-environment" aria-labelledby="order-environment-heading" tabIndex={newVersion ? -1 : undefined} className="order-sheet bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+            <h4 id="order-environment-heading" className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
               <Map className="h-4 w-4" /> Location & Environmental
             </h4>
-            {lookupWarnings.length > 0 && (
+            {review ? <OrderLookupWarnings review={review} /> : lookupWarnings.length > 0 && (
               <div role="note" aria-label="Lookup review" className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-relaxed text-amber-900">
                 <p className="font-semibold flex items-center gap-2"><AlertTriangle className="h-4 w-4 shrink-0" />Lookup review</p>
                 <ul className="mt-1 space-y-1 list-disc pl-5">
@@ -1155,8 +1268,8 @@ export default function ProjectDetail({
                 </ul>
               </div>
             )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
-              <div className="space-y-3">
+            <div className="order-field-grid grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+              <div id="order-field-coordinates" tabIndex={newVersion ? -1 : undefined} className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-slate-700">
                     Coordinates
@@ -1166,77 +1279,84 @@ export default function ProjectDetail({
                       </span>
                     )}
                   </label>
-                  <a
-                    href={`https://www.google.com/maps?q=${parseCoordinate(
-                      formData.latitude,
-                    )},${parseCoordinate(formData.longitude)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-brand-600 hover:text-brand-800 flex items-center hover:underline"
-                  >
-                    View on Map <ExternalLink className="h-3 w-3 ml-1" />
-                  </a>
+                  <OrderMapLink latitude={formData.latitude} longitude={formData.longitude} newVersion={newVersion} />
                 </div>
-                <div className="flex gap-2">
-                  <input
+                <div className="order-coordinate-pair flex gap-2">
+                  {newVersion && <label htmlFor="order-input-latitude">Latitude</label>}
+                  <OrderFieldControl
+                    newVersion={newVersion}
+                    id="order-input-latitude"
+                    aria-label="Latitude"
                     type="text"
                     value={formData.latitude || ""}
                     onChange={(e) => handleChange("latitude", e.target.value)}
-                    onBlur={() => onUpdate(formData)}
+                    onBlur={saveOnBlur}
                     className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     placeholder="Lat"
                     disabled={isApproved}
                   />
-                  <input
+                  {newVersion && <label htmlFor="order-input-longitude">Longitude</label>}
+                  <OrderFieldControl
+                    newVersion={newVersion}
+                    id="order-input-longitude"
+                    aria-label="Longitude"
                     type="text"
                     value={formData.longitude || ""}
                     onChange={(e) => handleChange("longitude", e.target.value)}
-                    onBlur={() => onUpdate(formData)}
+                    onBlur={saveOnBlur}
                     className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     placeholder="Long"
                     disabled={isApproved}
                   />
                 </div>
+                  {environmentalSaveHint("latitude") || environmentalSaveHint("longitude")}
               </div>
 
               <div className="space-y-3">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="order-input-state" className="text-sm font-medium text-slate-700">
                   State (full name)
                 </label>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-state"
                   type="text"
                   value={formData.state || ""}
                   onChange={(e) => handleChange("state", e.target.value)}
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   placeholder="e.g., Arkansas, Texas, Florida"
                   disabled={isApproved}
                 />
               </div>
 
-              <div className="space-y-3">
-                <label className="text-sm font-medium text-slate-700">
+              <div id="order-field-county" tabIndex={newVersion ? -1 : undefined} className="space-y-3">
+                <label htmlFor="order-input-county" className="text-sm font-medium text-slate-700">
                   County
                 </label>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-county"
                   type="text"
                   value={formData.county || ""}
                   onChange={(e) => handleChange("county", e.target.value)}
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
+                  {environmentalSaveHint("county")}
               </div>
 
               <div className="space-y-3">
-                <label className="text-sm font-medium text-slate-700">
+                <label htmlFor="order-input-city" className="text-sm font-medium text-slate-700">
                   City
                 </label>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-city"
                   type="text"
                   value={formData.city || ""}
                   onChange={(e) => handleChange("city", e.target.value)}
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   placeholder="e.g., Chalmette"
                   disabled={isApproved}
@@ -1247,39 +1367,45 @@ export default function ProjectDetail({
                 project.stateTemplateId || project.stateTemplateName,
               )?.includes("Texas") && (
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
+                  <label htmlFor="order-input-tceqSegment" className="text-sm font-medium text-slate-700">
                     TCEQ Segment
                   </label>
-                  <input
+                  <OrderFieldControl
+                    newVersion={newVersion}
+                    id="order-input-tceqSegment"
                     type="text"
                     value={formData.tceqSegment || ""}
                     onChange={(e) =>
                       handleChange("tceqSegment", e.target.value)
                     }
-                    onBlur={() => onUpdate(formData)}
+                    onBlur={saveOnBlur}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                     disabled={isApproved}
                   />
                 </div>
               )}
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+              <div id="order-field-ms4" tabIndex={newVersion ? -1 : undefined} className="space-y-2">
+                <label htmlFor="order-input-ms4Operator" className="text-sm font-medium text-slate-700">
                   MS4 Operator
                 </label>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-ms4Operator"
                   type="text"
                   value={formData.ms4Operator || ""}
                   onChange={(e) => handleChange("ms4Operator", e.target.value)}
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
+                  {environmentalSaveHint("ms4Operator")}
+                  {environmentalFieldNote("ms4Operator")}
               </div>
 
-              <div className="md:col-span-2 space-y-2">
+              <div id="order-field-waterway" tabIndex={newVersion ? -1 : undefined} className="md:col-span-2 space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-slate-700">
+                  <label htmlFor="order-input-waterway" className="text-sm font-medium text-slate-700">
                     Contributing Waterbodies<AiBadge field="waterway" />
                   </label>
                   <a
@@ -1291,20 +1417,24 @@ export default function ProjectDetail({
                     View Source <ExternalLink className="h-3 w-3 ml-1" />
                   </a>
                 </div>
-                <input
+                <OrderFieldControl
+                  newVersion={newVersion}
+                  id="order-input-waterway"
                   type="text"
                   value={formData.waterway || ""}
                   onChange={(e) => handleChange("waterway", e.target.value)}
-                  onBlur={() => onUpdate(formData)}
+                  onBlur={saveOnBlur}
                   className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 transition-all"
                   disabled={isApproved}
                 />
+                  {environmentalSaveHint("waterway")}
+                  {environmentalFieldNote("waterway")}
               </div>
 
-              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
+              <div className="order-soil-species md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div id="order-field-soil" tabIndex={newVersion ? -1 : undefined} className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-slate-700">
+                    <label htmlFor="order-input-soilData" className="text-sm font-medium text-slate-700">
                       Soil Data<AiBadge field="soilData" />
                     </label>
                     <a
@@ -1316,18 +1446,23 @@ export default function ProjectDetail({
                       View Source <ExternalLink className="h-3 w-3 ml-1" />
                     </a>
                   </div>
-                  <textarea
+                  <OrderFieldControl
+                    multiline
+                    newVersion={newVersion}
+                    id="order-input-soilData"
                     value={formData.soilData || ""}
                     onChange={(e) => handleChange("soilData", e.target.value)}
-                    onBlur={() => onUpdate(formData)}
+                    onBlur={saveOnBlur}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 min-h-[80px]"
                     disabled={isApproved}
                   />
+                  {environmentalSaveHint("soilData")}
+                  {environmentalFieldNote("soilData")}
                 </div>
 
-                <div className="space-y-2">
+                <div id="order-field-species" tabIndex={newVersion ? -1 : undefined} className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-slate-700">
+                    <label htmlFor="order-input-endangeredSpecies" className="text-sm font-medium text-slate-700">
                       Endangered Species<AiBadge field="endangeredSpecies" />
                     </label>
                     <a
@@ -1341,32 +1476,37 @@ export default function ProjectDetail({
                       View Source <ExternalLink className="h-3 w-3 ml-1" />
                     </a>
                   </div>
-                  <textarea
+                  <OrderFieldControl
+                    multiline
+                    newVersion={newVersion}
+                    id="order-input-endangeredSpecies"
                     value={formData.endangeredSpecies || ""}
                     onChange={(e) =>
                       handleChange("endangeredSpecies", e.target.value)
                     }
-                    onBlur={() => onUpdate(formData)}
+                    onBlur={saveOnBlur}
                     className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 min-h-[80px]"
                     disabled={isApproved}
                   />
+                  {environmentalSaveHint("endangeredSpecies")}
+                  {environmentalFieldNote("endangeredSpecies")}
                 </div>
               </div>
             </div>
-          </div>
+          </section>
 
           {/* SWPPP Specifics */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm relative overflow-hidden group/swppp">
-            <div className="absolute inset-0 bg-slate-50/40 backdrop-blur-[1px] z-10 flex items-center justify-center opacity-0 group-hover/swppp:opacity-100 transition-opacity">
+          <section id="order-swppp" aria-labelledby="order-swppp-heading" tabIndex={newVersion ? -1 : undefined} className="order-sheet bg-white border border-slate-200 rounded-xl p-6 shadow-sm relative overflow-hidden group/swppp">
+            <div className="order-coming-badge absolute inset-0 bg-slate-50/40 backdrop-blur-[1px] z-10 flex items-center justify-center opacity-0 group-hover/swppp:opacity-100 transition-opacity">
               <span className="bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest shadow-xl">
                 Coming Soon
               </span>
             </div>
-            <div className="opacity-40 pointer-events-none grayscale">
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+            <div className="order-coming-content opacity-40 pointer-events-none grayscale">
+              <h4 id="order-swppp-heading" className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4" /> SWPPP Specifics
               </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="order-field-grid grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">
                     NOI Acknowledgement
@@ -1379,7 +1519,7 @@ export default function ProjectDetail({
                         checked={formData.noiType === "Large"}
                         onChange={() => handleChange("noiType", "Large")}
                         className="text-brand-600 focus:ring-brand-500"
-                        disabled={isApproved}
+                        disabled={newVersion || isApproved}
                       />
                       <span className="text-sm text-slate-600">
                         Large Construction Site
@@ -1392,7 +1532,7 @@ export default function ProjectDetail({
                         checked={formData.noiType === "Small"}
                         onChange={() => handleChange("noiType", "Small")}
                         className="text-brand-600 focus:ring-brand-500"
-                        disabled={isApproved}
+                        disabled={newVersion || isApproved}
                       />
                       <span className="text-sm text-slate-600">
                         Small Construction Site
@@ -1403,10 +1543,13 @@ export default function ProjectDetail({
 
                 <div className="md:col-span-2 space-y-4 pt-4 border-t border-slate-100">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700">
+                    <label htmlFor="order-input-swppp-swpppProjectDescription" className="text-sm font-medium text-slate-700">
                       SWPPP Document Description
                     </label>
-                    <textarea
+                    <OrderFieldControl
+                      multiline
+                      newVersion={newVersion}
+                      id="order-input-swppp-swpppProjectDescription"
                       value={formData.swpppProjectDescription || ""}
                       onChange={(e) =>
                         handleChange("swpppProjectDescription", e.target.value)
@@ -1414,22 +1557,25 @@ export default function ProjectDetail({
                       rows={3}
                       className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 bg-slate-50/30"
                       placeholder="This description will appear in the SWPPP document..."
-                      disabled={isApproved}
+                      disabled={newVersion || isApproved}
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700">
+                    <label htmlFor="order-input-swppp-sequenceActivities" className="text-sm font-medium text-slate-700">
                       Sequence of Major Activities
                     </label>
-                    <textarea
+                    <OrderFieldControl
+                      multiline
+                      newVersion={newVersion}
+                      id="order-input-swppp-sequenceActivities"
                       value={formData.sequenceActivities || ""}
                       onChange={(e) =>
                         handleChange("sequenceActivities", e.target.value)
                       }
                       rows={6}
                       className="w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-brand-500 font-mono bg-slate-50/30"
-                      disabled={isApproved}
+                      disabled={newVersion || isApproved}
                     />
                   </div>
                 </div>
@@ -1462,23 +1608,23 @@ export default function ProjectDetail({
                 </div>
               </div>
             </div>
-          </div>
+          </section>
         </div>
 
         {/* Sidebar Column */}
         <div className="space-y-6">
           {/* Quick Resources */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
-              Quick Links
+          <section id="order-links" aria-labelledby="order-links-heading" tabIndex={newVersion ? -1 : undefined} className="order-sheet bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <h4 id="order-links-heading" className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
+              {newVersion && <FolderOpen className="h-4 w-4" />} Quick Links
             </h4>
             <div className="flex flex-col gap-1">
               {[
-                { href: project.folderLink, icon: FolderOpen, label: "Dropbox Folder" },
-                { href: getAvailableDocumentLink(project.jobOrderLink), icon: FileText, label: "Job Order PDF" },
-                { href: project.civilDrawingsLink, icon: FileCode, label: "Civil Drawings" },
-                { href: project.invoiceLink, icon: CreditCard, label: "Invoice" },
-                { href: project.trelloLink, icon: Trello, label: "Trello Card" },
+                { href: newVersion ? documentFolderLink : project.folderLink, icon: FolderOpen, label: "Dropbox Folder" },
+                { href: jobOrderFileLink, icon: FileText, label: "Job Order PDF" },
+                { href: newVersion ? getAvailableDocumentLink(project.civilDrawingsLink) : project.civilDrawingsLink, icon: FileCode, label: "Civil Drawings" },
+                { href: newVersion ? getAvailableDocumentLink(project.invoiceLink) : project.invoiceLink, icon: CreditCard, label: "Invoice" },
+                { href: newVersion ? getAvailableDocumentLink(project.trelloLink) : project.trelloLink, icon: Trello, label: "Trello Card" },
               ].map(({ href, icon: Icon, label }) =>
                 href ? (
                   <a
@@ -1499,16 +1645,17 @@ export default function ProjectDetail({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     <span className="flex-1 truncate">{label}</span>
+                    {newVersion && <small>Unavailable</small>}
                   </div>
                 )
               )}
             </div>
-          </div>
+          </section>
 
           {/* Actions Card */}
-          <div
+          <section id="order-actions" aria-labelledby="order-actions-heading" tabIndex={newVersion ? -1 : undefined}
             className={cn(
-              "rounded-xl border p-6 shadow-sm transition-all relative overflow-hidden",
+              "order-sheet rounded-xl border p-6 shadow-sm transition-all relative overflow-hidden",
               isApproved
                 ? "bg-white border-green-200 ring-1 ring-green-500/10"
                 : isManual
@@ -1532,10 +1679,10 @@ export default function ProjectDetail({
               )}
             />
 
-            <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-2">
+            <h4 id="order-actions-heading" className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-2">
               Status & Actions
             </h4>
-            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+            {review ? <OrderReviewStatus project={project} review={review} /> : <p className="text-sm text-slate-500 mb-6 leading-relaxed">
               {isGenerated
                 ? "Automated generation recorded. Check individual file links and review notes below; the full package and delivery still need separate review."
                 : isApproved
@@ -1547,11 +1694,14 @@ export default function ProjectDetail({
                       : isNew
                         ? "Review request details. Accept to process or delete if invalid."
                         : "Review accuracy. Approve to trigger generation."}
-            </p>
+            </p>}
 
             <div className="space-y-4">
               {!isApproved && !isManual && (
                 <div className="space-y-3">
+                  {newVersion && !getAvailableDocumentLink(formData.civilDrawingsLink) && !documentFolderLink && (
+                    <p className="text-sm text-slate-600">No drawings or folder link is recorded. Obtain the civil plans separately before verifying them.</p>
+                  )}
                   <label className="flex items-center p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer hover:border-brand-300 transition-colors">
                     <input
                       type="checkbox"
@@ -1562,7 +1712,7 @@ export default function ProjectDetail({
                       className="h-4 w-4 text-brand-600 rounded border-slate-300 focus:ring-brand-500"
                     />
                     <span className="ml-3 text-sm font-medium text-slate-700 leading-tight">
-                      I have verified civil plans are in the dropbox folder
+                      {newVersion && !documentFolderLink ? "I have obtained and verified the civil plans for this order" : "I have verified civil plans are in the dropbox folder"}
                     </span>
                   </label>
 
@@ -1623,7 +1773,7 @@ export default function ProjectDetail({
                   <button
                     onClick={handleApprove}
                     disabled={
-                      isGenerating || isRetriggering || isSaving ||
+                      isGenerating || isRetriggering || isSaving || (newVersion && isAnalyzing) ||
                       (!formData.plansUploaded && !formData.isIndustrial)
                     }
                     className="w-full flex items-center justify-center px-4 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-brand-600 hover:bg-brand-700 focus:ring-4 focus:ring-brand-500/20 disabled:opacity-70 disabled:cursor-not-allowed transition-all shadow-md shadow-brand-600/20"
@@ -1647,7 +1797,7 @@ export default function ProjectDetail({
 
               {(isApproved || isManual) && (
                 <>
-                  <div
+                  {!newVersion && <div
                     className={cn(
                       "flex items-center justify-center p-3 rounded-lg border font-medium text-sm",
                       isManual
@@ -1665,7 +1815,7 @@ export default function ProjectDetail({
                         <CheckCircle className="h-4 w-4 mr-2" /> {isGenerated ? "Generated" : "Approved"}
                       </>
                     )}
-                  </div>
+                  </div>}
 
                   <button
                     onClick={handleRetrigger}
@@ -1697,11 +1847,11 @@ export default function ProjectDetail({
                 </>
               )}
             </div>
-          </div>
+          </section>
 
           {/* Generated Documents Links */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+          <section id="order-documents" aria-labelledby="order-documents-heading" tabIndex={newVersion ? -1 : undefined} className="order-sheet space-y-3">
+            <h4 id="order-documents-heading" className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
               <FileText className="h-4 w-4" /> Documents to be Generated
             </h4>
             <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
@@ -1796,7 +1946,7 @@ export default function ProjectDetail({
                           </span>
                         )}
                         <span className="text-xs leading-relaxed text-slate-600">
-                          {receipt ? receipt.outcome === "produced" ? "Provider file recorded" : receipt.reason : isClickable ? "File link recorded" : "Output unverified · File link unavailable"}
+                          {receipt ? receipt.outcome === "produced" ? newVersion && !docLink ? "File produced · Link unavailable" : "Provider file recorded" : receipt.reason : isClickable ? "File link recorded" : "Output unverified · File link unavailable"}
                         </span>
                         {automated && !receipt && !isClickable && project.status === "Approved for Generation" && (
                           <span className="text-xs leading-relaxed text-slate-600">
@@ -1830,23 +1980,29 @@ export default function ProjectDetail({
                   </div>
                 );
               })}
-            </div>
+              {files && files.earlier.length > 0 && <details className="rounded-lg border border-slate-200 p-3 text-sm">
+              <summary className="cursor-pointer font-semibold">{project.generationState === "stale" ? "Results from earlier inputs" : "Results with unverified inputs"}</summary>
+              <ul className="mt-2 space-y-2">{files.earlier.map(({name, receipt, link}) =>
+                <li key={name}>{link ? <a className="text-brand-700 underline" href={link} target="_blank" rel="noopener noreferrer">{name} · Open earlier file</a> :
+                  <span>{name} · {receipt.reason || (receipt.outcome === "produced" ? "File produced without a link" : receipt.outcome.replace(/_/g, " "))}</span>}</li>)}</ul>
+            </details>}
           </div>
+          </section>
 
           {/* Financials */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-6 shadow-sm relative overflow-hidden group">
-            <div className="absolute inset-0 bg-slate-50/40 backdrop-blur-[1px] z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <section id="order-financials" aria-labelledby="order-financials-heading" tabIndex={newVersion ? -1 : undefined} className="order-sheet rounded-xl border border-slate-200 bg-slate-50/50 p-6 shadow-sm relative overflow-hidden group">
+            <div className="order-coming-badge absolute inset-0 bg-slate-50/40 backdrop-blur-[1px] z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
               <span className="bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest shadow-xl">
                 Coming Soon
               </span>
             </div>
-            <div className="opacity-40 pointer-events-none grayscale">
-              <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <div className="order-coming-content opacity-40 pointer-events-none grayscale">
+              <h4 id="order-financials-heading" className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
                 <DollarSign className="h-4 w-4" /> Financials
               </h4>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
+                  <label htmlFor="order-input-invoiceTotal" className="text-sm font-medium text-slate-700">
                     Invoice Total
                   </label>
                   <div className="relative">
@@ -1854,15 +2010,16 @@ export default function ProjectDetail({
                       <span className="text-slate-500 sm:text-sm">$</span>
                     </div>
                     <input
+                      id="order-input-invoiceTotal"
                       type="number"
-                      value={formData.invoiceTotal || ""}
+                      value={newVersion ? (formData.invoiceTotal ?? "") : (formData.invoiceTotal || "")}
                       className="pl-7 w-full text-sm border-slate-200 rounded-lg px-3 py-2 shadow-sm"
                       placeholder="0.00"
                       readOnly
                     />
                   </div>
                 </div>
-                {project.invoiceLink ? (
+                {(newVersion ? getAvailableDocumentLink(project.invoiceLink) : project.invoiceLink) ? (
                   <a
                     href={project.invoiceLink}
                     target="_blank"
@@ -1873,14 +2030,14 @@ export default function ProjectDetail({
                     View Invoice
                   </a>
                 ) : (
-                  <button className="w-full flex items-center justify-center px-4 py-2.5 border border-slate-200 text-sm font-medium rounded-lg text-slate-700 bg-white shadow-sm">
+                  <button disabled={newVersion} className="w-full flex items-center justify-center px-4 py-2.5 border border-slate-200 text-sm font-medium rounded-lg text-slate-700 bg-white shadow-sm">
                     <CreditCard className="-ml-1 mr-2 h-4 w-4" />
                     Generate on QuickBooks
                   </button>
                 )}
               </div>
             </div>
-          </div>
+          </section>
         </div>
       </div>
     </div>

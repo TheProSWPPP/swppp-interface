@@ -53,6 +53,8 @@ describe("due dates", () => {
     expect(formatDueDate("2026-10-29 10:29:00")).toBe("Oct 29, 2026, 10:29 AM");
     expect(formatDueDate("2026-10-29")).toBe("Oct 29, 2026");
     expect(formatDueDate("2026-10-29 00:00:00")).toBe("Oct 29, 2026");
+    expect(formatDueDate("2026-10-29 00:00:00", true)).toBe("Oct 29, 2026, 12:00 AM");
+    expect(formatDueDate("2026-10-29", true)).toBe("Oct 29, 2026");
     expect(formatDueDate("10/29/26")).toBe("Oct 29, 2026");
     expect(formatDay("2026-10-26 14:08:00")).toBe("Oct 26, 2026");
     expect(formatDay("10/26/26")).toBe("Oct 26, 2026");
